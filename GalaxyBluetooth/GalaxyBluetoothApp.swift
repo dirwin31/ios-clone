@@ -775,6 +775,12 @@ final class AppModel: ObservableObject {
 
 
 struct GalaxyRootView: View {
+    private struct ReportCapture: Identifiable {
+        let id = UUID()
+        let logs: String
+    }
+    @State private var discordReport: ReportCapture?
+    @State private var reportWasSent = false
     @ObservedObject var model: AppModel
     @ObservedObject var bluetooth: BluetoothTransport
     @ObservedObject var lan: LANTransport
@@ -837,9 +843,9 @@ struct GalaxyRootView: View {
                     }.padding(24)
                 }
                 if model.navigationEnabled && model.tab == .navigation {
-                    NavigationHome(connection: model.navigationServices.connection, navigation: model.navigationServices.navigation, saved: model.navigationServices.saved, selectAppTab: select) { select(.connections) }
+                    NavigationHome(connection: model.navigationServices.connection, navigation: model.navigationServices.navigation, saved: model.navigationServices.saved, selectAppTab: select, submitReport: presentReport) { select(.connections) }
                 } else if model.tab == .logs {
-                    DeveloperLogsView(model: model, log: model.connectionLog, back: { select(.connections) }, reportSent: { select(model.opened ? .galaxy : .connections) })
+                    DeveloperLogsView(model: model, log: model.connectionLog, back: { select(.connections) }, submitReport: presentReport)
                 } else if model.developerMode && (model.tab == .live || model.tab == .diagnostics) {
                     CompanionView(diagnostics: model.diagnostics)
                 } else if model.tab == .connections || !model.opened {
@@ -872,6 +878,15 @@ struct GalaxyRootView: View {
             if show { if model.developerMode { select(.live) }; model.showDiagnostics = false }
         }
         .onChange(of: bluetooth.connected) { _, connected in if connected { model.openIfReady() } }
+        .sheet(item: $discordReport, onDismiss: {
+            // Let the native sheet finish closing before animating back to Settings.
+            if reportWasSent {
+                reportWasSent = false
+                select(.connections)
+            }
+        }) { capture in
+            DiscordReportSheet(logs: capture.logs) { reportWasSent = true }
+        }
         .sheet(isPresented: $model.showAudioPairing, onDismiss: { model.audioPairing.dismiss() }) {
             AudioPairingSheet(pairing: model.audioPairing) { model.showAudioPairing = false }
         }
@@ -911,6 +926,14 @@ struct GalaxyRootView: View {
             model.navigationServices.setPhoneActive(scenePhase == .active)
             if scenePhase == .active { model.recoverGalaxy(reload: false); await model.checkGalaxyUpdates() }
         }
+    }
+    private func presentReport() {
+        reportWasSent = false
+        let logs = [model.connectionLog.report(model: model),
+                    model.galaxyPage.report(server: model.server, connection: model.transport.label),
+                    model.diagnostics.diagnosticLog(),
+                    "Galaxy screen updates\n" + model.assets.status].joined(separator: "\n\n")
+        discordReport = ReportCapture(logs: logs)
     }
     private func select(_ requestedTab: CompanionTab) {
         let tab = (requestedTab.isDeveloperPage && !model.developerMode) || (requestedTab == .navigation && !model.navigationEnabled) ? (model.opened ? CompanionTab.galaxy : .connections) : requestedTab
@@ -1154,16 +1177,11 @@ private struct DeveloperLogsView: View {
     @ObservedObject var model: AppModel
     @ObservedObject var log: ConnectionEventLog
     let back: () -> Void
-    let reportSent: () -> Void
+    let submitReport: () -> Void
     @State private var sharedReport: GalaxyDownloadedFile?
     @State private var reportDirectory: URL?
     @State private var exportStatus = ""
     @State private var exporting = false
-    private struct ReportCapture: Identifiable {
-        let id = UUID()
-        let logs: String
-    }
-    @State private var discordReport: ReportCapture?
     @Environment(\.colorScheme) private var colorScheme
     private var accent: Color { colorScheme == .dark ? Color(red: 0.68, green: 0.48, blue: 0.96) : Color(red: 0.45, green: 0.26, blue: 0.73) }
     private var panel: Color { colorScheme == .dark ? Color(red: 0.09, green: 0.065, blue: 0.145) : Color(red: 0.88, green: 0.83, blue: 0.95) }
@@ -1196,7 +1214,7 @@ private struct DeveloperLogsView: View {
                     Text("Tell us what happened and send diagnostics to the support forum.")
                         .font(.subheadline).foregroundStyle(muted)
                     Button {
-                        discordReport = ReportCapture(logs: allReports())
+                        submitReport()
                     } label: {
                         Label("Report a problem", systemImage: "bubble.left.and.exclamationmark.bubble.right")
                             .font(.headline).frame(maxWidth: .infinity).padding(.vertical, 13)
@@ -1262,12 +1280,6 @@ private struct DeveloperLogsView: View {
                 }.padding(18).background(panel, in: RoundedRectangle(cornerRadius: 22))
             }.padding(20)
         }.background(background.ignoresSafeArea())
-            .sheet(item: $discordReport) { capture in
-                DiscordReportSheet(logs: capture.logs) {
-                    discordReport = nil
-                    reportSent()
-                }
-            }
             .sheet(item: $sharedReport, onDismiss: {
                 if let directory = reportDirectory { try? FileManager.default.removeItem(at: directory) }
                 reportDirectory = nil

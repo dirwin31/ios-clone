@@ -8,6 +8,7 @@ struct NavigationHome: View {
     @ObservedObject private var bluetooth: BluetoothTransport
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
+    var submitReport: () -> Void
     var openSettings: () -> Void
     var selectAppTab: (CompanionTab) -> Void
     @State private var searchPurpose: PlaceSearchPurpose?
@@ -15,7 +16,8 @@ struct NavigationHome: View {
     @State private var navigationPanelHeight: CGFloat = 0
     @State private var expanded = false
     @State private var appTabsExpanded = true
-    init(connection: CommaConnection, navigation: NavigationModel, saved: SavedPlacesStore, selectAppTab: @escaping (CompanionTab) -> Void, openSettings: @escaping () -> Void) {
+    init(connection: CommaConnection, navigation: NavigationModel, saved: SavedPlacesStore, selectAppTab: @escaping (CompanionTab) -> Void, submitReport: @escaping () -> Void, openSettings: @escaping () -> Void) {
+        self.submitReport = submitReport
         self.openSettings = openSettings
         self.selectAppTab = selectAppTab
         self.connection = connection; self.navigation = navigation; self.saved = saved
@@ -171,9 +173,8 @@ struct NavigationHome: View {
     }
     private var navigationOptions: some View {
         Menu {
-            Button("Copy diagnostic report", systemImage: "doc.on.doc") {
-                UIPasteboard.general.string = connection.app.connectionLog.report(model: connection.app)
-                navigation.notice = "Diagnostic report copied."
+            Button("Submit report", systemImage: "bubble.left.and.exclamationmark.bubble.right") {
+                submitReport()
             }
             Button("Reset navigation", systemImage: "arrow.counterclockwise", role: .destructive) {
                 Task { await connection.app.navigationServices.resetNavigation() }
