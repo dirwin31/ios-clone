@@ -9,7 +9,7 @@ Use `wrangler deploy` in this directory. Required secrets:
 - DISCORD_CLIENT_ID
 - DISCORD_CLIENT_SECRET
 - DISCORD_WEBHOOK_URL (a webhook for the destination forum)
-- DISCORD_PRIVATE_WEBHOOK_URL (a webhook for a separate private text channel)
+- DISCORD_PRIVATE_WEBHOOK_URL (a webhook for a separate private forum or text channel)
 
 Register `https://starpilot-log-relay.nathan-g-hubbard.workers.dev/auth/discord/callback` as the Discord OAuth redirect. Optional `FORUM_TAG_IDS` is a comma-separated list of existing forum tag IDs (up to five). Without it, reports have no automatic tags; required forum tags must be configured before use.
 
@@ -30,3 +30,42 @@ Run `node --test worker.test.mjs`. These use mocked Discord responses; verify re
 Reports accept up to 16 MiB of encoded JSON; other endpoints remain limited to 1 MiB. Updated iOS clients fit oversized captures before preview/submission, removing older routine events before failures and marking omissions. Pending retries retain their original capture.
 
 Private diagnostics destination is a forum: `DISCORD_PRIVATE_FORUM=true` creates a private thread for each report and links to its confirmed message. Set it to `false` for a normal private text channel. Public report follow-ups still use the existing public thread.
+
+## Targeted build-ready notifications
+
+Tell the release operator which report(s) a build addresses. The operator registers
+an explicit selection in the Cloudflare `BUILD_NOTIFICATIONS` JSON text binding:
+
+```json
+[{"userID":"DISCORD_USER_ID","reference":"REPORT_UUID","version":"1.0.3","build":"79","ready":false,"message":"Please test the connection again and reply here with the result."}]
+```
+
+Use actual IDs; placeholders fail validation. This is server configuration, not
+personalization embedded in the iOS app. Every entry selects one reporter's saved
+report reference, which resolves to that account's existing public thread. The
+same build may select several reports, or none. Never enumerate open reports to
+choose recipients. The authenticated Cloudflare administration interface is the
+only way to register selections; there is no public send endpoint.
+
+First leave `ready:false`. Verify `/release-status` shows `pending`, then verify
+that the exact build is available in TestFlight for the recipient's testing group.
+Only then set `ready:true` in the binding. This readiness step is performed by the
+release operator; Apple webhooks are not configured. A five-minute Cron Trigger
+sends selected ready notifications. New schedules can take time to propagate.
+`GET /release-status` only reads status, without revealing reporter IDs or thread
+links. Confirm `sent` before announcing delivery. Remove completed selections
+from the binding when preparing later builds; stored deduplication survives.
+Preserve this binding on deployments (inherit it through the Cloudflare API).
+
+Every notification mentions the reporter **and REPORT_MAINTAINER_ID**, with all
+other mention parsing disabled. It posts only in the selected public thread,
+never in private diagnostics or the forum generally. Followers' ordinary Discord
+notifications still depend on their settings. A build/version/thread key prevents
+duplicate posts, including concurrent scheduled invocations and restarts. A 429
+waits before retry; all uncertain deliveries stop for manual investigation.
+Do not delete the deduplication record to retry an uncertain send.
+
+Report-to-thread references and notification receipts persist without diagnostic
+contents or tokens. The original seven-day retry receipt expiry is unchanged.
+Older reports can resolve from their unexpired receipt; missing older mappings
+must be investigated rather than guessing the destination.

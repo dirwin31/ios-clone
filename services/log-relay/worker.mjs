@@ -28,10 +28,28 @@ async function discord(path, options = {}) {
   return fetch(API + path, {...options, redirect: 'manual', signal: AbortSignal.timeout(15000)});
 }
 export default {
+  async scheduled(controller, env) {
+    for (const notice of buildNotifications(env)) {
+      if (!notice.ready) continue;
+      const id = env.REPORTS.idFromName(notice.userID);
+      await env.REPORTS.get(id).fetch('https://reports/build-notice', {method:'POST', body:JSON.stringify(notice)});
+    }
+  },
   async fetch(request, env) {
     const url = new URL(request.url);
     try {
-      if (request.method === 'GET' && url.pathname === '/') return json({service: 'StarPilot log relay', version: 11});
+      if (request.method === 'GET' && url.pathname === '/') return json({service: 'StarPilot log relay', version: 12});
+      // Read-only operational status: no reporter IDs, report references, or thread links.
+      if (request.method === 'GET' && url.pathname === '/release-status') {
+        const releases = [];
+        for (const notice of buildNotifications(env)) {
+          const id = env.REPORTS.idFromName(notice.userID);
+          const response = await env.REPORTS.get(id).fetch('https://reports/build-notice-status', {method:'POST', body:JSON.stringify(notice)});
+          const result = await response.json();
+          releases.push({version:notice.version, build:notice.build, ready:notice.ready, state:result.state});
+        }
+        return json({releases});
+      }
       if (request.method === 'GET' && url.pathname === '/auth/discord/start') {
         const state = url.searchParams.get('state'), challenge = url.searchParams.get('code_challenge');
         if (!validNonce(state) || !validNonce(challenge)) return json({error: 'Invalid sign-in request'}, 400);
@@ -98,6 +116,21 @@ export default {
   }
 };
 
+// Only Cloudflare administrators can change this binding. There is no public send endpoint.
+// Mark ready only after verifying this build is available to the recipient in TestFlight.
+export function buildNotifications(env) {
+  try {
+    const notices = JSON.parse(env.BUILD_NOTIFICATIONS || '[]');
+    if (!Array.isArray(notices) || notices.length > 25) return [];
+    if (!notices.every(n => n && typeof n.userID === 'string' && /^\d{1,20}$/.test(n.userID) &&
+      typeof n.reference === 'string' && /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(n.reference) &&
+      typeof n.build === 'string' && /^[1-9]\d{0,8}$/.test(n.build) &&
+      typeof n.version === 'string' && /^\d{1,4}\.\d{1,4}(\.\d{1,4})?$/.test(n.version) &&
+      typeof n.ready === 'boolean' && typeof n.message === 'string' && n.message.trim() && n.message.length <= 1200)) return [];
+    return notices;
+  } catch { return []; }
+}
+
 // Use only the written description. The diagnostics attachment never goes to the model.
 export async function reportTitle(ai, description) {
   const fallback = description.trim().split('\n')[0].replace(/[\r\n\x00-\x1f]/g, ' ').trim();
@@ -124,10 +157,13 @@ export class Reports {
   async fetch(request) {
     {
       const body = await request.json();
+      const path = new URL(request.url).pathname;
+      if (path === '/build-notice' || path === '/build-notice-status') return this.buildNotice(body, path === '/build-notice-status');
       if (new URL(request.url).pathname === '/list') {
         const items = await this.ctx.storage.list({prefix:'thread:'});
         return json({reports:[...items.values()].sort((a,b) => b.created - a.created).slice(0,100)});
       }
+      if (path !== '/submit') return json({error:'Not found'}, 404);
       const existingThread = body.threadID ? await this.ctx.storage.get('thread:' + body.threadID) : null;
       if (body.threadID && !existingThread) return json({error:'Report not found for this Discord account'}, 403);
       const key = 'report:' + body.reference;
@@ -214,10 +250,71 @@ export class Reports {
         await this.ctx.storage.transaction(async storage => {
           if (!existingThread) await storage.put('thread:' + message.channel_id, {id:message.channel_id, title, created:now});
           await storage.put(key, {status: 200, result: response, at: now});
+          await storage.put('reference:' + body.reference.toUpperCase(), {threadURL:response.threadURL});
         });
         return json(response);
       } catch { return json(uncertain.result, 409); }
     }
+  }
+  async buildNotice(notice, statusOnly) {
+    if (!buildNotifications({BUILD_NOTIFICATIONS:JSON.stringify([notice])}).length) return json({state:'invalid_selection'}, 400);
+    const storage = this.ctx.storage;
+    const reference = notice.reference.toUpperCase();
+    let mapping = await storage.get('reference:' + reference);
+    if (!mapping) {
+      const report = await storage.get('report:' + reference) || await storage.get('report:' + reference.toLowerCase());
+      if (report?.status === 200 && report.result?.sent) mapping = report.result;
+    }
+    const match = /^https:\/\/discord\.com\/channels\/(\d+)\/(\d+)\/\d+$/.exec(mapping?.threadURL || '');
+    if (!match || !await storage.get('thread:' + match[2])) return json({state:'report_not_found'}, 404);
+    const key = `build-notice:${notice.version}:${notice.build}:${match[2]}`;
+    const previous = await storage.get(key);
+    if (statusOnly) return json({state:previous?.state || 'pending'});
+    if (!notice.ready) return json({state:'not_ready'});
+    if (previous && previous.state !== 'rate_limited') return json({state:previous.state});
+    if (previous?.retryAt > Date.now()) return json({state:'rate_limited'});
+    const maintainer = this.env.REPORT_MAINTAINER_ID;
+    if (!/^\d{1,20}$/.test(maintainer || '')) return json({state:'maintainer_not_configured'}, 503);
+    let webhook;
+    try {
+      webhook = new URL(this.env.DISCORD_WEBHOOK_URL);
+      if (webhook.protocol !== 'https:' || webhook.hostname !== 'discord.com' || !/^\/api\/webhooks\/\d+\/[A-Za-z0-9_-]+$/.test(webhook.pathname)) throw Error();
+      webhook.search = ''; webhook.hash = '';
+      const metadata = await fetch(webhook, {redirect:'manual', signal:AbortSignal.timeout(10000)});
+      if (!metadata.ok || (await metadata.json()).guild_id !== match[1]) return json({state:'destination_unavailable'}, 503);
+    } catch { return json({state:'destination_unavailable'}, 503); }
+    // Reserve before posting. Unknown outcomes stay blocked, even after restarts.
+    const reserved = await storage.transaction(async store => {
+      const current = await store.get(key);
+      if (current && (current.state !== 'rate_limited' || current.retryAt > Date.now())) return false;
+      await store.put(key, {state:'unconfirmed', at:Date.now()});
+      await store.put('reference:' + reference, {threadURL:mapping.threadURL});
+      return true;
+    });
+    if (!reserved) return json({state:(await storage.get(key)).state});
+    const users = [...new Set([notice.userID, maintainer])];
+    const payload = {content: `${users.map(id => `<@${id}>`).join(' ')}\nStarPilot ${notice.version} (build ${notice.build}) is ready in TestFlight.\n\n${notice.message.trim()}`,
+      allowed_mentions:{parse:[], users}};
+    webhook.searchParams.set('thread_id', match[2]);
+    webhook.searchParams.set('wait', 'true');
+    try {
+      const response = await fetch(webhook, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload), redirect:'manual', signal:AbortSignal.timeout(15000)});
+      if (response.status === 429) {
+        const data = await response.json();
+        const seconds = Number(data.retry_after);
+        await storage.put(key, {state:'rate_limited', retryAt:Date.now() + Math.max(60, Number.isFinite(seconds) ? seconds : 300) * 1000});
+        return json({state:'rate_limited'});
+      }
+      if (response.status >= 400 && response.status < 500 && response.status !== 408) {
+        await storage.put(key, {state:'rejected', status:response.status});
+        return json({state:'rejected'});
+      }
+      if (!response.ok) return json({state:'unconfirmed'});
+      const message = await response.json();
+      if (!/^\d+$/.test(message.id || '') || message.channel_id !== match[2]) return json({state:'unconfirmed'});
+      await storage.put(key, {state:'sent', messageID:message.id, at:Date.now()});
+      return json({state:'sent'});
+    } catch { return json({state:'unconfirmed'}); }
   }
   async alarm() {
     const records = await this.ctx.storage.list({prefix: 'report:'});

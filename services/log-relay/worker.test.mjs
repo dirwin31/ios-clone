@@ -187,3 +187,67 @@ test('private forum creates a thread and resumes rejected public delivery withou
   assert.ok(!JSON.stringify([...await store.list()]).includes(body.logs));
  }finally{globalThis.fetch=old;}
 });
+
+const notice={userID:'789',reference:body.reference,version:'1.0.3',build:'79',ready:true,message:'Please test Bluetooth and cellular again. @everyone'};
+async function noticeStore(){const s=storage();await s.put('thread:222',{id:'222'});await s.put('report:'+body.reference,{status:200,result:{sent:true,threadURL:'https://discord.com/channels/333/222/111'}});return s;}
+test('build notice selects one owned thread, mentions reporter and maintainer, and deduplicates concurrent sends',async()=>{
+ const old=globalThis.fetch;let posts=0;const s=await noticeStore();const reports=new Reports({storage:s},env);
+ globalThis.fetch=async(url,options)=>{
+  if(options.method!=='POST')return Response.json({guild_id:'333'});
+  posts++;assert.equal(new URL(url).searchParams.get('thread_id'),'222');assert.equal(new URL(url).searchParams.get('wait'),'true');
+  const p=JSON.parse(options.body);assert.deepEqual(p.allowed_mentions,{parse:[],users:['789',env.REPORT_MAINTAINER_ID]});assert.equal(p.thread_name,undefined);assert.equal(p.files,undefined);assert.ok(p.content.includes('build 79'));return Response.json({id:'888',channel_id:'222'});
+ };
+ try{
+  assert.equal((await (await reports.fetch(request('/build-notice-status',notice))).json()).state,'pending');assert.equal(posts,0);
+  await Promise.all([reports.fetch(request('/build-notice',notice)),reports.fetch(request('/build-notice',notice))]);
+  const restarted=new Reports({storage:s},env);
+  assert.equal((await (await restarted.fetch(request('/build-notice',notice))).json()).state,'sent');assert.equal(posts,1);
+  await s.delete('report:'+body.reference);
+  assert.equal((await (await restarted.fetch(request('/build-notice-status',notice))).json()).state,'sent');
+ }finally{globalThis.fetch=old;}
+});
+test('wrong account, not-ready build, and unconfigured maintainer cannot post notices',async()=>{
+ const old=globalThis.fetch;globalThis.fetch=async()=>{assert.fail('No network calls expected')};
+ try{
+  const empty=new Reports({storage:storage()},env);
+  assert.equal((await (await empty.fetch(request('/build-notice',notice))).json()).state,'report_not_found');
+  const reports=new Reports({storage:await noticeStore()},env);
+  assert.equal((await (await reports.fetch(request('/build-notice',{...notice,ready:false}))).json()).state,'not_ready');
+  const missing=new Reports({storage:await noticeStore()},{...env,REPORT_MAINTAINER_ID:''});
+  assert.equal((await (await missing.fetch(request('/build-notice',notice))).json()).state,'maintainer_not_configured');
+  assert.equal((await worker.fetch(request('/build-notice',notice),env)).status,404);
+ }finally{globalThis.fetch=old;}
+});
+for(const outcome of ['timeout','500','malformed','wrong-thread','403']){
+ test(`build notification ${outcome} never duplicates on restart`,async()=>{
+  const old=globalThis.fetch;let posts=0;const s=await noticeStore();
+  globalThis.fetch=async(url,options)=>{
+   if(options.method!=='POST')return Response.json({guild_id:'333'});posts++;
+   if(outcome==='timeout')throw Error('lost');
+   if(outcome==='500'||outcome==='403')return new Response('',{status:Number(outcome)});
+   return Response.json(outcome==='malformed'?{}:{id:'888',channel_id:'999'});
+  };
+  try{
+   await new Reports({storage:s},env).fetch(request('/build-notice',notice));
+   const result=await(await new Reports({storage:s},env).fetch(request('/build-notice',notice))).json();
+   assert.equal(result.state,outcome==='403'?'rejected':'unconfirmed');assert.equal(posts,1);
+  }finally{globalThis.fetch=old;}
+ });
+}
+test('rate-limited notification respects delay then retries only the selected thread',async()=>{
+ const old=globalThis.fetch;let posts=0;const s=await noticeStore();const reports=new Reports({storage:s},env);
+ globalThis.fetch=async(url,options)=>{if(options.method!=='POST')return Response.json({guild_id:'333'});posts++;return posts===1?Response.json({retry_after:10},{status:429}):Response.json({id:'888',channel_id:'222'});};
+ try{
+  await reports.fetch(request('/build-notice',notice));await reports.fetch(request('/build-notice',notice));assert.equal(posts,1);
+  await s.put('build-notice:1.0.3:79:222',{state:'rate_limited',retryAt:0});
+  assert.equal((await(await reports.fetch(request('/build-notice',notice))).json()).state,'sent');assert.equal(posts,2);
+ }finally{globalThis.fetch=old;}
+});
+test('scheduler visits only explicitly selected ready reporters; public status never sends or reveals identities',async()=>{
+ const visits=[];const e={...env,BUILD_NOTIFICATIONS:JSON.stringify([notice,{...notice,userID:'456',ready:false}]),REPORTS:{idFromName:id=>id,get:id=>({fetch:async(url)=>{visits.push([id,url]);return Response.json({state:'sent'})}})}};
+ await worker.scheduled({},e);assert.deepEqual(visits,[['789','https://reports/build-notice']]);visits.length=0;
+ const status=await(await worker.fetch(new Request('https://relay/release-status'),e)).json();
+ assert.equal(visits.length,2);assert.ok(visits.every(v=>v[1].endsWith('/build-notice-status')));assert.equal(JSON.stringify(status).includes('789'),false);assert.equal(JSON.stringify(status).includes(body.reference),false);
+ visits.length=0;await worker.scheduled({},{...e,BUILD_NOTIFICATIONS:'[]'});assert.equal(visits.length,0);
+ await worker.scheduled({},{...e,BUILD_NOTIFICATIONS:JSON.stringify([{...notice,userID:'all'}])});assert.equal(visits.length,0);
+});
