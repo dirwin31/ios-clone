@@ -117,6 +117,22 @@ final class LANTransport: ObservableObject, GalaxyRequestTransport {
             return host
         }.first
     }
+    static func runtimeDiagnostic(_ data: Data) -> String {
+        guard let value = try? JSONSerialization.jsonObject(with: data) else {
+            let prefix = String(decoding: data.prefix(128), as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            return prefix.hasPrefix("<") ? "HTML instead of runtime JSON" : "invalid JSON"
+        }
+        guard let json = value as? [String: Any] else { return "JSON root is not an object" }
+        guard json["schemaVersion"] as? Int == 1 else { return "unsupported or missing runtime schema" }
+        guard json["monitor"] as? String == "local" else { return "runtime is not a live comma" }
+        guard deviceID(data) != nil else { return "missing or invalid runtime instance" }
+        return "valid live runtime"
+    }
+    static func responseDiagnostic(_ data: Data, _ response: HTTPURLResponse) -> String {
+        let mime = response.mimeType?.lowercased() ?? ""
+        let type = mime.contains("json") ? "JSON" : mime.contains("html") ? "HTML" : mime.isEmpty ? "missing" : "other"
+        return "HTTP \(response.statusCode); bytes=\(data.count); content-type=\(type); \(runtimeDiagnostic(data))"
+    }
     static func deviceID(_ data: Data) -> String? {
         guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               json["schemaVersion"] as? Int == 1, json["monitor"] as? String == "local",
@@ -164,15 +180,22 @@ final class LANTransport: ObservableObject, GalaxyRequestTransport {
         do {
             let (data, response) = try await authenticated(path: "/data/runtime.json", method: "GET", headers: [:], body: Data(), limit: 4096)
             guard !Task.isCancelled, expectedGeneration == generation else { return false }
-            if sampleProbe || response.statusCode != 200 { onDiagnostic?("LAN probe \(attempt) runtime response HTTP \(response.statusCode); bytes=\(data.count)") }
+            if sampleProbe || response.statusCode != 200 { onDiagnostic?("LAN probe \(attempt) runtime response: \(Self.responseDiagnostic(data, response))") }
             let runtime = Self.deviceID(data)
             var persistent: String?
             if response.statusCode == 200, runtime != nil {
-                if let (statusData, statusResponse) = try? await authenticated(path: "/api/galaxy/status", method: "GET", headers: [:], body: Data(), limit: 8192), statusResponse.statusCode == 200 {
-                    persistent = Self.persistentIdentity(statusData)
+                do {
+                    let (statusData, statusResponse) = try await authenticated(path: "/api/galaxy/status", method: "GET", headers: [:], body: Data(), limit: 8192)
+                    if statusResponse.statusCode == 200 { persistent = Self.persistentIdentity(statusData) }
+                    if sampleProbe || persistent == nil {
+                        onDiagnostic?("LAN persistent identity response: HTTP \(statusResponse.statusCode); bytes=\(statusData.count); valid paired identity=\(persistent != nil)")
+                    }
+                } catch {
+                    onDiagnostic?("LAN persistent identity request failed: \(Self.failureCode(error)); cancelled=\(Task.isCancelled)")
                 }
             }
             let identity = persistent ?? runtime
+            if sampleProbe { onDiagnostic?("LAN identity check: runtime=\(runtime != nil); persistent=\(persistent != nil); saved=\(expectedDeviceID != nil); matches=\(runtime.map { Self.matches(expectedDeviceID, runtime: $0, persistent: persistent) } ?? false)") }
             let available = response.statusCode == 200 && runtime != nil
                 && Self.matches(expectedDeviceID, runtime: runtime ?? "", persistent: persistent)
             guard !Task.isCancelled, expectedGeneration == generation else { return false }
@@ -456,6 +479,11 @@ final class TunnelTransport: ObservableObject, GalaxyRequestTransport {
     var onEvent: ((String) -> Void)?
     var onDiagnostic: ((String) -> Void)?
     private var probeNumber = 0
+    private var runtimePath = "/api/companion/runtime"
+    private var lastProbeDetail = "Not attempted"
+    var diagnosticSummary: String {
+        "configured=\(credential != nil); expected identity saved=\(expectedDeviceID != nil); credential identity saved=\(!(credential?.deviceID.isEmpty ?? true)); preferred runtime path=\(runtimePath); last probe=\(lastProbeDetail)"
+    }
     private let load: (URLRequest, Int) async throws -> (Data, HTTPURLResponse)
     init(load: @escaping (URLRequest, Int) async throws -> (Data, HTTPURLResponse) = { try await BoundedHTTP.load($0, limit: $1) }) { self.load = load }
     static func endpoint(_ text: String) -> URL? {
@@ -484,26 +512,54 @@ final class TunnelTransport: ObservableObject, GalaxyRequestTransport {
             onDiagnostic?("Tunnel probe \(attempt) finished; elapsed=\(String(format: "%.3f", ProcessInfo.processInfo.systemUptime - started))s; cancelled=\(Task.isCancelled); session changed=\(original != generation); verified=\(connected)")
         }
         do {
-            let (data, response) = try await send(path: "/data/runtime.json", method: "GET", headers: [:], body: Data(), limit: 4096)
+            var path = runtimePath
+            var (data, response) = try await send(path: path, method: "GET", headers: [:], body: Data(), limit: 4096)
             guard !Task.isCancelled, generation == original else { return false }
-            onDiagnostic?("Tunnel probe \(attempt) runtime response HTTP \(response.statusCode); bytes=\(data.count)")
+            lastProbeDetail = Self.probeDetail(path, data, response)
+            onDiagnostic?("Tunnel probe \(attempt): \(lastProbeDetail)")
+            // Some gateways route static /data paths to HTML; older comma builds lack the API alias.
+            // Only retry a read. Never treat HTML or an arbitrary HTTP 200 as device verification.
+            if response.statusCode == 404 || (response.statusCode == 200 && LANTransport.deviceID(data) == nil) {
+                path = path == "/api/companion/runtime" ? "/data/runtime.json" : "/api/companion/runtime"
+                onDiagnostic?("Tunnel probe \(attempt): trying compatible runtime endpoint \(path)")
+                (data, response) = try await send(path: path, method: "GET", headers: [:], body: Data(), limit: 4096)
+                guard !Task.isCancelled, generation == original else { return false }
+                lastProbeDetail = Self.probeDetail(path, data, response)
+                onDiagnostic?("Tunnel probe \(attempt): \(lastProbeDetail)")
+            }
             let persistent = LANTransport.persistentIdentity(url: Self.endpoint(credential.url)!)
-            guard response.statusCode == 200, let runtime = LANTransport.deviceID(data),
+            let savedCredentialMatches = !credential.deviceID.hasPrefix("galaxy:") || credential.deviceID == persistent
+            let runtime = LANTransport.deviceID(data)
+            let savedDeviceMatches = runtime.map { LANTransport.matches(expectedDeviceID, runtime: $0, persistent: persistent) } ?? false
+            onDiagnostic?("Tunnel identity check: valid runtime=\(runtime != nil); saved credential matches URL=\(savedCredentialMatches); saved comma matches=\(savedDeviceMatches); legacy identity=\(!credential.deviceID.isEmpty && !credential.deviceID.hasPrefix("galaxy:"))")
+            guard response.statusCode == 200, let runtime,
                   // The authenticated, fixed tunnel URL identifies the saved tunnel across restarts.
                   (!credential.deviceID.hasPrefix("galaxy:") || credential.deviceID == persistent),
                   (LANTransport.matches(expectedDeviceID, runtime: runtime, persistent: persistent)
                    || (expectedDeviceID == credential.deviceID && !credential.deviceID.isEmpty && !credential.deviceID.hasPrefix("galaxy:"))) else {
-                invalidate(response.statusCode == 401 || response.statusCode == 302 ? "Sign in to Tunnel again" : "Tunnel did not verify the saved comma")
+                let reason: String
+                if response.statusCode == 401 || (300..<400).contains(response.statusCode) { reason = "Sign in to Tunnel again" }
+                else if response.statusCode != 200 { reason = "Tunnel server returned HTTP \(response.statusCode)" }
+                else if runtime == nil { reason = "Tunnel returned \(LANTransport.runtimeDiagnostic(data)). Sign in to Tunnel again." }
+                else { reason = "Tunnel identity does not match the saved comma" }
+                lastProbeDetail += "; rejected: " + reason
+                invalidate(reason)
                 return false
             }
+            runtimePath = path
             self.credential = TunnelCredential(url: credential.url, cookie: credential.cookie, deviceID: persistent)
             expectedDeviceID = persistent
             connected = true; status = "Tunnel verified"
             return true
         } catch {
+            lastProbeDetail = "request failed: " + LANTransport.failureCode(error) + "; cancelled=\(Task.isCancelled); superseded=\(generation != original)"
+            onDiagnostic?("Tunnel probe \(attempt): \(lastProbeDetail)")
             if !Task.isCancelled, generation == original { invalidate("Tunnel unavailable: " + LANTransport.failureCode(error)) }
             return false
         }
+    }
+    private static func probeDetail(_ path: String, _ data: Data, _ response: HTTPURLResponse) -> String {
+        "\(path): \(LANTransport.responseDiagnostic(data, response))"
     }
     private func send(path: String, method: String, headers: [String: String], body: Data, limit: Int) async throws -> (Data, HTTPURLResponse) {
         guard let credential, let endpoint = Self.endpoint(credential.url),
@@ -518,7 +574,17 @@ final class TunnelTransport: ObservableObject, GalaxyRequestTransport {
             request.setValue("https://galaxy.firestar.link", forHTTPHeaderField: "Origin")
             if request.value(forHTTPHeaderField: "Content-Type") == nil { request.setValue("application/json", forHTTPHeaderField: "Content-Type") }
         }
-        let result = try await load(request, limit)
+        let started = ProcessInfo.processInfo.systemUptime
+        let result: (Data, HTTPURLResponse)
+        do { result = try await load(request, limit) }
+        catch {
+            onDiagnostic?("Tunnel request \(method) \(SecretGoodGalaxy.diagnosticPath(path)) failed; elapsed=\(String(format: "%.3f", ProcessInfo.processInfo.systemUptime - started))s; cancelled=\(Task.isCancelled); superseded=\(generation != original); \(LANTransport.failureCode(error))")
+            throw error
+        }
+        let elapsed = ProcessInfo.processInfo.systemUptime - started
+        if result.1.statusCode >= 300 || elapsed >= 2 {
+            onDiagnostic?("Tunnel request \(method) \(SecretGoodGalaxy.diagnosticPath(path)): HTTP \(result.1.statusCode); bytes=\(result.0.count); elapsed=\(String(format: "%.3f", elapsed))s; superseded=\(generation != original)")
+        }
         try Task.checkCancellation()
         guard generation == original else { throw CancellationError() }
         return result

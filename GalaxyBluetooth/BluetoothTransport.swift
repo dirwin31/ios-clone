@@ -85,13 +85,43 @@ final class BluetoothTransport: NSObject, ObservableObject, GalaxyRequestTranspo
         central = CBCentralManager(delegate: self, queue: .main)
     }
 
+    private var reconnectTarget: (id: UUID, key: String)?
+    private var lastReconnectReason = ""
+    var diagnosticSummary: String {
+        let saved = UserDefaults.standard.string(forKey: "galaxy.bluetooth.device")
+        return "state=\(central.state.rawValue); saved device=\(saved != nil); saved ID valid=\(saved.flatMap(UUID.init(uuidString:)) != nil); scanning=\(isScanning); connecting=\(connecting); verified=\(connected); paired handshake=\(pairingVerified); recovery scan=\(reconnectTarget != nil); failed connections=\(failedConnections); queued requests=\(queue.count); request active=\(active != nil); RX=\(rx != nil); TX=\(tx != nil); read stream=\(supportsReadStream); notifications=\(supportsNotifications); last reconnect=\(lastReconnectReason)"
+    }
+    private func reconnectDecision(_ reason: String) {
+        guard reason != lastReconnectReason else { return }
+        lastReconnectReason = reason
+        onEvent?("Bluetooth reconnect: " + reason)
+    }
     func reconnectSaved(pairingKey: String) {
-        guard !connected, !connecting, central.state == .poweredOn,
-              let value = UserDefaults.standard.string(forKey: "galaxy.bluetooth.device"),
-              let id = UUID(uuidString: value),
-              let found = central.retrievePeripherals(withIdentifiers: [id]).first else { return }
-        peripherals[id] = found
-        connect(NearbyDevice(id: id, name: found.name ?? "comma", signal: 0), pairingKey: pairingKey)
+        guard !connected, !connecting, !isScanning else { return }
+        guard central.state == .poweredOn else { reconnectDecision("waiting for powered-on Bluetooth; state=\(central.state.rawValue)"); return }
+        guard let bytes = Data(hex: pairingKey), bytes.count == 32 else {
+            status = "Bluetooth app pairing is missing. Connect over Local Wi-Fi and choose Pair Bluetooth with comma."
+            reconnectDecision("missing or invalid saved app key; pairing required"); return
+        }
+        guard let value = UserDefaults.standard.string(forKey: "galaxy.bluetooth.device"), let id = UUID(uuidString: value) else {
+            status = "No saved Bluetooth device. Connect over Local Wi-Fi and pair Bluetooth with comma."
+            reconnectDecision("saved peripheral ID missing or invalid; pairing required"); return
+        }
+        if let found = central.retrievePeripherals(withIdentifiers: [id]).first {
+            reconnectDecision("saved peripheral retrieved; connecting")
+            peripherals[id] = found
+            connect(NearbyDevice(id: id, name: found.name ?? "comma", signal: 0), pairingKey: pairingKey)
+        } else {
+            reconnectDecision("saved peripheral unavailable from iOS cache; scanning for the same device")
+            scan()
+            reconnectTarget = (id, pairingKey)
+            reconnectDiscoveredDevice()
+        }
+    }
+    private func reconnectDiscoveredDevice() {
+        guard let target = reconnectTarget, let found = devices.first(where: { $0.id == target.id }) else { return }
+        reconnectDecision("saved peripheral rediscovered; connecting with saved app key")
+        connect(found, pairingKey: target.key)
     }
 
     func forgetSavedDevice() {
@@ -100,6 +130,7 @@ final class BluetoothTransport: NSObject, ObservableObject, GalaxyRequestTranspo
     }
 
     func scan() {
+        reconnectTarget = nil
         guard central.state == .poweredOn else { onEvent?("Bluetooth scan blocked: state=\(central.state.rawValue)"); status = "Bluetooth is unavailable or permission is required."; return }
         devices = []
         peripherals = [:]
@@ -117,6 +148,10 @@ final class BluetoothTransport: NSObject, ObservableObject, GalaxyRequestTranspo
             try? await Task.sleep(nanoseconds: 15_000_000_000)
             guard !Task.isCancelled, let self else { return }
             self.onEvent?("Bluetooth service scan finished: candidates=\(self.devices.count)")
+            if self.reconnectTarget != nil {
+                self.reconnectDecision("recovery scan timed out without the saved device; candidates=\(self.devices.count)")
+                self.reconnectTarget = nil
+            }
             self.central.stopScan()
             self.isScanning = false
             self.status = self.devices.isEmpty ? "No bridge found. Start the bridge on your comma and enable Bluetooth in StarPilot." : "Select your comma to connect."
@@ -147,6 +182,7 @@ final class BluetoothTransport: NSObject, ObservableObject, GalaxyRequestTranspo
 
     func disconnect(reason: String = "Bluetooth connection closed") {
         connectionFailed = false
+        reconnectTarget = nil
         let wasConnected = connected
         central.stopScan()
         scanTimeout?.cancel()
@@ -391,7 +427,8 @@ final class BluetoothTransport: NSObject, ObservableObject, GalaxyRequestTranspo
                                   name: advertisementData[CBAdvertisementDataLocalNameKey] as? String ?? peripheral.name ?? "Galaxy",
                                   signal: RSSI.intValue)
         if let index = devices.firstIndex(where: { $0.id == device.id }) { devices[index] = device }
-        else { devices.append(device); onEvent?("Bluetooth service candidate discovered: RSSI=\(RSSI.intValue), candidates=\(devices.count)") }
+        else { devices.append(device); onEvent?("Bluetooth service candidate discovered: RSSI=\(RSSI.intValue), candidates=\(devices.count); saved match=\(reconnectTarget?.id == device.id)") }
+        reconnectDiscoveredDevice()
     }
 
     func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {

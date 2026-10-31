@@ -24,6 +24,16 @@ probe = "import Foundation\nimport Combine\n" + source[start:end] + "}\n" + r'''
         precondition(!log.events.last!.contains("private-token"))
         precondition(!log.events.last!.contains("galaxy.firestar.link"))
         log.clear(); precondition(log.events.isEmpty)
+        let beforeStates = publications
+        for _ in 0..<10000 {
+            log.recordState("bluetooth", "Bluetooth waiting")
+            log.recordState("tunnel", "Tunnel waiting")
+        }
+        precondition(log.events.count == 2, "Interleaved repeated states must not flood the log")
+        log.recordState("bluetooth", "Bluetooth connecting")
+        precondition(log.events.count == 3)
+        precondition(publications == beforeStates, "Detailed state logging must not invalidate SwiftUI")
+        log.clear(); precondition(log.events.isEmpty)
         log.record("fresh"); precondition(log.events.count == 1)
         withExtendedLifetime(observation) {}
         print("Connection log: ordering, bounds, redaction, repeat summary, clear, and zero UI publications passed; 30000 events in \(elapsed)s")

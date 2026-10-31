@@ -738,9 +738,10 @@ final class AppModel: ObservableObject {
 
     func monitor() async {
         while !Task.isCancelled {
+            connectionLog.recordState("monitor", "Connection monitor: requested=\(wantsConnection); mode=\(mode.rawValue); pairing=\(pairingInProgress); selecting device=\(selectingDiscoveredComma); Bluetooth key saved=\(!pairingKey.isEmpty); Bluetooth connected=\(bluetooth.connected); connecting=\(bluetooth.connecting); scanning=\(bluetooth.isScanning); LAN connected=\(lan.connected); LAN probe active=\(lanProbeTask != nil)")
             if wantsConnection && !pairingInProgress && !selectingDiscoveredComma {
                 if mode != .lan, !bluetooth.connected, !bluetooth.connecting, !bluetooth.isScanning,
-                   !pairingKey.isEmpty, Date().timeIntervalSince(lastReconnect) >= bluetooth.reconnectDelay {
+                   Date().timeIntervalSince(lastReconnect) >= bluetooth.reconnectDelay {
                     lastReconnect = Date()
                     bluetooth.reconnectSaved(pairingKey: pairingKey)
                 }
@@ -761,7 +762,7 @@ final class AppModel: ObservableObject {
                     }
                     connectionMessage = "Connected over \(transport.label)." + (opened || assets.readyRoot != nil ? "" : " " + assets.status)
                 } else if mode == .bluetooth {
-                    connectionMessage = "Reconnecting over Bluetooth. If you removed this phone’s pairing, connect over Local Wi-Fi.\nThen set up Bluetooth again in this app."
+                    connectionMessage = bluetooth.status
                 } else {
                     connectionMessage = discovery.searching || lan.endpoint == nil
                         ? discovery.status
@@ -1118,6 +1119,13 @@ final class ConnectionEventLog: ObservableObject {
     private static func redact(_ text: String) -> String {
         privateValues.stringByReplacingMatches(in: text, range: NSRange(text.startIndex..., in: text), withTemplate: "[redacted]")
     }
+    private var stateEvents: [String: String] = [:]
+    func recordState(_ key: String, _ event: String) {
+        guard stateEvents[key] != event else { return }
+        if stateEvents.count >= 32 && stateEvents[key] == nil { stateEvents.removeAll(keepingCapacity: true) }
+        stateEvents[key] = event
+        record(event)
+    }
     // No published changes or disk/network work on the connection callback path.
     func record(_ event: String) {
         let bounded = Self.redact(String(event.prefix(1000)))
@@ -1136,7 +1144,7 @@ final class ConnectionEventLog: ObservableObject {
     func clear() {
         storage = Array(repeating: "", count: 12000)
         nextEvent = 0; retained = 0; dropped = 0; repeats = 0
-        lastEvent = ""; detail = ""; copied = false
+        lastEvent = ""; stateEvents.removeAll(keepingCapacity: true); detail = ""; copied = false
     }
     func report(model: AppModel, eventLimit: Int? = nil) -> String {
         let info = Bundle.main.infoDictionary ?? [:]
@@ -1149,11 +1157,14 @@ final class ConnectionEventLog: ObservableObject {
         Selected route: \(model.transport.label)
         Tunnel verified: \(model.tunnel.connected)
         Tunnel status: \(model.tunnel.status)
+        Tunnel detail: \(model.tunnel.diagnosticSummary)
         Connection order: \(model.connectionPriority.map(\.title).joined(separator: " → "))
         \(model.commaSoftwareDiagnostics)
         Saved comma identity: \(model.lan.expectedDeviceID ?? "none")
         LAN verified: \(model.lan.connected)
         Bluetooth verified: \(model.bluetooth.connected)
+        Bluetooth app key saved: \(!model.pairingKey.isEmpty)
+        Bluetooth detail: \(model.bluetooth.diagnosticSummary)
         Log session started: \(formatter.string(from: started)); retained: \(retained); older events dropped: \(dropped); pending repeated events: \(repeats)
         Current screen: \(model.tab.rawValue)
         GPS sharing: \(model.phoneLocation.sharing); \(model.phoneLocation.diagnosticSummary)

@@ -16,10 +16,11 @@ def method(signature):
 stubs = r'''
 import Foundation
 
-enum ConnectionMode { case automatic, bluetooth, lan }
+enum ConnectionMode: String { case automatic, bluetooth, lan }
 @MainActor final class Bluetooth {
     var connected = false, connecting = false, isScanning = false
     var reconnectDelay: TimeInterval { 3 }
+    var status = "Bluetooth status"
     var attempts = 0
     func reconnectSaved(pairingKey: String) { attempts += 1 }
 }
@@ -41,7 +42,9 @@ enum ConnectionMode { case automatic, bluetooth, lan }
 @MainActor final class Discovery { var searching = false; var status = "Find comma on Wi-Fi"; func start() { searching = true }; func stop() {} }
 @MainActor final class Audio { func refreshAudioRoute() {} }
 @MainActor final class Assets { var readyRoot: URL?; var status = "" }
+@MainActor final class Log { func recordState(_ key: String, _ event: String) {} }
 @MainActor final class MonitorProbe {
+    let connectionLog = Log()
     let bluetooth = Bluetooth(), lan = LAN(), transport = Transport(), discovery = Discovery()
     let assets = Assets()
     let audioPairing = Audio()

@@ -17,8 +17,13 @@ import Foundation
     var identity = "0123456789abcdef"
     var status = 200
     var requests: [URLRequest] = []
+    var legacyOnly = false
+    var htmlEverywhere = false
     func load(_ request: URLRequest, _ limit: Int) async throws -> (Data, HTTPURLResponse) {
         requests.append(request)
+        if htmlEverywhere || (legacyOnly && request.url!.path.hasSuffix("/api/companion/runtime")) {
+            return (Data(("<html>private response " + String(repeating: "x", count: 2580)).utf8), HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: ["Content-Type":"text/html"])!)
+        }
         let data = try JSONSerialization.data(withJSONObject: ["schemaVersion": 1, "monitor": "local", "instance": identity])
         return (data, HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: [:])!)
     }
@@ -54,6 +59,29 @@ import Foundation
         for cookie in ["bad\r\nCookie:x", "bad;other=x", ""] {
             do { try tunnel.configure(TunnelCredential(url: url, cookie: cookie, deviceID: "")); preconditionFailure() } catch {}
         }
+        let legacyServer = TunnelServer()
+        legacyServer.legacyOnly = true
+        let legacy = TunnelTransport(load: { try await legacyServer.load($0, $1) })
+        try legacy.configure(TunnelCredential(url: url, cookie: "opaque-token", deviceID: ""))
+        legacy.expectedDeviceID = LANTransport.persistentIdentity(url: URL(string: url)!)
+        var details: [String] = []
+        legacy.onDiagnostic = { details.append($0) }
+        let legacyVerified = await legacy.probe()
+        precondition(legacyVerified)
+        precondition(legacyServer.requests.map { $0.url!.path } == ["/abcdefghijklmnop/api/companion/runtime", "/abcdefghijklmnop/data/runtime.json"])
+        precondition(details.contains { $0.contains("HTML instead of runtime JSON") })
+        precondition(!details.joined().contains("private response"))
+        legacyServer.requests = []
+        let cachedVerified = await legacy.probe()
+        precondition(cachedVerified && legacyServer.requests.count == 1, "Cache working runtime path to avoid repeated failed probes")
+        legacyServer.htmlEverywhere = true
+        let invalid = await legacy.probe()
+        precondition(!invalid && !legacy.connected && legacy.status.contains("HTML"), "Never accept a gateway HTML page as a verified comma")
+        let deniedServer = TunnelServer(); deniedServer.status = 401
+        let denied = TunnelTransport(load: { try await deniedServer.load($0, $1) })
+        try denied.configure(TunnelCredential(url: url, cookie: "opaque-token", deviceID: ""))
+        let deniedResult = await denied.probe()
+        precondition(!deniedResult && deniedServer.requests.count == 1, "Do not retry an authentication rejection through another path")
         let wifi = RouteStub("wifi"), remote = RouteStub("tunnel"), ble = RouteStub("ble")
         let preferred = PreferredTransport(lan: wifi, bluetooth: ble, tunnel: remote,
             invalidateTunnel: { _ in remote.connected = false }, invalidateLAN: { _ in wifi.connected = false })

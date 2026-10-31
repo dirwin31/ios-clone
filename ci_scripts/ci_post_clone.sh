@@ -27,6 +27,9 @@ swiftc -module-cache-path "$test_dir/module-cache" -swift-version 5 -parse-as-li
 python3 tests/extract_bluetooth_reads.py "$test_dir/BluetoothReadProbe.swift"
 swiftc -module-cache-path "$test_dir/module-cache" -swift-version 5 -parse-as-library "$test_dir/BluetoothReadProbe.swift" -o "$test_dir/bluetooth-read-tests"
 "$test_dir/bluetooth-read-tests"
+python3 tests/extract_bluetooth_reconnect.py "$test_dir/BluetoothReconnectProbe.swift"
+swiftc -module-cache-path "$test_dir/module-cache" -swift-version 5 -parse-as-library "$test_dir/BluetoothReconnectProbe.swift" -o "$test_dir/bluetooth-reconnect-tests"
+"$test_dir/bluetooth-reconnect-tests"
 
 swiftc -module-cache-path "$test_dir/module-cache" -swift-version 5 -parse-as-library GalaxyBluetooth/GalaxyRequestTransport.swift tests/GalaxyReadCacheRegression.swift -o "$test_dir/read-cache-tests"
 "$test_dir/read-cache-tests"
