@@ -40,7 +40,7 @@ final class GalaxyPageDiagnostics: ObservableObject {
 
     func record(_ event: String) {
         events.append("\(ISO8601DateFormatter().string(from: Date())) \(event.prefix(300))")
-        if events.count > 40 { events.removeFirst(events.count - 40) }
+        if events.count > 400 { events.removeFirst(events.count - 400) }
     }
     func begin() {
         deadline?.cancel()
@@ -138,7 +138,7 @@ private struct GalaxyPage: UIViewRepresentable {
     let bluetooth: Bool
     let followGalaxyLanguage: Bool
     func makeCoordinator() -> Coordinator {
-        let coordinator = Coordinator(origin: url, diagnostics: diagnostics)
+        let coordinator = Coordinator(origin: url, requestKey: requestKey, diagnostics: diagnostics)
         coordinator.isVisible = isActive
         return coordinator
     }
@@ -353,7 +353,20 @@ private struct GalaxyPage: UIViewRepresentable {
         }
         let origin: URL
         let diagnostics: GalaxyPageDiagnostics
-        init(origin: URL, diagnostics: GalaxyPageDiagnostics) { self.origin = origin; self.diagnostics = diagnostics }
+        private let requestKey: String
+        init(origin: URL, requestKey: String, diagnostics: GalaxyPageDiagnostics) {
+            self.origin = origin
+            self.requestKey = requestKey
+            self.diagnostics = diagnostics
+        }
+        private func isLocal(_ url: URL) -> Bool {
+            url.scheme == origin.scheme && url.host == origin.host && url.port == origin.port
+        }
+        private func authorized(_ request: URLRequest) -> URLRequest {
+            var result = request
+            result.setValue(requestKey, forHTTPHeaderField: "X-Galaxy-Local")
+            return result
+        }
 
         func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
             let frame = message.frameInfo.securityOrigin
@@ -418,8 +431,19 @@ private struct GalaxyPage: UIViewRepresentable {
         func webView(_ webView: WKWebView, decidePolicyFor action: WKNavigationAction,
                      decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
             guard let url = action.request.url else { decisionHandler(.cancel); return }
-            if url.scheme == origin.scheme, url.host == origin.host, url.port == origin.port {
-                decisionHandler(action.shouldPerformDownload ? .download : .allow)
+            if isLocal(url) {
+                if action.shouldPerformDownload {
+                    decisionHandler(.cancel)
+                    webView.startDownload(using: authorized(action.request)) { [weak self] download in
+                        self?.track(download)
+                    }
+                } else if url.path.hasPrefix("/api/"),
+                          action.request.value(forHTTPHeaderField: "X-Galaxy-Local") != requestKey {
+                    decisionHandler(.cancel)
+                    webView.load(authorized(action.request))
+                } else {
+                    decisionHandler(.allow)
+                }
             } else if url.scheme == "blob" {
                 let frame = action.sourceFrame.securityOrigin
                 guard frame.protocol == origin.scheme, frame.host == origin.host,
@@ -435,6 +459,21 @@ private struct GalaxyPage: UIViewRepresentable {
             }
         }
 
+        func webView(_ webView: WKWebView, decidePolicyFor response: WKNavigationResponse,
+                     decisionHandler: @escaping (WKNavigationResponsePolicy) -> Void) {
+            if let http = response.response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
+                diagnostics.downloadFailed(URLError(.badServerResponse))
+                decisionHandler(.cancel)
+                return
+            }
+            let disposition = (response.response as? HTTPURLResponse)?.value(forHTTPHeaderField: "Content-Disposition") ?? ""
+            decisionHandler(disposition.lowercased().hasPrefix("attachment") || !response.canShowMIMEType ? .download : .allow)
+        }
+        func download(_ download: WKDownload, willPerformHTTPRedirection response: HTTPURLResponse,
+                      newRequest request: URLRequest,
+                      decisionHandler: @escaping (WKDownload.RedirectPolicy) -> Void) {
+            decisionHandler(request.url.map(isLocal) == true ? .allow : .cancel)
+        }
         func webView(_ webView: WKWebView, navigationAction: WKNavigationAction, didBecome download: WKDownload) {
             track(download)
         }
@@ -454,6 +493,11 @@ private struct GalaxyPage: UIViewRepresentable {
                       suggestedFilename: String, completionHandler: @escaping (URL?) -> Void) {
             let id = ObjectIdentifier(download)
             guard downloads[id] != nil else { completionHandler(nil); return }
+            if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
+                completionHandler(nil)
+                diagnostics.downloadFailed(URLError(.badServerResponse))
+                return
+            }
             let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
             do {
                 try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -493,7 +537,11 @@ private struct GalaxyPage: UIViewRepresentable {
         func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration,
                      for action: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
             if action.targetFrame == nil, let url = action.request.url, ["https", "http"].contains(url.scheme ?? "") {
-                UIApplication.shared.open(url)
+                if isLocal(url) {
+                    webView.load(authorized(action.request))
+                } else {
+                    UIApplication.shared.open(url)
+                }
             }
             return nil
         }

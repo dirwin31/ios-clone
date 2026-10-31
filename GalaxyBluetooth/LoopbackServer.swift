@@ -54,7 +54,7 @@ final class LoopbackServer: ObservableObject {
 
     private func record(_ event: String) {
         lifecycleEvents.append("\(ISO8601DateFormatter().string(from: Date())) \(event)")
-        if lifecycleEvents.count > 20 { lifecycleEvents.removeFirst(lifecycleEvents.count - 20) }
+        if lifecycleEvents.count > 200 { lifecycleEvents.removeFirst(lifecycleEvents.count - 200) }
     }
 
     // Probe real HTTP service after suspension; an old URL is not proof of readiness.
@@ -163,9 +163,9 @@ final class LoopbackServer: ObservableObject {
         recentRequests.append("\(ISO8601DateFormatter().string(from: Date())) \(request.method) \(Self.reportPath(request.target)) → \(response.status), \(response.body.count) bytes, \(String(format: "%.2f", Date().timeIntervalSince(start)))s")
         if response.status >= 400, let failure = recentRequests.last {
             recentFailures.append(failure)
-            if recentFailures.count > 40 { recentFailures.removeFirst(recentFailures.count - 40) }
+            if recentFailures.count > 1000 { recentFailures.removeFirst(recentFailures.count - 1000) }
         }
-        if recentRequests.count > 60 { recentRequests.removeFirst(recentRequests.count - 60) }
+        if recentRequests.count > 3000 { recentRequests.removeFirst(recentRequests.count - 3000) }
         return response
     }
 

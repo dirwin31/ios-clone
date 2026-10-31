@@ -11,6 +11,51 @@ private struct DiscordCredentials: Codable {
     let userID: String
 }
 
+// Budget the encoded request, including JSON escaping, rather than character count.
+enum DiagnosticReportBudget {
+    static let maximumBytes = 16 * 1024 * 1024
+    static func fit(_ logs: String, maximumBytes: Int = maximumBytes) -> String {
+        // Reserve room for description, reference, thread ID and JSON field names.
+        let budget = max(0, maximumBytes - 64 * 1024)
+        func fits(_ value: String) -> Bool {
+            guard let data = try? JSONEncoder().encode(value) else { return false }
+            return data.count <= budget
+        }
+        if fits(logs) { return logs }
+        let lines = logs.components(separatedBy: "\n")
+        let dated = lines.indices.filter { lines[$0].range(of: #"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}.* "#, options: .regularExpression) != nil }
+        // Routine events go first; failures survive until routine history is exhausted.
+        let failures = Set(dated.filter {
+            lines[$0].range(of: "fail|error|disconnect|cancel|unavailable|unconfirmed|did not verify|(?:HTTP |→ )[45][0-9]{2}", options: [.regularExpression, .caseInsensitive]) != nil
+        })
+        let ordered = dated.sorted { a, b in
+            let af = failures.contains(a), bf = failures.contains(b)
+            if af != bf { return !af }
+            return lines[a] < lines[b]
+        }
+        func candidate(_ count: Int) -> String {
+            let removed = Set(ordered.prefix(count))
+            return "Upload size limit: omitted \(count) older events; routine events removed before failures.\n" + lines.indices.filter { !removed.contains($0) }.map { lines[$0] }.joined(separator: "\n")
+        }
+        var low = 0, high = ordered.count
+        while low < high {
+            let middle = (low + high) / 2
+            if fits(candidate(middle)) { high = middle } else { low = middle + 1 }
+        }
+        let fitted = candidate(low)
+        if fits(fitted) { return fitted }
+        // Defensive fallback for an unusually large non-event snapshot.
+        let characters = Array(fitted)
+        low = 0; high = characters.count
+        let notice = "Upload size limit: diagnostic snapshot shortened. Full capture is available through Share diagnostics.\n"
+        while low < high {
+            let middle = (low + high + 1) / 2
+            if fits(notice + String(characters.suffix(middle))) { low = middle } else { high = middle - 1 }
+        }
+        return notice + String(characters.suffix(low))
+    }
+}
+
 private struct PendingDiscordReport: Codable {
     let description: String
     let logs: String
@@ -148,7 +193,7 @@ final class DiscordReports: NSObject, ObservableObject, ASWebAuthenticationPrese
                 guard let updated = self.credentials else { return }; credentials = updated
             }
             let payload = ["description": description, "logs": logs, "reference": reference]
-            guard try JSONSerialization.data(withJSONObject: payload).count <= 1024 * 1024 else { throw ReportError("This report is too large. Use Share diagnostics instead.") }
+            guard try JSONSerialization.data(withJSONObject: payload).count <= DiagnosticReportBudget.maximumBytes else { throw ReportError("This report is too large. Use Share diagnostics instead.") }
             if let pending = PendingDiscordReport.load() {
                 guard pending.reference == reference, pending.description == description, pending.logs == logs, pending.threadID == threadID else { throw ReportError("Reopen the report to retry the saved submission.") }
                 guard pending.userID == credentials.userID else { throw ReportError("Reconnect the Discord account used for this report, or discard it first.") }
@@ -173,7 +218,7 @@ final class DiscordReports: NSObject, ObservableObject, ASWebAuthenticationPrese
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         if let token { request.setValue("Bearer " + token, forHTTPHeaderField: "Authorization") }
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
-        guard (request.httpBody?.count ?? 0) <= 1024 * 1024 else { throw ReportError("This report is too large. Use Share diagnostics instead.") }
+        guard (request.httpBody?.count ?? 0) <= DiagnosticReportBudget.maximumBytes else { throw ReportError("This report is too large. Use Share diagnostics instead.") }
         let (data, response) = try await URLSession.shared.data(for: request)
         let result = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:]
         guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
@@ -246,15 +291,16 @@ struct DiscordReportSheet: View {
     @State private var explainDiscord = false
     @State private var selectedThread = ""
     @State private var loadedReports = false
-    private var reportLogs: String { restoredLogs ?? logs }
+    @State private var preparedLogs: String?
+    private var reportLogs: String { restoredLogs ?? preparedLogs ?? logs }
     var body: some View {
         NavigationStack {
             Form {
                 Section {
                     Label("StarPilot support", systemImage: "bubble.left.and.text.bubble.right.fill")
                         .font(.headline).foregroundStyle(brandPurple)
-                    Text("Tell us what happened. We’ll attach your diagnostics and open a post in Discord.")
-                    Text("Your Discord username and report are visible to people with access to the forum.").font(.footnote).foregroundStyle(.secondary)
+                    Text("Tell us what happened. Your description goes to the support forum; diagnostics go to a private support channel.")
+                    Text("Your Discord username, description and a private-diagnostics link are visible in the forum. Only people with access to the private channel can open the diagnostics.").font(.footnote).foregroundStyle(.secondary)
                     if discord.connected {
                         Label("Discord connected", systemImage: "checkmark.circle.fill").foregroundStyle(.green)
                         Button("Disconnect Discord", role: .destructive) { Task { await discord.disconnect() } }.disabled(discord.busy)
@@ -273,6 +319,9 @@ struct DiscordReportSheet: View {
                         Picker("Send to", selection: $selectedThread) {
                             Text("New report").tag("")
                             ForEach(discord.reports) { report in Text(report.title).tag(report.id) }
+                            if !selectedThread.isEmpty && !discord.reports.contains(where: { $0.id == selectedThread }) {
+                                Text("Saved report thread").tag(selectedThread)
+                            }
                         }.disabled(attempted)
                         Button("Refresh your reports", systemImage: "arrow.clockwise") { Task { await discord.loadReports() } }.disabled(discord.busy || attempted)
                         Text("Report titles and thread IDs are saved with your Discord account so you can follow up. Older reports may not be listed.").font(.caption).foregroundStyle(.secondary)
@@ -343,9 +392,10 @@ struct DiscordReportSheet: View {
                     if !busy && discord.connected && !loadedReports { loadedReports = true; Task { await discord.loadReports() } }
                 }
                 .onChange(of: discord.connected) { _, connected in
-                    if !connected { loadedReports = false; selectedThread = "" }
+                    if !connected { loadedReports = false; if !attempted { selectedThread = "" } }
                 }
                 .onAppear {
+                    if preparedLogs == nil { preparedLogs = DiagnosticReportBudget.fit(logs) }
                     if discord.connected { loadedReports = true; Task { await discord.loadReports() } }
                     if let pending = PendingDiscordReport.load() {
                         description = pending.description; restoredLogs = pending.logs; selectedThread = pending.threadID ?? ""

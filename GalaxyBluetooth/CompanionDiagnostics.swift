@@ -73,7 +73,7 @@ final class CompanionDiagnostics: ObservableObject {
         guard message != lastEvent else { return }
         lastEvent = message
         events.append("\(ISO8601DateFormatter().string(from: Date())) \(message.prefix(500))")
-        if events.count > 30 { events.removeFirst(events.count - 30) }
+        if events.count > 300 { events.removeFirst(events.count - 300) }
     }
     func diagnosticLog() -> String {
         let info = Bundle.main.infoDictionary ?? [:]

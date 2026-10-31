@@ -12,8 +12,8 @@ probe = "import Foundation\nimport Combine\n" + source[start:end] + "}\n" + r'''
         let start = ProcessInfo.processInfo.systemUptime
         for index in 0..<30000 { log.record("event \(index)") }
         let elapsed = ProcessInfo.processInfo.systemUptime - start
-        precondition(log.events.count == 3000)
-        precondition(log.events.first!.hasSuffix("event 27000"))
+        precondition(log.events.count == 12000)
+        precondition(log.events.first!.hasSuffix("event 18000"))
         precondition(log.events.last!.hasSuffix("event 29999"))
         precondition(publications == 0, "Recording must not invalidate SwiftUI")
         log.record("repeat"); log.record("repeat"); log.record("repeat"); log.record("next")

@@ -1068,7 +1068,7 @@ struct FloatingGalaxyGlass: ViewModifier {
 
 @MainActor
 final class ConnectionEventLog: ObservableObject {
-    private var storage = Array(repeating: "", count: 3000)
+    private var storage = Array(repeating: "", count: 12000)
     private var nextEvent = 0
     private var retained = 0
     private var sequence = 0
@@ -1111,7 +1111,7 @@ final class ConnectionEventLog: ObservableObject {
         if retained == storage.count { dropped += 1 } else { retained += 1 }
     }
     func clear() {
-        storage = Array(repeating: "", count: 3000)
+        storage = Array(repeating: "", count: 12000)
         nextEvent = 0; retained = 0; dropped = 0; repeats = 0
         lastEvent = ""; detail = ""; copied = false
     }
