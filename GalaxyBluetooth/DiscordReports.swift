@@ -289,6 +289,9 @@ struct DiscordReportSheet: View {
     @State private var attempted = false
     @State private var reference = UUID().uuidString
     let logs: String
+    let onSent: () -> Void
+    @State private var showSendError = false
+    @State private var sendError = ""
     @State private var restoredLogs: String?
     @State private var confirmDiscard = false
     @State private var explainDiscord = false
@@ -369,15 +372,30 @@ struct DiscordReportSheet: View {
                             if discord.threadURL != nil { dismiss() } else {
                                 guard !reportLogs.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
                                     discord.status = "Diagnostics weren’t captured. Close this form and open Report a problem again."
+                                    sendError = discord.status; showSendError = true
                                     return
                                 }
                                 descriptionFocused = false; attempted = true
-                                Task { await discord.send(description: description, logs: reportLogs, reference: reference, threadID: selectedThread.isEmpty ? nil : selectedThread) }
+                                Task {
+                                    await discord.send(description: description, logs: reportLogs, reference: reference, threadID: selectedThread.isEmpty ? nil : selectedThread)
+                                    if discord.threadURL != nil {
+                                        dismiss()
+                                        onSent()
+                                    } else {
+                                        sendError = discord.status
+                                        showSendError = true
+                                    }
+                                }
                             }
                         }.tint(.blue).disabled(discord.busy || (discord.threadURL == nil && (!discord.connected || description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || description.count > 1000)))
                     }
                 }
                 .interactiveDismissDisabled(discord.busy)
+                .alert("Report not confirmed", isPresented: $showSendError) {
+                    Button("OK", role: .cancel) {}
+                } message: {
+                    Text(sendError)
+                }
                 .alert("Connect Discord", isPresented: $explainDiscord) {
                     Button("Continue") { discord.connect() }
                     Button("Not now", role: .cancel) {}

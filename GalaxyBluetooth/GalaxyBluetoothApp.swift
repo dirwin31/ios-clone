@@ -839,7 +839,7 @@ struct GalaxyRootView: View {
                 if model.navigationEnabled && model.tab == .navigation {
                     NavigationHome(connection: model.navigationServices.connection, navigation: model.navigationServices.navigation, saved: model.navigationServices.saved, selectAppTab: select) { select(.connections) }
                 } else if model.tab == .logs {
-                    DeveloperLogsView(model: model, log: model.connectionLog, back: { select(.connections) })
+                    DeveloperLogsView(model: model, log: model.connectionLog, back: { select(.connections) }, reportSent: { select(model.opened ? .galaxy : .connections) })
                 } else if model.developerMode && (model.tab == .live || model.tab == .diagnostics) {
                     CompanionView(diagnostics: model.diagnostics)
                 } else if model.tab == .connections || !model.opened {
@@ -1154,6 +1154,7 @@ private struct DeveloperLogsView: View {
     @ObservedObject var model: AppModel
     @ObservedObject var log: ConnectionEventLog
     let back: () -> Void
+    let reportSent: () -> Void
     @State private var sharedReport: GalaxyDownloadedFile?
     @State private var reportDirectory: URL?
     @State private var exportStatus = ""
@@ -1262,7 +1263,10 @@ private struct DeveloperLogsView: View {
             }.padding(20)
         }.background(background.ignoresSafeArea())
             .sheet(item: $discordReport) { capture in
-                DiscordReportSheet(logs: capture.logs)
+                DiscordReportSheet(logs: capture.logs) {
+                    discordReport = nil
+                    reportSent()
+                }
             }
             .sheet(item: $sharedReport, onDismiss: {
                 if let directory = reportDirectory { try? FileManager.default.removeItem(at: directory) }
