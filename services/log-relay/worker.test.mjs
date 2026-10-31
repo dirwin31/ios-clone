@@ -159,3 +159,31 @@ test('concurrent submissions reserve once',async()=>{
  globalThis.fetch=async(url,o)=>{const priv=String(url).includes('/456/');if(o.method==='POST'){posts++;return Response.json({id:'555',channel_id:priv?'666':'222'});}return Response.json({guild_id:'333',channel_id:priv?'666':'777'});};
  try{const obj=new Reports({storage:storage()},env);const results=await Promise.all([obj.fetch(request('/submit',body)),obj.fetch(request('/submit',body))]);assert.ok(results.some(r=>r.status===200));assert.equal(posts,2);}finally{globalThis.fetch=old;}
 });
+
+test('private forum creates a thread and resumes rejected public delivery without duplicating diagnostics', async () => {
+ const old=globalThis.fetch, posts=[]; let rejectPublic=true;
+ globalThis.fetch=async(url,options)=>{
+  const privateDestination=String(url).includes('/456/');
+  if(options.method!=='POST') return Response.json({guild_id:'333',channel_id:privateDestination?'666':'777'});
+  posts.push(privateDestination?'private':'public');
+  if(privateDestination) {
+   const payload=JSON.parse(options.body.get('payload_json'));
+   assert.ok(payload.thread_name.startsWith('iOS — '));
+   assert.deepEqual(payload.allowed_mentions,{parse:[]});
+   assert.equal(await options.body.get('files[0]').text(),body.logs);
+   return Response.json({id:'555',channel_id:'888'});
+  }
+  const payload=JSON.parse(options.body);
+  assert.ok(payload.content.includes('https://discord.com/channels/333/888/555'));
+  assert.ok(!options.body.includes(body.logs));
+  if(rejectPublic){rejectPublic=false;return Response.json({code:50013},{status:403});}
+  return Response.json({id:'111',channel_id:'222'});
+ };
+ const store=storage(), configured={...env,DISCORD_PRIVATE_FORUM:'true'};
+ try {
+  assert.equal((await new Reports({storage:store},configured).fetch(request('/submit',body))).status,503);
+  assert.equal((await new Reports({storage:store},configured).fetch(request('/submit',body))).status,200);
+  assert.deepEqual(posts,['private','public','public']);
+  assert.ok(!JSON.stringify([...await store.list()]).includes(body.logs));
+ }finally{globalThis.fetch=old;}
+});

@@ -31,7 +31,7 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
     try {
-      if (request.method === 'GET' && url.pathname === '/') return json({service: 'StarPilot log relay', version: 10});
+      if (request.method === 'GET' && url.pathname === '/') return json({service: 'StarPilot log relay', version: 11});
       if (request.method === 'GET' && url.pathname === '/auth/discord/start') {
         const state = url.searchParams.get('state'), challenge = url.searchParams.get('code_challenge');
         if (!validNonce(state) || !validNonce(challenge)) return json({error: 'Invalid sign-in request'}, 400);
@@ -187,8 +187,11 @@ export class Reports {
         }
         return json(uncertain.result, 409);
       };
+      const privateForum = this.env.DISCORD_PRIVATE_FORUM === 'true';
+      const privatePayload = {content: `Diagnostics from <@${body.user.id}> (${name})\nReference: ${body.reference}`, allowed_mentions: {parse: []}};
+      if (privateForum) privatePayload.thread_name = title;
       const form = new FormData();
-      form.append('payload_json', JSON.stringify({content: `Diagnostics from <@${body.user.id}> (${name})\nReference: ${body.reference}`, allowed_mentions: {parse: []}}));
+      form.append('payload_json', JSON.stringify(privatePayload));
       form.append('files[0]', new Blob([body.logs], {type: 'text/plain;charset=utf-8'}), `StarPilot-${body.reference}.txt`);
       webhook.searchParams.set('wait', 'true');
       try {
@@ -197,7 +200,8 @@ export class Reports {
           const privateResult = await fetch(privateWebhook, {method: 'POST', body: form, redirect: 'manual', signal: AbortSignal.timeout(15000)});
           if (!privateResult.ok) return await rejected(privateResult);
           const privateMessage = await privateResult.json();
-          if (!/^\d+$/.test(privateMessage.id || '') || privateMessage.channel_id !== privateHook.channel_id) return json(uncertain.result, 409);
+          if (!/^\d+$/.test(privateMessage.id || '') || !/^\d+$/.test(privateMessage.channel_id || '') ||
+              (privateForum ? privateMessage.channel_id === privateHook.channel_id || privateMessage.channel_id === hook.channel_id : privateMessage.channel_id !== privateHook.channel_id)) return json(uncertain.result, 409);
           uncertain.privateURL = `https://discord.com/channels/${privateHook.guild_id}/${privateMessage.channel_id}/${privateMessage.id}`;
           await this.ctx.storage.put(key, uncertain);
         }

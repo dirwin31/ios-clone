@@ -28,3 +28,5 @@ Worker request logging is disabled to avoid retaining OAuth callback query strin
 Run `node --test worker.test.mjs`. These use mocked Discord responses; verify real sign-in, posting, attachment, and opening the forum on a device before announcing end-to-end success.
 
 Reports accept up to 16 MiB of encoded JSON; other endpoints remain limited to 1 MiB. Updated iOS clients fit oversized captures before preview/submission, removing older routine events before failures and marking omissions. Pending retries retain their original capture.
+
+Private diagnostics destination is a forum: `DISCORD_PRIVATE_FORUM=true` creates a private thread for each report and links to its confirmed message. Set it to `false` for a normal private text channel. Public report follow-ups still use the existing public thread.
