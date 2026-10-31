@@ -188,6 +188,9 @@ final class DiscordReports: NSObject, ObservableObject, ASWebAuthenticationPrese
         busy = true; status = "Sending report…"; threadURL = nil
         defer { busy = false }
         do {
+            guard !logs.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                throw ReportError("Diagnostics weren’t captured. Close this form and open Report a problem again.")
+            }
             if credentials.expires.timeIntervalSinceNow < 60 {
                 try store(await request("/auth/discord/refresh", body: ["refresh_token": credentials.refresh]))
                 guard let updated = self.credentials else { return }; credentials = updated
@@ -364,6 +367,10 @@ struct DiscordReportSheet: View {
                     ToolbarItem(placement: .confirmationAction) {
                         Button(discord.threadURL != nil ? "Done" : "Send") {
                             if discord.threadURL != nil { dismiss() } else {
+                                guard !reportLogs.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                                    discord.status = "Diagnostics weren’t captured. Close this form and open Report a problem again."
+                                    return
+                                }
                                 descriptionFocused = false; attempted = true
                                 Task { await discord.send(description: description, logs: reportLogs, reference: reference, threadID: selectedThread.isEmpty ? nil : selectedThread) }
                             }
@@ -398,9 +405,21 @@ struct DiscordReportSheet: View {
                     if preparedLogs == nil { preparedLogs = DiagnosticReportBudget.fit(logs) }
                     if discord.connected { loadedReports = true; Task { await discord.loadReports() } }
                     if let pending = PendingDiscordReport.load() {
-                        description = pending.description; restoredLogs = pending.logs; selectedThread = pending.threadID ?? ""
-                        reference = pending.reference; attempted = true
-                        discord.status = "Your previous report is awaiting confirmation. Retry to check its delivery without creating a duplicate."
+                        description = pending.description; selectedThread = pending.threadID ?? ""
+                        if pending.logs.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                            // The relay rejects empty diagnostics before reserving or posting a report.
+                            // Keep the description, but replace this unsendable capture with fresh logs.
+                            do {
+                                try FileManager.default.removeItem(at: PendingDiscordReport.url)
+                                discord.status = "Diagnostics refreshed. Your report is ready to send."
+                            } catch {
+                                restoredLogs = pending.logs; reference = pending.reference; attempted = true
+                                discord.status = "Couldn’t refresh the saved report. Discard it before trying again."
+                            }
+                        } else {
+                            restoredLogs = pending.logs; reference = pending.reference; attempted = true
+                            discord.status = "Your previous report is awaiting confirmation. Retry to check its delivery without creating a duplicate."
+                        }
                     }
                 }
         }

@@ -1158,8 +1158,11 @@ private struct DeveloperLogsView: View {
     @State private var reportDirectory: URL?
     @State private var exportStatus = ""
     @State private var exporting = false
-    @State private var discordReport: String?
-    @State private var showDiscordReport = false
+    private struct ReportCapture: Identifiable {
+        let id = UUID()
+        let logs: String
+    }
+    @State private var discordReport: ReportCapture?
     @Environment(\.colorScheme) private var colorScheme
     private var accent: Color { colorScheme == .dark ? Color(red: 0.68, green: 0.48, blue: 0.96) : Color(red: 0.45, green: 0.26, blue: 0.73) }
     private var panel: Color { colorScheme == .dark ? Color(red: 0.09, green: 0.065, blue: 0.145) : Color(red: 0.88, green: 0.83, blue: 0.95) }
@@ -1192,8 +1195,7 @@ private struct DeveloperLogsView: View {
                     Text("Tell us what happened and send diagnostics to the support forum.")
                         .font(.subheadline).foregroundStyle(muted)
                     Button {
-                        discordReport = allReports()
-                        showDiscordReport = true
+                        discordReport = ReportCapture(logs: allReports())
                     } label: {
                         Label("Report a problem", systemImage: "bubble.left.and.exclamationmark.bubble.right")
                             .font(.headline).frame(maxWidth: .infinity).padding(.vertical, 13)
@@ -1259,8 +1261,8 @@ private struct DeveloperLogsView: View {
                 }.padding(18).background(panel, in: RoundedRectangle(cornerRadius: 22))
             }.padding(20)
         }.background(background.ignoresSafeArea())
-            .sheet(isPresented: $showDiscordReport) {
-                DiscordReportSheet(logs: discordReport ?? "")
+            .sheet(item: $discordReport) { capture in
+                DiscordReportSheet(logs: capture.logs)
             }
             .sheet(item: $sharedReport, onDismiss: {
                 if let directory = reportDirectory { try? FileManager.default.removeItem(at: directory) }
