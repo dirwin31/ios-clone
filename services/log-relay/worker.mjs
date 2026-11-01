@@ -117,7 +117,7 @@ export default {
 };
 
 // Only Cloudflare administrators can change this binding. There is no public send endpoint.
-// Mark ready only after verifying this build is available to the recipient in TestFlight.
+// Mark ready after verifying the selected milestone: archive success or recipient TestFlight availability.
 export function buildNotifications(env) {
   try {
     const notices = JSON.parse(env.BUILD_NOTIFICATIONS || '[]');
@@ -126,6 +126,7 @@ export function buildNotifications(env) {
       typeof n.reference === 'string' && /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(n.reference) &&
       typeof n.build === 'string' && /^[1-9]\d{0,8}$/.test(n.build) &&
       typeof n.version === 'string' && /^\d{1,4}\.\d{1,4}(\.\d{1,4})?$/.test(n.version) &&
+      (n.stage === undefined || ['archived','testflight'].includes(n.stage)) &&
       typeof n.ready === 'boolean' && typeof n.message === 'string' && n.message.trim() && n.message.length <= 1200)) return [];
     return notices;
   } catch { return []; }
@@ -293,7 +294,8 @@ export class Reports {
     });
     if (!reserved) return json({state:(await storage.get(key)).state});
     const users = [...new Set([notice.userID, maintainer])];
-    const payload = {content: `${users.map(id => `<@${id}>`).join(' ')}\nStarPilot ${notice.version} (build ${notice.build}) is ready in TestFlight.\n\n${notice.message.trim()}`,
+    const milestone = notice.stage === 'archived' ? 'has archived successfully. TestFlight access may still require processing, review, or testing-group assignment.' : 'is ready in TestFlight.';
+    const payload = {content: `${users.map(id => `<@${id}>`).join(' ')}\nStarPilot ${notice.version} (build ${notice.build}) ${milestone}\n\n${notice.message.trim()}`,
       allowed_mentions:{parse:[], users}};
     webhook.searchParams.set('thread_id', match[2]);
     webhook.searchParams.set('wait', 'true');

@@ -58,7 +58,9 @@ test, not a guarantee that the reporter's problem is resolved. The notifier uses
 only this per-report message and does not append general release notes.
 
 First leave `ready:false`. Verify `/release-status` shows `pending`, then verify
-that the exact build is available in TestFlight for the recipient's testing group.
+the selected milestone: `stage:"archived"` requires a successful Apple archive;
+omitting stage (or `stage:"testflight"`) requires availability to the recipient's TestFlight group. Archived notices explicitly say access may still require
+processing, review, or group assignment.
 Only then set `ready:true` in the binding. This readiness step is performed by the
 release operator; Apple webhooks are not configured. A five-minute Cron Trigger
 sends selected ready notifications. New schedules can take time to propagate.

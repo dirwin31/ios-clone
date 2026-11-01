@@ -251,3 +251,13 @@ test('scheduler visits only explicitly selected ready reporters; public status n
  visits.length=0;await worker.scheduled({},{...e,BUILD_NOTIFICATIONS:'[]'});assert.equal(visits.length,0);
  await worker.scheduled({},{...e,BUILD_NOTIFICATIONS:JSON.stringify([{...notice,userID:'all'}])});assert.equal(visits.length,0);
 });
+
+test('archive notice does not claim TestFlight access',async()=>{
+ const old=globalThis.fetch;let posted=false;
+ globalThis.fetch=async(url,options)=>{
+  if(options.method!=='POST')return Response.json({guild_id:'333'});
+  const p=JSON.parse(options.body);assert.ok(p.content.includes('has archived successfully'));assert.ok(p.content.includes('testing-group assignment'));assert.ok(!p.content.includes('is ready in TestFlight'));posted=true;
+  return Response.json({id:'888',channel_id:'222'});
+ };
+ try{const r=new Reports({storage:await noticeStore()},env);assert.equal((await (await r.fetch(request('/build-notice',{...notice,stage:'archived'}))).json()).state,'sent');assert.ok(posted);}finally{globalThis.fetch=old;}
+});
