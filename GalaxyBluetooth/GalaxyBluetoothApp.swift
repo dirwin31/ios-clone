@@ -649,6 +649,7 @@ final class AppModel: ObservableObject {
                   lastNetworkPath == networkPath, lan.generation == generation, !lan.connected,
                   !response.bodyData.isEmpty else { return }
             if let ip = LANTransport.reportedAddress(response.bodyData) {
+                connectionLog.record("Comma address learned over Bluetooth: \(ip):8082; previous=\(lan.endpoint?.host ?? "none")")
                 localAddressNetwork = network
                 try lan.configure(address: ip)
                 address = ip
@@ -1164,6 +1165,9 @@ final class ConnectionEventLog: ObservableObject {
         \(model.commaSoftwareDiagnostics)
         Saved comma identity: \(model.lan.expectedDeviceID ?? "none")
         LAN verified: \(model.lan.connected)
+        LAN endpoint: \(model.lan.endpoint?.host ?? "none"):8082
+        LAN status: \(model.lan.status)
+        Phone private IPv4 interfaces: \(LANDiscovery.privateInterfaceDiagnostics())
         Bluetooth verified: \(model.bluetooth.connected)
         Bluetooth app key saved: \(!model.pairingKey.isEmpty)
         Bluetooth detail: \(model.bluetooth.diagnosticSummary)

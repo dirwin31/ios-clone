@@ -91,6 +91,7 @@ final class LANDiscovery: NSObject, ObservableObject, @preconcurrency NetService
     private func key(_ service: NetService) -> String { service.name + "/" + service.type + "/" + service.domain }
     func netServiceBrowser(_ browser: NetServiceBrowser, didFind service: NetService, moreComing: Bool) {
         guard searching, browser === self.browser, services.count < 16, services[key(service)] == nil else { return }
+        onEvent?("Local Wi-Fi discovery service found; resolving address; count=\(services.count + 1)")
         services[key(service)] = service
         service.delegate = self
         service.resolve(withTimeout: 5)
@@ -119,10 +120,11 @@ final class LANDiscovery: NSObject, ObservableObject, @preconcurrency NetService
         sender.resolve(withTimeout: 5)
     }
     func netServiceDidResolveAddress(_ sender: NetService) {
-        guard searching, services[key(sender)] === sender, sender.port == 8082 else { return }
+        guard searching, services[key(sender)] === sender else { return }
+        guard sender.port == 8082 else { onEvent?("Local Wi-Fi discovery rejected service: unexpected port \(sender.port)"); return }
         let txt = sender.txtRecordData().map(NetService.dictionary(fromTXTRecord:)) ?? [:]
-        guard txt["protocol"] == Data("galaxy-lan-1".utf8) else { return }
-        guard let address = (sender.addresses ?? []).compactMap(Self.privateIPv4).first else { return }
+        guard txt["protocol"] == Data("galaxy-lan-1".utf8) else { onEvent?("Local Wi-Fi discovery rejected service: missing or unsupported protocol"); return }
+        guard let address = (sender.addresses ?? []).compactMap(Self.privateIPv4).first else { onEvent?("Local Wi-Fi discovery rejected service: no supported private IPv4 address; candidates=\(sender.addresses?.count ?? 0)"); return }
         let suffix = "-" + address.replacingOccurrences(of: ".", with: "-")
         let name = sender.name.hasSuffix(suffix) ? String(sender.name.dropLast(suffix.count)) : sender.name
         let device = DiscoveredComma(id: key(sender), name: String(name.prefix(80)), address: address)
@@ -133,6 +135,15 @@ final class LANDiscovery: NSObject, ObservableObject, @preconcurrency NetService
         onEvent?("Local Wi-Fi discovery found Galaxy at \(address):8082")
         onDevicesChanged?()
     }
+    // Snapshot only: avoid public cellular/VPN addresses and do not collect SSIDs.
+    static func privateInterfaceDiagnostics() -> String {
+        let entries = networkSignature().split(separator: ",").filter { entry in
+            guard let separator = entry.firstIndex(of: ":") else { return false }
+            return (try? LANTransport.endpoint(String(entry[entry.index(after: separator)...]))) != nil
+        }
+        return entries.isEmpty ? "none" : entries.prefix(8).joined(separator: ",")
+    }
+
     static func networkSignature() -> String {
         var interfaces: UnsafeMutablePointer<ifaddrs>?
         guard getifaddrs(&interfaces) == 0 else { return "" }

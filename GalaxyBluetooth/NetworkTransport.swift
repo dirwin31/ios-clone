@@ -171,7 +171,7 @@ final class LANTransport: ObservableObject, GalaxyRequestTransport {
         let attempt = probeNumber, started = ProcessInfo.processInfo.systemUptime
         let wasConnected = connected
         let sampleProbe = !wasConnected || attempt % 20 == 0
-        if sampleProbe { onDiagnostic?("LAN probe \(attempt) started; previously verified=\(wasConnected)") }
+        if sampleProbe { onDiagnostic?("LAN probe \(attempt) started; endpoint=\(endpoint?.host ?? "none"):8082; previously verified=\(wasConnected)") }
         defer {
             if sampleProbe || !connected || Task.isCancelled || expectedGeneration != generation {
                 onDiagnostic?("LAN probe \(attempt) finished; elapsed=\(String(format: "%.3f", ProcessInfo.processInfo.systemUptime - started))s; cancelled=\(Task.isCancelled); superseded=\(expectedGeneration != generation); verified=\(connected)")

@@ -15,6 +15,16 @@ final class PrivateLANHTTP {
     private var phase = "connecting"
     private var receivedBytes = 0
     private var networkFailure = "none"
+    private var transitions: [String] = []
+    private func recordState(_ state: String) {
+        guard transitions.count < 8 else { return }
+        transitions.append("\(String(format: "%.2f", ProcessInfo.processInfo.systemUptime - started))s:\(state)")
+    }
+    private var pathDetail: String {
+        guard let path = connection.currentPath else { return "unavailable" }
+        let interfaces = path.availableInterfaces.map { "\($0.name):\($0.type)" }.joined(separator: ",")
+        return "status=\(path.status); unsatisfied=\(path.unsatisfiedReason); interfaces=\(interfaces); IPv4=\(path.supportsIPv4); IPv6=\(path.supportsIPv6); expensive=\(path.isExpensive); constrained=\(path.isConstrained)"
+    }
     private let started = ProcessInfo.processInfo.systemUptime
     private let request: URLRequest
     private init(_ request: URLRequest, limit: Int, host: String) {
@@ -45,11 +55,13 @@ final class PrivateLANHTTP {
             Task { @MainActor in
                 guard let self, !self.finished else { return }
                 switch state {
-                case .ready: self.phase = "sending"; self.send()
-                case .failed(let error): self.networkFailure = Self.networkCode(error); self.finish(.failure(URLError(.cannotConnectToHost)))
-                case .waiting(let error): self.networkFailure = Self.networkCode(error)
-                case .cancelled: self.finish(.failure(URLError(.networkConnectionLost)))
-                default: break
+                case .ready: self.recordState("ready"); self.phase = "sending"; self.send()
+                case .failed(let error): self.recordState("failed:" + Self.networkCode(error)); self.networkFailure = Self.networkCode(error); self.finish(.failure(URLError(.cannotConnectToHost)))
+                case .waiting(let error): self.recordState("waiting:" + Self.networkCode(error)); self.networkFailure = Self.networkCode(error)
+                case .cancelled: self.recordState("cancelled"); self.finish(.failure(URLError(.networkConnectionLost)))
+                case .preparing: self.recordState("preparing")
+                case .setup: self.recordState("setup")
+                @unknown default: break
                 }
             }
         }
@@ -74,7 +86,7 @@ final class PrivateLANHTTP {
         connection.send(content: body, completion: .contentProcessed { [weak self] error in
             Task { @MainActor in
                 guard let self, !self.finished else { return }
-                if error != nil { self.finish(.failure(URLError(.networkConnectionLost))) }
+                if let error { self.networkFailure = Self.networkCode(error); self.finish(.failure(URLError(.networkConnectionLost))) }
                 else { self.phase = "receiving"; self.receive() }
             }
         })
@@ -98,10 +110,11 @@ final class PrivateLANHTTP {
     }
     private func finish(_ result: Result<(Data, HTTPURLResponse), Error>) {
         guard !finished else { return }
+        let pathContext = pathDetail
         finished = true; timeout?.cancel(); connection.stateUpdateHandler = nil; connection.cancel()
         let callback = continuation; continuation = nil
         if case .failure(let error) = result, let urlError = error as? URLError {
-            let detail = "phase=\(phase); elapsed=\(String(format: "%.2f", ProcessInfo.processInfo.systemUptime - started))s; received=\(receivedBytes); network=\(networkFailure); \(parser.diagnosticSummary)"
+            let detail = "endpoint=\(request.url?.host ?? "none"):8082; method=\(request.httpMethod ?? "GET"); request=\(SecretGoodGalaxy.diagnosticPath(request.url?.path ?? "")); deadline=\(request.timeoutInterval)s; states=\(transitions.joined(separator: ",")); path={\(pathContext)}; phase=\(phase); elapsed=\(String(format: "%.2f", ProcessInfo.processInfo.systemUptime - started))s; received=\(receivedBytes); network=\(networkFailure); \(parser.diagnosticSummary)"
             callback?.resume(throwing: URLError(urlError.code, userInfo: ["StarPilotLANContext": detail]))
         } else { callback?.resume(with: result) }
     }
