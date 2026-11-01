@@ -195,7 +195,7 @@ test('build notice selects one owned thread, mentions reporter and maintainer, a
  globalThis.fetch=async(url,options)=>{
   if(options.method!=='POST')return Response.json({guild_id:'333'});
   posts++;assert.equal(new URL(url).searchParams.get('thread_id'),'222');assert.equal(new URL(url).searchParams.get('wait'),'true');
-  const p=JSON.parse(options.body);assert.deepEqual(p.allowed_mentions,{parse:[],users:['789',env.REPORT_MAINTAINER_ID]});assert.equal(p.thread_name,undefined);assert.equal(p.files,undefined);assert.ok(p.content.includes('build 79'));return Response.json({id:'888',channel_id:'222'});
+  const p=JSON.parse(options.body);assert.deepEqual(p.allowed_mentions,{parse:[],users:['789',env.REPORT_MAINTAINER_ID]});assert.equal(p.thread_name,undefined);assert.equal(p.files,undefined);assert.ok(p.content.includes('Build 79'));return Response.json({id:'888',channel_id:'222'});
  };
  try{
   assert.equal((await (await reports.fetch(request('/build-notice-status',notice))).json()).state,'pending');assert.equal(posts,0);
@@ -256,7 +256,7 @@ test('archive notice does not claim TestFlight access',async()=>{
  const old=globalThis.fetch;let posted=false;
  globalThis.fetch=async(url,options)=>{
   if(options.method!=='POST')return Response.json({guild_id:'333'});
-  const p=JSON.parse(options.body);assert.ok(p.content.includes('has archived successfully'));assert.ok(p.content.includes('testing-group assignment'));assert.ok(!p.content.includes('is ready in TestFlight'));posted=true;
+  const p=JSON.parse(options.body);assert.ok(p.content.includes('Build 79 archived.'));assert.ok(!p.content.includes('TestFlight'));assert.ok(!p.content.includes('is ready in TestFlight'));posted=true;
   return Response.json({id:'888',channel_id:'222'});
  };
  try{const r=new Reports({storage:await noticeStore()},env);assert.equal((await (await r.fetch(request('/build-notice',{...notice,stage:'archived'}))).json()).state,'sent');assert.ok(posted);}finally{globalThis.fetch=old;}

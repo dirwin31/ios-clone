@@ -59,8 +59,8 @@ only this per-report message and does not append general release notes.
 
 First leave `ready:false`. Verify `/release-status` shows `pending`, then verify
 the selected milestone: `stage:"archived"` requires a successful Apple archive;
-omitting stage (or `stage:"testflight"`) requires availability to the recipient's TestFlight group. Archived notices explicitly say access may still require
-processing, review, or group assignment.
+omitting stage (or `stage:"testflight"`) requires availability to the recipient's TestFlight group. Notices use a short “Build N archived” or “Build N ready” heading.
+Keep the body to the relevant fix and one brief retest request; omit TestFlight boilerplate.
 Only then set `ready:true` in the binding. This readiness step is performed by the
 release operator; Apple webhooks are not configured. A five-minute Cron Trigger
 sends selected ready notifications. New schedules can take time to propagate.

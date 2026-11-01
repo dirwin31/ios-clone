@@ -294,8 +294,8 @@ export class Reports {
     });
     if (!reserved) return json({state:(await storage.get(key)).state});
     const users = [...new Set([notice.userID, maintainer])];
-    const milestone = notice.stage === 'archived' ? 'has archived successfully. TestFlight access may still require processing, review, or testing-group assignment.' : 'is ready in TestFlight.';
-    const payload = {content: `${users.map(id => `<@${id}>`).join(' ')}\nStarPilot ${notice.version} (build ${notice.build}) ${milestone}\n\n${notice.message.trim()}`,
+    const milestone = notice.stage === 'archived' ? 'archived' : 'ready';
+    const payload = {content: `${users.map(id => `<@${id}>`).join(' ')}\nBuild ${notice.build} ${milestone}.\n\n${notice.message.trim()}`,
       allowed_mentions:{parse:[], users}};
     webhook.searchParams.set('thread_id', match[2]);
     webhook.searchParams.set('wait', 'true');
