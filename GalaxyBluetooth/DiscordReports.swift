@@ -56,27 +56,14 @@ enum DiagnosticReportBudget {
     }
 }
 
-private struct PendingDiscordReport: Codable {
+private struct PendingDiscordReport {
     let description: String
     let logs: String
     let reference: String
     let userID: String
     let created: Date
     var threadID: String? = nil
-    static var url: URL {
-        URL.applicationSupportDirectory.appendingPathComponent("PendingDiscordReport.json")
-    }
-    static func load() -> Self? {
-        guard let data = try? Data(contentsOf: url) else { return nil }
-        return try? JSONDecoder().decode(Self.self, from: data)
-    }
-    func save() throws {
-        try FileManager.default.createDirectory(at: Self.url.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try JSONEncoder().encode(self).write(to: Self.url, options: [.atomic, .completeFileProtection])
-        var url = Self.url
-        var values = URLResourceValues(); values.isExcludedFromBackup = true
-        try url.setResourceValues(values)
-    }
+
 }
 
 struct DiscordReportItem: Identifiable { let id: String; let title: String }
@@ -88,6 +75,7 @@ final class DiscordReports: NSObject, ObservableObject, ASWebAuthenticationPrese
     @Published var status = ""
     @Published var threadURL: URL?
     @Published var reports: [DiscordReportItem] = []
+    fileprivate var pendingReport: PendingDiscordReport?
     private var session: ASWebAuthenticationSession?
     private var credentials: DiscordCredentials?
     private let base = "https://starpilot-log-relay.nathan-g-hubbard.workers.dev"
@@ -95,6 +83,8 @@ final class DiscordReports: NSObject, ObservableObject, ASWebAuthenticationPrese
     private let account = "oauth"
     override init() {
         super.init()
+        // Migrate away from drafts saved by older versions.
+        try? FileManager.default.removeItem(at: URL.applicationSupportDirectory.appendingPathComponent("PendingDiscordReport.json"))
         let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service,
             kSecAttrAccount as String: account, kSecReturnData as String: true]
         var result: CFTypeRef?
@@ -197,12 +187,12 @@ final class DiscordReports: NSObject, ObservableObject, ASWebAuthenticationPrese
             }
             let payload = ["description": description, "logs": logs, "reference": reference]
             guard try JSONSerialization.data(withJSONObject: payload).count <= DiagnosticReportBudget.maximumBytes else { throw ReportError("This report is too large. Use Share diagnostics instead.") }
-            if let pending = PendingDiscordReport.load() {
+            if let pending = pendingReport {
                 guard pending.reference == reference, pending.description == description, pending.logs == logs, pending.threadID == threadID else { throw ReportError("Reopen the report to retry the saved submission.") }
                 guard pending.userID == credentials.userID else { throw ReportError("Reconnect the Discord account used for this report, or discard it first.") }
                 guard pending.created.timeIntervalSinceNow > -6 * 24 * 3600 else { throw ReportError("This saved report is too old to retry safely. Check Discord, then discard it before starting another.") }
             } else {
-                try PendingDiscordReport(description: description, logs: logs, reference: reference, userID: credentials.userID, created: Date(), threadID: threadID).save()
+                pendingReport = PendingDiscordReport(description: description, logs: logs, reference: reference, userID: credentials.userID, created: Date(), threadID: threadID)
             }
             var body = ["description": description, "logs": logs, "reference": reference]
             if let threadID { body["threadID"] = threadID }
@@ -211,7 +201,7 @@ final class DiscordReports: NSObject, ObservableObject, ASWebAuthenticationPrese
                   let url = URL(string: raw), url.scheme == "https", url.host == "discord.com", url.path.hasPrefix("/channels/") else {
                 throw ReportError("Delivery wasn’t confirmed. Check Discord before sending another report.")
             }
-            try? FileManager.default.removeItem(at: PendingDiscordReport.url)
+            pendingReport = nil
             threadURL = url; status = "Report sent. Open the post to follow replies."
         } catch { status = error.localizedDescription }
     }
@@ -284,11 +274,14 @@ struct DiscordReportSheet: View {
     @Environment(\.colorScheme) private var colorScheme
     private let brandPurple = Color(red: 139.0 / 255, green: 92.0 / 255, blue: 246.0 / 255)
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var visitEnded = false
     @State private var description = ""
     @State private var descriptionFocused = false
     @State private var attempted = false
     @State private var reference = UUID().uuidString
     let logs: String
+    let captureLogs: () -> String
     let onSent: () -> Void
     @State private var showSendError = false
     @State private var sendError = ""
@@ -299,6 +292,9 @@ struct DiscordReportSheet: View {
     @State private var loadedReports = false
     @State private var preparedLogs: String?
     private var reportLogs: String { restoredLogs ?? preparedLogs ?? logs }
+    private var captureDetails: String {
+        reportLogs.components(separatedBy: "\n").prefix(4).filter { $0.hasPrefix("App:") || $0.hasSuffix("Z") }.joined(separator: " · ")
+    }
     var body: some View {
         NavigationStack {
             Form {
@@ -333,6 +329,13 @@ struct DiscordReportSheet: View {
                         Text("Report titles and thread IDs are saved with your Discord account so you can follow up. Older reports may not be listed.").font(.caption).foregroundStyle(.secondary)
                     }
                 }
+                if attempted {
+                    Section("Current attempt — original diagnostics") {
+                        Text(captureDetails).font(.footnote)
+                        Text("Retry uses this attempt’s original description and logs. Closing this form or leaving the app clears the draft; your next report starts fresh.")
+                        Button("Start new report with fresh logs") { confirmDiscard = true }.disabled(discord.busy)
+                    }
+                }
                 Section("What happened?") {
                     ReportTextEditor(text: $description, isFocused: $descriptionFocused, editable: !attempted)
                         .frame(minHeight: 120)
@@ -351,10 +354,10 @@ struct DiscordReportSheet: View {
                     if let url = discord.threadURL {
                         Link("Open in Discord", destination: url)
                     } else if attempted {
-                        Text("Use Send to check or retry this report.").font(.footnote).foregroundStyle(.secondary)
+                        Text("Use Retry to check or retry the original report.").font(.footnote).foregroundStyle(.secondary)
                     }
                     if attempted && discord.threadURL == nil {
-                        Button("Discard saved report", role: .destructive) { confirmDiscard = true }.disabled(discord.busy)
+                        Button("Start new report with fresh logs") { confirmDiscard = true }.disabled(discord.busy)
                     }
                     if !discord.status.isEmpty { Text(LocalizedStringKey(discord.status)).font(.callout).accessibilityIdentifier("discord-report-status") }
                 }
@@ -368,7 +371,7 @@ struct DiscordReportSheet: View {
                 .toolbar {
                     ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() }.disabled(discord.busy) }
                     ToolbarItem(placement: .confirmationAction) {
-                        Button(discord.threadURL != nil ? "Done" : "Send") {
+                        Button(discord.threadURL != nil ? "Done" : (attempted ? "Retry" : "Send")) {
                             if discord.threadURL != nil { dismiss() } else {
                                 guard !reportLogs.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
                                     discord.status = "Diagnostics weren’t captured. Close this form and open Report a problem again."
@@ -378,10 +381,12 @@ struct DiscordReportSheet: View {
                                 descriptionFocused = false; attempted = true
                                 Task {
                                     await discord.send(description: description, logs: reportLogs, reference: reference, threadID: selectedThread.isEmpty ? nil : selectedThread)
+                                    guard !visitEnded else { return }
                                     if discord.threadURL != nil {
                                         dismiss()
                                         onSent()
                                     } else {
+                                        attempted = discord.pendingReport != nil
                                         sendError = discord.status
                                         showSendError = true
                                     }
@@ -402,15 +407,12 @@ struct DiscordReportSheet: View {
                 } message: {
                     Text("Sign in to identify your report and open its support thread in Discord. Your diagnostics are only sent when you submit the report.")
                 }
-                .confirmationDialog("Discard this saved report? Check Discord first—it may already have been delivered.", isPresented: $confirmDiscard, titleVisibility: .visible) {
-                    Button("Discard saved report", role: .destructive) {
-                        do {
-                            if FileManager.default.fileExists(atPath: PendingDiscordReport.url.path) {
-                                try FileManager.default.removeItem(at: PendingDiscordReport.url)
-                            }
-                            attempted = false; description = ""; restoredLogs = nil
-                            reference = UUID().uuidString; discord.status = ""
-                        } catch { discord.status = "Couldn’t discard the saved report. Try again." }
+                .confirmationDialog("Start a new report? The previous report may already be in Discord. This captures fresh logs and creates a separate submission.", isPresented: $confirmDiscard, titleVisibility: .visible) {
+                    Button("Start new report", role: .destructive) {
+                        discord.pendingReport = nil
+                        preparedLogs = DiagnosticReportBudget.fit(captureLogs())
+                        attempted = false; restoredLogs = nil
+                        reference = UUID().uuidString; discord.status = "Fresh diagnostics captured. Review and edit your description before sending."
                     }
                 }
                 .onChange(of: discord.busy) { _, busy in
@@ -419,26 +421,17 @@ struct DiscordReportSheet: View {
                 .onChange(of: discord.connected) { _, connected in
                     if !connected { loadedReports = false; if !attempted { selectedThread = "" } }
                 }
+                .onChange(of: scenePhase) { _, phase in
+                    if phase == .background {
+                        visitEnded = true
+                        discord.pendingReport = nil
+                        dismiss()
+                    }
+                }
                 .onAppear {
                     if preparedLogs == nil { preparedLogs = DiagnosticReportBudget.fit(logs) }
                     if discord.connected { loadedReports = true; Task { await discord.loadReports() } }
-                    if let pending = PendingDiscordReport.load() {
-                        description = pending.description; selectedThread = pending.threadID ?? ""
-                        if pending.logs.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                            // The relay rejects empty diagnostics before reserving or posting a report.
-                            // Keep the description, but replace this unsendable capture with fresh logs.
-                            do {
-                                try FileManager.default.removeItem(at: PendingDiscordReport.url)
-                                discord.status = "Diagnostics refreshed. Your report is ready to send."
-                            } catch {
-                                restoredLogs = pending.logs; reference = pending.reference; attempted = true
-                                discord.status = "Couldn’t refresh the saved report. Discard it before trying again."
-                            }
-                        } else {
-                            restoredLogs = pending.logs; reference = pending.reference; attempted = true
-                            discord.status = "Your previous report is awaiting confirmation. Retry to check its delivery without creating a duplicate."
-                        }
-                    }
+
                 }
         }
     }

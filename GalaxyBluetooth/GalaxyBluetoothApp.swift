@@ -886,7 +886,7 @@ struct GalaxyRootView: View {
                 select(.connections)
             }
         }) { capture in
-            DiscordReportSheet(logs: capture.logs) { reportWasSent = true }
+            DiscordReportSheet(logs: capture.logs, captureLogs: captureReportLogs) { reportWasSent = true }
         }
         .sheet(isPresented: $model.showAudioPairing, onDismiss: { model.audioPairing.dismiss() }) {
             AudioPairingSheet(pairing: model.audioPairing) { model.showAudioPairing = false }
@@ -930,11 +930,13 @@ struct GalaxyRootView: View {
     }
     private func presentReport() {
         reportWasSent = false
-        let logs = [model.connectionLog.report(model: model),
+        discordReport = ReportCapture(logs: captureReportLogs())
+    }
+    private func captureReportLogs() -> String {
+        [model.connectionLog.report(model: model),
                     model.galaxyPage.report(server: model.server, connection: model.transport.label),
                     model.diagnostics.diagnosticLog(),
                     "Galaxy screen updates\n" + model.assets.status].joined(separator: "\n\n")
-        discordReport = ReportCapture(logs: logs)
     }
     private func select(_ requestedTab: CompanionTab) {
         let tab = (requestedTab.isDeveloperPage && !model.developerMode) || (requestedTab == .navigation && !model.navigationEnabled) ? (model.opened ? CompanionTab.galaxy : .connections) : requestedTab
