@@ -31,6 +31,31 @@ final class BluetoothTransport: NSObject, ObservableObject, GalaxyRequestTranspo
     }
 
     private var failedConnections = 0
+    private var reconnectNotBefore: TimeInterval = 0
+    private var connectionAttempt = 0
+    private var connectionPhase = "idle"
+    private var connectionStarted: TimeInterval = 0
+    private var phaseStarted: TimeInterval = 0
+
+    private func recordConnectionFailure(now: TimeInterval = ProcessInfo.processInfo.systemUptime) {
+        failedConnections = min(failedConnections + 1, 4)
+        reconnectNotBefore = now + reconnectDelay
+    }
+
+    private func beginConnectionPhase(_ phase: String) {
+        connectionPhase = phase
+        phaseStarted = ProcessInfo.processInfo.systemUptime
+        onEvent?("Bluetooth setup: attempt=\(connectionAttempt); phase=\(phase); elapsed=\(String(format: "%.2f", phaseStarted - connectionStarted))s")
+        connectionTimeout?.cancel()
+        let attempt = connectionAttempt
+        connectionTimeout = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 20_000_000_000)
+            guard !Task.isCancelled, let self, !self.connected,
+                  self.connectionAttempt == attempt, self.connectionPhase == phase else { return }
+            self.failConnection("Bluetooth connection timed out during \(phase). Check that the comma bridge is available.")
+        }
+    }
+
     var reconnectDelay: TimeInterval { min(25, 3 * pow(2, Double(min(failedConnections, 3)))) }
     private var central: CBCentralManager!
     private var peripherals: [UUID: CBPeripheral] = [:]
@@ -89,7 +114,7 @@ final class BluetoothTransport: NSObject, ObservableObject, GalaxyRequestTranspo
     private var lastReconnectReason = ""
     var diagnosticSummary: String {
         let saved = UserDefaults.standard.string(forKey: "galaxy.bluetooth.device")
-        return "state=\(central.state.rawValue); saved device=\(saved != nil); saved ID valid=\(saved.flatMap(UUID.init(uuidString:)) != nil); scanning=\(isScanning); connecting=\(connecting); verified=\(connected); paired handshake=\(pairingVerified); recovery scan=\(reconnectTarget != nil); failed connections=\(failedConnections); queued requests=\(queue.count); request active=\(active != nil); RX=\(rx != nil); TX=\(tx != nil); read stream=\(supportsReadStream); notifications=\(supportsNotifications); last reconnect=\(lastReconnectReason)"
+        return "attempt=\(connectionAttempt); phase=\(connectionPhase); retry wait=\(String(format: "%.1f", max(0, reconnectNotBefore - ProcessInfo.processInfo.systemUptime)))s; state=\(central.state.rawValue); saved device=\(saved != nil); saved ID valid=\(saved.flatMap(UUID.init(uuidString:)) != nil); scanning=\(isScanning); connecting=\(connecting); verified=\(connected); paired handshake=\(pairingVerified); recovery scan=\(reconnectTarget != nil); failed connections=\(failedConnections); queued requests=\(queue.count); request active=\(active != nil); RX=\(rx != nil); TX=\(tx != nil); read stream=\(supportsReadStream); notifications=\(supportsNotifications); last reconnect=\(lastReconnectReason)"
     }
     private func reconnectDecision(_ reason: String) {
         guard reason != lastReconnectReason else { return }
@@ -98,6 +123,9 @@ final class BluetoothTransport: NSObject, ObservableObject, GalaxyRequestTranspo
     }
     func reconnectSaved(pairingKey: String) {
         guard !connected, !connecting, !isScanning else { return }
+        guard ProcessInfo.processInfo.systemUptime >= reconnectNotBefore else {
+            reconnectDecision("waiting after failed connection; failures=\(failedConnections)"); return
+        }
         guard central.state == .poweredOn else { reconnectDecision("waiting for powered-on Bluetooth; state=\(central.state.rawValue)"); return }
         guard let bytes = Data(hex: pairingKey), bytes.count == 32 else {
             status = "Bluetooth app pairing is missing. Connect over Local Wi-Fi and choose Pair Bluetooth with comma."
@@ -172,18 +200,20 @@ final class BluetoothTransport: NSObject, ObservableObject, GalaxyRequestTranspo
         connecting = true
         status = "Connecting to \(device.name)…"
         onEvent?("Starting Bluetooth connection")
+        connectionAttempt += 1
+        connectionStarted = ProcessInfo.processInfo.systemUptime
+        beginConnectionPhase("link")
         central.connect(found, options: nil)
-        connectionTimeout = Task { @MainActor [weak self] in
-            try? await Task.sleep(nanoseconds: 20_000_000_000)
-            guard !Task.isCancelled, let self, !self.connected else { return }
-            self.failConnection("Bluetooth connection timed out. Check the comma bridge and pairing key.")
-        }
     }
 
     func disconnect(reason: String = "Bluetooth connection closed") {
         connectionFailed = false
         reconnectTarget = nil
-        let wasConnected = connected
+        let hadConnection = connected || connecting || peripheral != nil
+        if hadConnection {
+            let now = ProcessInfo.processInfo.systemUptime
+            onEvent?("\(reason); attempt=\(connectionAttempt); phase=\(connectionPhase); verified=\(connected); elapsed=\(String(format: "%.2f", now - connectionStarted))s; phase elapsed=\(String(format: "%.2f", now - phaseStarted))s; active request=\(active != nil); queued=\(queue.count); RX=\(rx != nil); TX=\(tx != nil); handshake=\(pairingVerified); retry wait=\(String(format: "%.1f", max(0, reconnectNotBefore - now)))s")
+        }
         central.stopScan()
         scanTimeout?.cancel()
         connectionTimeout?.cancel()
@@ -206,11 +236,11 @@ final class BluetoothTransport: NSObject, ObservableObject, GalaxyRequestTranspo
         activeNotifications = false
         pairingVerified = false
         notificationBuffer = []
-        if wasConnected { onEvent?(reason) }
+        connectionPhase = "idle"
     }
 
     private func failConnection(_ message: String) {
-        failedConnections = min(failedConnections + 1, 4)
+        recordConnectionFailure()
         if Self.shouldPauseFastReads(method: active?.method, notifications: activeNotifications,
                                      cancelled: message.lowercased().contains("cancelled")) {
             fastReadFallback = true
@@ -433,17 +463,25 @@ final class BluetoothTransport: NSObject, ObservableObject, GalaxyRequestTranspo
 
     func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
         guard peripheral == self.peripheral else { return }
+        beginConnectionPhase("services")
         onEvent?("Bluetooth link established; discovering Galaxy service")
+        peripheral.readRSSI()
         peripheral.discoverServices([CBUUID(string: Wire.service)])
+    }
+
+    func peripheral(_ peripheral: CBPeripheral, didReadRSSI RSSI: NSNumber, error: Error?) {
+        guard peripheral == self.peripheral else { return }
+        onEvent?("Bluetooth signal: attempt=\(connectionAttempt); phase=\(connectionPhase); RSSI=\(RSSI.intValue); result=\(error.map { LANTransport.failureCode($0) } ?? "ok")")
     }
 
     func centralManager(_ central: CBCentralManager, didFailToConnect peripheral: CBPeripheral, error: Error?) {
         guard peripheral == self.peripheral else { return }
-        failConnection(error?.localizedDescription ?? "Could not connect to your comma.")
+        failConnection("Bluetooth operation failed: connect callback; \(error.map { LANTransport.failureCode($0) } ?? "no OS error supplied")")
     }
 
     func centralManager(_ central: CBCentralManager, didDisconnectPeripheral peripheral: CBPeripheral, error: Error?) {
         guard peripheral == self.peripheral else { return }
+        recordConnectionFailure()
         disconnect(reason: "Bluetooth peer disconnected: \(error.map { LANTransport.failureCode($0) } ?? "no OS error supplied")")
         connectionFailed = error != nil && central.state == .poweredOn
         status = error?.localizedDescription ?? "Your comma disconnected. Scan to reconnect."
@@ -452,21 +490,23 @@ final class BluetoothTransport: NSObject, ObservableObject, GalaxyRequestTranspo
     func peripheral(_ peripheral: CBPeripheral, didDiscoverServices error: Error?) {
         guard peripheral == self.peripheral else { return }
         guard error == nil, let service = peripheral.services?.first(where: { $0.uuid == CBUUID(string: Wire.service) }) else {
-            failConnection("StarPilot BT service was not found."); return
+            failConnection("Bluetooth operation failed: service discovery; \(error.map { LANTransport.failureCode($0) } ?? "required service missing")"); return
         }
+        beginConnectionPhase("characteristics")
         onEvent?("Bluetooth Galaxy service found; discovering characteristics")
         peripheral.discoverCharacteristics([CBUUID(string: Wire.rx), CBUUID(string: Wire.tx), CBUUID(string: Wire.info), CBUUID(string: Wire.notify)], for: service)
     }
 
     func peripheral(_ peripheral: CBPeripheral, didDiscoverCharacteristicsFor service: CBService, error: Error?) {
         guard peripheral == self.peripheral else { return }
-        guard error == nil else { failConnection(error!.localizedDescription); return }
+        guard error == nil else { failConnection("Bluetooth operation failed: characteristics; \(LANTransport.failureCode(error!))"); return }
         rx = service.characteristics?.first { $0.uuid == CBUUID(string: Wire.rx) }
         tx = service.characteristics?.first { $0.uuid == CBUUID(string: Wire.tx) }
         notify = service.characteristics?.first { $0.uuid == CBUUID(string: Wire.notify) }
         guard rx != nil, tx != nil, let info = service.characteristics?.first(where: { $0.uuid == CBUUID(string: Wire.info) }) else {
             failConnection("The comma bridge has incompatible Bluetooth characteristics."); return
         }
+        beginConnectionPhase("challenge")
         onEvent?("Bluetooth characteristics ready; reading handshake challenge")
         peripheral.readValue(for: info)
     }
@@ -500,7 +540,9 @@ final class BluetoothTransport: NSObject, ObservableObject, GalaxyRequestTranspo
             return
         }
         if characteristic.uuid == CBUUID(string: Wire.info) {
+            guard connectionPhase == "challenge" else { return }
             guard data.count == 17, data.first == 1 else { failConnection("Unsupported bridge protocol."); return }
+            beginConnectionPhase("authentication")
             session = Data(data.dropFirst()).hex
             let handshakeSession = session
             status = "Verifying the pairing key…"
@@ -519,6 +561,7 @@ final class BluetoothTransport: NSObject, ObservableObject, GalaxyRequestTranspo
                     self.supportsReadStream = health.readStream == true
                     self.pairingVerified = true
                     if health.notificationStream == true, let notify = self.notify, notify.properties.contains(.notify) {
+                        self.beginConnectionPhase("notification subscription")
                         self.status = "Enabling fast Bluetooth transfers…"
                         peripheral.setNotifyValue(true, for: notify)
                     } else {
@@ -567,10 +610,13 @@ final class BluetoothTransport: NSObject, ObservableObject, GalaxyRequestTranspo
         connectionTimeout?.cancel()
         if let peripheral { UserDefaults.standard.set(peripheral.identifier.uuidString, forKey: "galaxy.bluetooth.device") }
         failedConnections = 0
+        reconnectNotBefore = 0
+        connectionPhase = "ready"
+        phaseStarted = ProcessInfo.processInfo.systemUptime
         connected = true
         connecting = false
         status = supportsNotifications ? "Connected with fast Bluetooth transfers" : "Connected over Bluetooth"
-        onEvent?("Bluetooth encrypted handshake completed")
+        onEvent?("Bluetooth encrypted handshake completed; attempt=\(connectionAttempt); elapsed=\(String(format: "%.2f", ProcessInfo.processInfo.systemUptime - connectionStarted))s")
     }
 
     func peripheral(_ peripheral: CBPeripheral, didUpdateNotificationStateFor characteristic: CBCharacteristic, error: Error?) {

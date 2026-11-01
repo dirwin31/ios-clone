@@ -27,6 +27,8 @@ class Probe {
     var central = Central()
     var connected = false, connecting = false, isScanning = false
     var status = "", lastReconnectReason = ""
+    var reconnectNotBefore: TimeInterval = 0
+    var failedConnections = 0
     var reconnectTarget: (id: UUID, key: String)?
     var onEvent: ((String) -> Void)?
     var peripherals: [UUID: Peripheral] = [:]
@@ -59,6 +61,13 @@ tests = r'''
         recovery.discovered(saved)
         precondition(recovery.connects == [saved] && recovery.reconnectTarget == nil)
         precondition(!events.joined().contains(key))
+        let cooling = Probe(); cooling.central.cached = [Peripheral(saved)]
+        cooling.reconnectNotBefore = ProcessInfo.processInfo.systemUptime + 24
+        cooling.reconnectSaved(pairingKey: key)
+        precondition(cooling.connects.isEmpty && cooling.central.lookups == 0, "Wait after failure, even when the previous attempt took longer than the retry delay")
+        cooling.reconnectNotBefore = 0
+        cooling.reconnectSaved(pairingKey: key)
+        precondition(cooling.connects == [saved])
         let missing = Probe(); missing.reconnectSaved(pairingKey: "")
         precondition(missing.scans == 0 && missing.central.lookups == 0 && missing.status.contains("pairing"))
         UserDefaults.standard.saved = nil
