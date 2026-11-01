@@ -47,6 +47,16 @@ same build may select several reports, or none. Never enumerate open reports to
 choose recipients. The authenticated Cloudflare administration interface is the
 only way to register selections; there is no public send endpoint.
 
+Write each entry's `message` specifically for the selected report. Include only
+changes that address that reported issue, relevant diagnostic improvements, and
+what that reporter should retest. Never copy the full build changelog or include
+unrelated features, fixes, or other requests from the maintainer. When one build
+addresses several reports, write a separate relevant message for each thread.
+Check the message against the original report before setting `ready:true`; if a
+change's relevance is unclear, omit it. Describe unverified fixes as changes to
+test, not a guarantee that the reporter's problem is resolved. The notifier uses
+only this per-report message and does not append general release notes.
+
 First leave `ready:false`. Verify `/release-status` shows `pending`, then verify
 that the exact build is available in TestFlight for the recipient's testing group.
 Only then set `ready:true` in the binding. This readiness step is performed by the
