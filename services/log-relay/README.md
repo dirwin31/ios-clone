@@ -37,7 +37,7 @@ Tell the release operator which report(s) a build addresses. The operator regist
 an explicit selection in the Cloudflare `BUILD_NOTIFICATIONS` JSON text binding:
 
 ```json
-[{"userID":"DISCORD_USER_ID","reference":"REPORT_UUID","version":"1.0.3","build":"79","ready":false,"message":"Please test the connection again and reply here with the result."}]
+[{"userID":"DISCORD_USER_ID","reference":"REPORT_UUID","version":"1.0.3","build":"79","ready":false,"message":"Includes updated Bluetooth connection diagnostics."}]
 ```
 
 Use actual IDs; placeholders fail validation. This is server configuration, not
@@ -48,8 +48,9 @@ choose recipients. The authenticated Cloudflare administration interface is the
 only way to register selections; there is no public send endpoint.
 
 Write each entry's `message` specifically for the selected report. Include only
-changes that address that reported issue, relevant diagnostic improvements, and
-what that reporter should retest. Never copy the full build changelog or include
+changes that address that reported issue, and relevant diagnostic improvements.
+Notifications are informational only: never ask the recipient to retest, reply,
+submit a report, or take any action. Never copy the full build changelog or include
 unrelated features, fixes, or other requests from the maintainer. When one build
 addresses several reports, write a separate relevant message for each thread.
 Check the message against the original report before setting `ready:true`; if a
@@ -60,7 +61,7 @@ only this per-report message and does not append general release notes.
 First leave `ready:false`. Verify `/release-status` shows `pending`, then verify
 the selected milestone: `stage:"archived"` requires a successful Apple archive;
 omitting stage (or `stage:"testflight"`) requires availability to the recipient's TestFlight group. Notices use a short “Build N archived” or “Build N ready” heading.
-Keep the body to the relevant fix and one brief retest request; omit TestFlight boilerplate.
+Keep the body to a brief description of the relevant change; omit requests and TestFlight boilerplate.
 Only then set `ready:true` in the binding. This readiness step is performed by the
 release operator; Apple webhooks are not configured. A five-minute Cron Trigger
 sends selected ready notifications. New schedules can take time to propagate.
