@@ -112,6 +112,10 @@ final class BluetoothTransport: NSObject, ObservableObject, GalaxyRequestTranspo
 
     private var reconnectTarget: (id: UUID, key: String)?
     private var lastReconnectReason = ""
+    var hasSavedDevice: Bool {
+        guard let value = UserDefaults.standard.string(forKey: "galaxy.bluetooth.device") else { return false }
+        return UUID(uuidString: value) != nil
+    }
     var diagnosticSummary: String {
         let saved = UserDefaults.standard.string(forKey: "galaxy.bluetooth.device")
         return "attempt=\(connectionAttempt); phase=\(connectionPhase); retry wait=\(String(format: "%.1f", max(0, reconnectNotBefore - ProcessInfo.processInfo.systemUptime)))s; state=\(central.state.rawValue); saved device=\(saved != nil); saved ID valid=\(saved.flatMap(UUID.init(uuidString:)) != nil); scanning=\(isScanning); connecting=\(connecting); verified=\(connected); paired handshake=\(pairingVerified); recovery scan=\(reconnectTarget != nil); failed connections=\(failedConnections); queued requests=\(queue.count); request active=\(active != nil); RX=\(rx != nil); TX=\(tx != nil); read stream=\(supportsReadStream); notifications=\(supportsNotifications); last reconnect=\(lastReconnectReason)"

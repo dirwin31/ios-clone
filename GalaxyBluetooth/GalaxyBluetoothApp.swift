@@ -686,7 +686,9 @@ final class AppModel: ObservableObject {
             }
             return
         }
-        guard phoneActive, wantsConnection, mode == .automatic,
+        // A saved address can belong to a previous hotspot in either Wi-Fi-capable mode.
+        // Keep discovery identity-checked rather than requiring repeated manual attempts.
+        guard phoneActive, wantsConnection, mode != .bluetooth,
               !pairingInProgress, !selectingDiscoveredComma, !lan.connected,
               let identity = lan.expectedDeviceID else { return }
         if !discovery.searching, Date().timeIntervalSince(lastLANDiscovery) >= 20 {
@@ -702,7 +704,7 @@ final class AppModel: ObservableObject {
         automaticLAN = Task { @MainActor in
             defer { self.automaticLAN = nil }
             let stillCurrent = {
-                self.phoneActive && self.wantsConnection && self.mode == .automatic
+                self.phoneActive && self.wantsConnection && self.mode != .bluetooth
                     && !self.pairingInProgress && !self.selectingDiscoveredComma && !self.lan.connected
                     && self.lan.generation == generation && self.lan.expectedDeviceID == identity
             }

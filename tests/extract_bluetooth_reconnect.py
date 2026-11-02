@@ -4,6 +4,13 @@ source = Path('GalaxyBluetooth/BluetoothTransport.swift').read_text()
 start = source.index('    private func reconnectDecision(')
 end = source.index('    func forgetSavedDevice()', start)
 methods = source[start:end]
+property_start = source.index('    var hasSavedDevice: Bool {')
+property_end = source.index('    var diagnosticSummary:', property_start)
+methods = source[property_start:property_end] + methods
+settings = Path('GalaxyBluetooth/ConnectionSettingsView.swift').read_text()
+ui_start = settings.index('    private var needsPairing: Bool {')
+ui_end = settings.index('    private var connecting:', ui_start)
+ui_property = settings[ui_start:ui_end].replace('private var needsPairing', 'var needsPairing')
 probe = r'''
 import Foundation
 struct NearbyDevice { let id: UUID; let name: String; let signal: Int }
@@ -44,6 +51,13 @@ tests = r'''
         reconnectDiscoveredDevice()
     }
 }
+enum Mode { case automatic, bluetooth, lan }
+struct Model { var mode = Mode.bluetooth; var pairingKey = String(repeating: "a", count: 64) }
+struct SettingsProbe {
+    var model = Model()
+    let bluetooth = Probe()
+    UI_PROPERTY
+}
 @main struct ReconnectRegression {
     static func main() {
         let saved = UUID(), other = UUID(), key = String(repeating: "a", count: 64)
@@ -73,6 +87,18 @@ tests = r'''
         UserDefaults.standard.saved = nil
         let noDevice = Probe(); noDevice.reconnectSaved(pairingKey: key)
         precondition(noDevice.scans == 0 && noDevice.status.contains("No saved"))
+        var settings = SettingsProbe()
+        precondition(settings.needsPairing, "A saved key without a peripheral must offer pairing, not a dead-end Connect button")
+        UserDefaults.standard.saved = "invalid"
+        precondition(settings.needsPairing, "An invalid peripheral ID must offer pairing")
+        UserDefaults.standard.saved = saved.uuidString
+        precondition(!settings.needsPairing, "A complete setup must retain reconnect")
+        settings.model.pairingKey = ""
+        precondition(settings.needsPairing, "A peripheral without a key still needs pairing")
+        for mode in [Mode.lan, .automatic] {
+            settings.model.mode = mode
+            precondition(!settings.needsPairing, "Wi-Fi connections must not require Bluetooth setup")
+        }
         UserDefaults.standard.saved = saved.uuidString
         let off = Probe(); off.central.state = .off; off.reconnectSaved(pairingKey: key)
         precondition(off.scans == 0 && off.central.lookups == 0)
@@ -80,4 +106,4 @@ tests = r'''
     }
 }
 '''
-Path(sys.argv[1]).write_text(probe + methods + tests)
+Path(sys.argv[1]).write_text(probe + methods + tests.replace('UI_PROPERTY', ui_property))

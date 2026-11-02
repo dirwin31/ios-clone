@@ -36,7 +36,9 @@ struct ConnectionSettingsView: View {
     private var muted: Color { colorScheme == .dark ? Color(red: 0.70, green: 0.65, blue: 0.77) : Color(red: 0.36, green: 0.29, blue: 0.46) }
     private var connected: Bool { model.transport.connected }
     private var pairing: Bool { model.pairingInProgress }
-    private var needsPairing: Bool { model.mode == .bluetooth && model.pairingKey.isEmpty }
+    private var needsPairing: Bool {
+        model.mode == .bluetooth && (model.pairingKey.isEmpty || !bluetooth.hasSavedDevice)
+    }
     private var connecting: Bool { !connected && (bluetooth.connecting || bluetooth.isScanning) }
     private var primaryTitle: String {
         if pairing { return "Pairing…" }
