@@ -14,6 +14,21 @@ private struct DiscordCredentials: Codable {
 // Budget the encoded request, including JSON escaping, rather than character count.
 enum DiagnosticReportBudget {
     static let maximumBytes = 16 * 1024 * 1024
+    private static let datedEvent = try! NSRegularExpression(pattern: #"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}.* "#)
+    private static let benignStatus = try! NSRegularExpression(pattern:
+        #"\b(?:fail(?:ed|ures?)?|errors?|disconnect(?:ed|s|ions?)?|cancel(?:led|ed|lations?)?|unavailable|unconfirmed|timeouts?)\s*=\s*(?:false|no|none|nil|null|0(?:\.0+)?)(?=$|[\s,;)\]}])"#,
+        options: .caseInsensitive)
+    private static let failureEvent = try! NSRegularExpression(pattern:
+        #"fail|error|disconnect|cancel|unavailable|unconfirmed|did not verify|timeout|timed out|(?:HTTP |→ )[45][0-9]{2}"#,
+        options: .caseInsensitive)
+
+    static func isFailure(_ event: String) -> Bool {
+        // Successful requests include fields such as cancelled=false and failures=0.
+        // Remove only benign assignments, so a separate error on the same line survives.
+        let meaningful = benignStatus.stringByReplacingMatches(in: event, range: NSRange(event.startIndex..., in: event), withTemplate: "")
+        return failureEvent.firstMatch(in: meaningful, range: NSRange(meaningful.startIndex..., in: meaningful)) != nil
+    }
+
     static func fit(_ logs: String, maximumBytes: Int = maximumBytes) -> String {
         // Reserve room for description, reference, thread ID and JSON field names.
         let budget = max(0, maximumBytes - 64 * 1024)
@@ -23,11 +38,11 @@ enum DiagnosticReportBudget {
         }
         if fits(logs) { return logs }
         let lines = logs.components(separatedBy: "\n")
-        let dated = lines.indices.filter { lines[$0].range(of: #"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}.* "#, options: .regularExpression) != nil }
+        let dated = lines.indices.filter {
+            datedEvent.firstMatch(in: lines[$0], range: NSRange(lines[$0].startIndex..., in: lines[$0])) != nil
+        }
         // Routine events go first; failures survive until routine history is exhausted.
-        let failures = Set(dated.filter {
-            lines[$0].range(of: "fail|error|disconnect|cancel|unavailable|unconfirmed|did not verify|(?:HTTP |→ )[45][0-9]{2}", options: [.regularExpression, .caseInsensitive]) != nil
-        })
+        let failures = Set(dated.filter { isFailure(lines[$0]) })
         let ordered = dated.sorted { a, b in
             let af = failures.contains(a), bf = failures.contains(b)
             if af != bf { return !af }

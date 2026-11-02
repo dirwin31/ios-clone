@@ -366,6 +366,11 @@ enum ConnectionRoute: String, CaseIterable, Identifiable, Codable {
 
 @MainActor
 final class PreferredTransport: ObservableObject, GalaxyRequestTransport {
+    var onDiagnostic: ((String) -> Void)?
+    private var diagnosticRequest = 0
+    private var diagnosticSampler = DiagnosticSuccessSampler()
+    private var lastDiagnosticRoute: ConnectionRoute?
+    private var diagnosticFailurePending = false
     let lan: any GalaxyRequestTransport
     let bluetooth: any GalaxyRequestTransport
     let tunnel: (any GalaxyRequestTransport)?
@@ -403,12 +408,28 @@ final class PreferredTransport: ObservableObject, GalaxyRequestTransport {
         }
         return try await chosen.page(path: path)
     }
+    private func recordDiagnostic(routineSuccess: Bool = false, _ message: @autoclosure () -> String) {
+        guard let onDiagnostic,
+              let sampled = diagnosticSampler.take(routineSuccess: routineSuccess, now: ProcessInfo.processInfo.systemUptime) else { return }
+        onDiagnostic(message() + (sampled == 0 ? "" : "; routine successes sampled=\(sampled)"))
+    }
+    private var diagnosticAvailability: String {
+        "available: lan=\(lan.connected), tunnel=\(tunnel?.connected ?? false), bluetooth=\(bluetooth.connected)"
+    }
     func request(path: String, method: String, headers: [String: String], body: Data) async throws -> BridgeResponse {
         var lastError: Error = URLError(.notConnectedToInternet)
+        diagnosticRequest += 1
+        let requestID = diagnosticRequest
         for route in routes {
+            if Task.isCancelled {
+                diagnosticFailurePending = true
+                recordDiagnostic("Request #\(requestID) \(method) \(SecretGoodGalaxy.diagnosticPath(path)) cancelled before dispatch; mode=\(mode.rawValue)")
+            }
             try Task.checkCancellation()
             guard let chosen = transport(route), chosen.connected else { continue }
             if route == .bluetooth && SecretGoodGalaxy.needsWiFi(path) {
+                diagnosticFailurePending = true
+                recordDiagnostic("Request #\(requestID) \(method) \(SecretGoodGalaxy.diagnosticPath(path)) blocked: network-required; route=bluetooth; HTTP 501")
                 return BridgeResponse(id: UUID().uuidString, session: "network-required", counter: 0, status: 501,
                     headers: ["content-type": "application/json"],
                     body: Data("{\"error\":\"Connect over Local Wi-Fi or Tunnel to use this feature.\"}".utf8).base64EncodedString())
@@ -416,15 +437,25 @@ final class PreferredTransport: ObservableObject, GalaxyRequestTransport {
             let started = ProcessInfo.processInfo.systemUptime
             do {
                 let response = try await chosen.request(path: path, method: method, headers: headers, body: body)
+                let elapsed = ProcessInfo.processInfo.systemUptime - started
                 if route == .lan {
-                    let elapsed = ProcessInfo.processInfo.systemUptime - started
                     let target = response.status >= 400 ? 2.0 : min(2, max(0.2, elapsed * 2))
                     // Back off immediately; recover gradually rather than oscillating.
                     localDelay = target > localDelay ? target : max(target, localDelay * 0.9)
                 }
+                let routine = (200..<300).contains(response.status) && elapsed < 2 && !Task.isCancelled
+                    && lastDiagnosticRoute == route && !diagnosticFailurePending
+                    && (["GET", "HEAD"].contains(method) || (method == "POST" && path == "/api/companion/location"))
+                lastDiagnosticRoute = route
+                diagnosticFailurePending = response.status >= 400
+                recordDiagnostic(routineSuccess: routine, "Request #\(requestID) \(method) \(SecretGoodGalaxy.diagnosticPath(path)) completed over \(route.rawValue): HTTP \(response.status); \(SecretGoodGalaxy.responseDiagnostic(status: response.status, encodedBody: response.body)); elapsed=\(String(format: "%.3f", elapsed))s; mode=\(mode.rawValue); selected now=\(label); upload bytes=\(body.count); cancelled=\(Task.isCancelled)\(response.status >= 400 ? "; " + diagnosticAvailability : "")")
                 return response
             }
             catch {
+                let elapsed = ProcessInfo.processInfo.systemUptime - started
+                lastDiagnosticRoute = route
+                diagnosticFailurePending = true
+                recordDiagnostic("Request #\(requestID) \(method) \(SecretGoodGalaxy.diagnosticPath(path)) failed over \(route.rawValue); elapsed=\(String(format: "%.3f", elapsed))s; mode=\(mode.rawValue); \(diagnosticAvailability); cancelled=\(Task.isCancelled); \(LANTransport.failureCode(error))")
                 if route == .lan { localDelay = 2 }
                 try Task.checkCancellation()
                 guard error is URLError, route != .bluetooth else { throw error }
@@ -432,11 +463,15 @@ final class PreferredTransport: ObservableObject, GalaxyRequestTransport {
                 else { invalidateTunnel("Tunnel request failed: " + LANTransport.failureCode(error)) }
                 // An uncertain write must never be replayed on another connection.
                 guard ["GET", "HEAD"].contains(method) else {
+                    recordDiagnostic("Request #\(requestID) \(method) \(SecretGoodGalaxy.diagnosticPath(path)) uncertain write: replay blocked")
                     throw BridgeError.message("Connection interrupted. This change may have saved; reload to confirm before trying again.")
                 }
                 lastError = error
+                recordDiagnostic("Request #\(requestID) \(method) \(SecretGoodGalaxy.diagnosticPath(path)) read fallback: checking remaining routes")
             }
         }
+        diagnosticFailurePending = true
+        recordDiagnostic("Request #\(requestID) \(method) \(SecretGoodGalaxy.diagnosticPath(path)) exhausted available routes; mode=\(mode.rawValue)")
         throw lastError
     }
 }

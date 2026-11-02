@@ -24,6 +24,15 @@ probe = "import Foundation\nimport Combine\n" + source[start:end] + "}\n" + r'''
         precondition(!log.events.last!.contains("private-token"))
         precondition(!log.events.last!.contains("galaxy.firestar.link"))
         log.clear(); precondition(log.events.isEmpty)
+        log.record("request failed HTTP 403 Bearer secret")
+        for index in 0..<13000 { log.record("successful poll \(index)") }
+        precondition(!log.events.contains { $0.contains("HTTP 403") })
+        precondition(log.failureEvents.count == 1 && log.failureEvents[0].contains("HTTP 403"))
+        precondition(!log.failureEvents[0].contains("Bearer secret"))
+        for index in 0..<300 { log.record("request failed \(index)") }
+        precondition(log.failureEvents.count == 256)
+        precondition(log.failureEvents.first!.hasSuffix("request failed 44"))
+        log.clear(); precondition(log.failureEvents.isEmpty)
         let beforeStates = publications
         for _ in 0..<10000 {
             log.recordState("bluetooth", "Bluetooth waiting")

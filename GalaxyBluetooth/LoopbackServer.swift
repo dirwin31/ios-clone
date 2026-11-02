@@ -13,6 +13,7 @@ final class LoopbackServer: ObservableObject {
     private var availabilityTask: Task<Bool, Never>?
     private(set) var recentRequests: [String] = []
     private var recentFailures: [String] = []
+    private let lifecycleFormatter = ISO8601DateFormatter()
     var diagnosticSummary: String {
         let mobile = webRoot.map { FileManager.default.fileExists(atPath: $0.appendingPathComponent("index.html").path) } ?? false
         let script = webRoot.map { FileManager.default.fileExists(atPath: $0.appendingPathComponent("js/app.js").path) } ?? false
@@ -53,7 +54,7 @@ final class LoopbackServer: ObservableObject {
     }
 
     private func record(_ event: String) {
-        lifecycleEvents.append("\(ISO8601DateFormatter().string(from: Date())) \(event)")
+        lifecycleEvents.append("\(lifecycleFormatter.string(from: Date())) \(event)")
         if lifecycleEvents.count > 200 { lifecycleEvents.removeFirst(lifecycleEvents.count - 200) }
     }
 
@@ -152,7 +153,8 @@ final class LoopbackServer: ObservableObject {
         let client = LocalConnection(connection: connection, handle: { [weak self] request in
             guard let self else { return .error(503, "App is shutting down.") }
             return await self.handle(request)
-        }, onClose: { [weak self] in self?.connections.removeValue(forKey: id) })
+        }, onDiagnostic: { [weak self] in self?.record($0) },
+           onClose: { [weak self] in self?.connections.removeValue(forKey: id) })
         connections[id] = client
         client.start()
     }
@@ -337,35 +339,44 @@ private final class LocalConnection {
     let connection: NWConnection
     let handle: @MainActor (LocalRequest) async -> LocalResponse
     let onClose: @MainActor () -> Void
+    let onDiagnostic: @MainActor (String) -> Void
+    private let diagnosticID = String(UUID().uuidString.prefix(8))
+    private let started = ProcessInfo.processInfo.systemUptime
+    private var diagnosticTarget = "headers pending"
     private var data = Data()
     private var requestTask: Task<Void, Never>?
     private var headerTimeout: Task<Void, Never>?
     private var closed = false
 
     init(connection: NWConnection, handle: @escaping @MainActor (LocalRequest) async -> LocalResponse,
+         onDiagnostic: @escaping @MainActor (String) -> Void = { _ in },
          onClose: @escaping @MainActor () -> Void) {
         self.connection = connection
         self.handle = handle
         self.onClose = onClose
+        self.onDiagnostic = onDiagnostic
     }
 
     func start() {
         connection.stateUpdateHandler = { [weak self] state in
             Task { @MainActor in
-                if case .failed = state { self?.close() }
-                if case .cancelled = state { self?.close() }
+                if case .failed = state { self?.close(reason: "network-failed") }
+                if case .cancelled = state { self?.close(reason: "network-cancelled") }
             }
         }
         connection.start(queue: .main)
         headerTimeout = Task { @MainActor [weak self] in
             try? await Task.sleep(nanoseconds: 10_000_000_000)
-            if !Task.isCancelled { self?.close() }
+            if !Task.isCancelled { self?.close(reason: "header-timeout") }
         }
         receive()
     }
 
-    fileprivate func close() {
+    fileprivate func close(reason: String = "server-close") {
         guard !closed else { return }
+        if reason != "response-sent" {
+            onDiagnostic("Local connection \(diagnosticID) closed: \(reason); \(diagnosticTarget); elapsed=\(String(format: "%.3f", ProcessInfo.processInfo.systemUptime - started))s; cancelling request=\(requestTask != nil)")
+        }
         closed = true
         headerTimeout?.cancel()
         requestTask?.cancel()
@@ -385,7 +396,7 @@ private final class LocalConnection {
     private func consume(_ chunk: Data?, ended: Bool, failure: NWError?) {
         guard !closed else { return }
         data.append(chunk ?? Data())
-        guard failure == nil, data.count <= LocalRequest.maxPackageBody + 16_388 else { close(); return }
+        guard failure == nil, data.count <= LocalRequest.maxPackageBody + 16_388 else { close(reason: failure != nil ? "receive-failed" : "request-size-limit"); return }
         if !packageTimeout, let end = data.range(of: Data("\r\n\r\n".utf8)),
            let header = String(data: data[..<end.lowerBound], encoding: .utf8),
            let first = header.components(separatedBy: "\r\n").first {
@@ -395,26 +406,29 @@ private final class LocalConnection {
                 headerTimeout?.cancel()
                 headerTimeout = Task { @MainActor [weak self] in
                     try? await Task.sleep(nanoseconds: UInt64(LocalRequest.packageUploadTimeout * 1_000_000_000))
-                    if !Task.isCancelled { self?.close() }
+                    if !Task.isCancelled { self?.close(reason: "package-timeout") }
                 }
             }
         }
         do {
             guard let request = try LocalRequest.parse(data) else {
-                if ended { close() } else { receive() }
+                if ended { close(reason: "incomplete-request-eof") } else { receive() }
                 return
             }
             headerTimeout?.cancel()
+            diagnosticTarget = request.method + " " + SecretGoodGalaxy.diagnosticPath(request.target)
             data = Data()
             // Detect browser aborts while a Bluetooth request is queued.
             connection.receive(minimumIncompleteLength: 1, maximumLength: 1) { [weak self] bytes, _, done, failure in
                 Task { @MainActor in
-                    if done || failure != nil || bytes?.isEmpty == false { self?.close() }
+                    if done || failure != nil || bytes?.isEmpty == false {
+                        self?.close(reason: failure != nil ? "peer-receive-failed" : done ? "peer-eof" : "unexpected-extra-data")
+                    }
                 }
             }
             requestTask = Task { @MainActor in
                 let response = await handle(request)
-                guard !Task.isCancelled, !closed else { close(); return }
+                guard !Task.isCancelled, !closed else { close(reason: "handler-cancelled"); return }
                 send(response, headOnly: request.method == "HEAD")
             }
         } catch { send(.error(400, error.localizedDescription), headOnly: false) }
@@ -422,8 +436,8 @@ private final class LocalConnection {
 
     private func send(_ response: LocalResponse, headOnly: Bool) {
         headerTimeout?.cancel()
-        connection.send(content: response.encoded(headOnly: headOnly), completion: .contentProcessed { [weak self] _ in
-            Task { @MainActor in self?.close() }
+        connection.send(content: response.encoded(headOnly: headOnly), completion: .contentProcessed { [weak self] failure in
+            Task { @MainActor in self?.close(reason: failure == nil ? "response-sent" : "response-send-failed") }
         })
     }
 }

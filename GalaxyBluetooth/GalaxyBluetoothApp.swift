@@ -335,6 +335,7 @@ final class AppModel: ObservableObject {
         discovery.onEvent = { [weak self] reason in self?.connectionLog.record(reason) }
         discovery.onDevicesChanged = { [weak self] in self?.discoverAutomaticLAN() }
         lan.onDiagnostic = { [weak self] in self?.connectionLog.record($0) }
+        transport.onDiagnostic = { [weak self] in self?.connectionLog.record($0) }
         tunnel.onDiagnostic = { [weak self] in self?.connectionLog.record($0) }
         tunnel.onEvent = { [weak self] reason in self?.objectWillChange.send(); self?.logConnection(reason) }
         lan.onEvent = { [weak self] reason in
@@ -1096,6 +1097,17 @@ struct FloatingGalaxyGlass: ViewModifier {
 @MainActor
 final class ConnectionEventLog: ObservableObject {
     private var storage = Array(repeating: "", count: 12000)
+    // Keep failure evidence even when successful polling rolls out the main timeline.
+    private var failureStorage = Array(repeating: "", count: 256)
+    private var nextFailure = 0
+    private var failureCount = 0
+    private var totalFailures = 0
+    var failureEvents: [String] {
+        let start = failureCount == failureStorage.count ? nextFailure : 0
+        return (0..<failureCount).map { failureStorage[(start + $0) % failureStorage.count] }
+    }
+    private static let failurePattern = try! NSRegularExpression(pattern:
+        #"(?i:failed|timeout|timed out|disconnected|replay blocked|exhausted|HTTP [45][0-9]{2})"#)
     private var nextEvent = 0
     private var retained = 0
     private var sequence = 0
@@ -1141,11 +1153,19 @@ final class ConnectionEventLog: ObservableObject {
         sequence += 1
         let elapsed = String(format: "%.3f", ProcessInfo.processInfo.systemUptime - uptime)
         storage[nextEvent] = "\(formatter.string(from: Date())) #\(sequence) +\(elapsed)s \(event)"
+        if Self.failurePattern.firstMatch(in: event, range: NSRange(event.startIndex..., in: event)) != nil {
+            failureStorage[nextFailure] = storage[nextEvent]
+            nextFailure = (nextFailure + 1) % failureStorage.count
+            failureCount = min(failureCount + 1, failureStorage.count)
+            totalFailures += 1
+        }
         nextEvent = (nextEvent + 1) % storage.count
         if retained == storage.count { dropped += 1 } else { retained += 1 }
     }
     func clear() {
         storage = Array(repeating: "", count: 12000)
+        failureStorage = Array(repeating: "", count: 256)
+        nextFailure = 0; failureCount = 0; totalFailures = 0
         nextEvent = 0; retained = 0; dropped = 0; repeats = 0
         lastEvent = ""; stateEvents.removeAll(keepingCapacity: true); detail = ""; copied = false
     }
@@ -1184,6 +1204,8 @@ final class ConnectionEventLog: ObservableObject {
         Last pairing failure: \(model.pairingFailure.isEmpty ? "none" : model.pairingFailure)
         Current connection message: \(model.connectionMessage)
         Navigation alpha: \(model.navigationEnabled)
+        Retained failure events (may also appear in the timeline; retained=\(failureCount); older failures dropped=\(max(0, totalFailures - failureCount))):
+        \(failureEvents.suffix(eventLimit ?? failureCount).joined(separator: "\n"))
         Recent connection events:
         \(events.suffix(eventLimit ?? retained).joined(separator: "\n"))
         """

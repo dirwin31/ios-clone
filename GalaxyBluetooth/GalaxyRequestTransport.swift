@@ -64,7 +64,51 @@ enum LANPairing {
     }
 }
 
+/// Emit routine successes at most once per ten seconds, while retaining every notable event.
+/// A non-nil result is the count of routine successes sampled since the previous emission.
+struct DiagnosticSuccessSampler {
+    private var lastEmission: TimeInterval?
+    private var suppressed = 0
+
+    mutating func take(routineSuccess: Bool, now: TimeInterval) -> Int? {
+        if routineSuccess, let lastEmission, now >= lastEmission, now - lastEmission < 10 {
+            suppressed += 1
+            return nil
+        }
+        lastEmission = now
+        let count = suppressed
+        suppressed = 0
+        return count
+    }
+}
+
 enum SecretGoodGalaxy {
+    /// Normal responses need no decoding; inspect only small rejection bodies.
+    static func responseDiagnostic(status: Int, encodedBody: String) -> String {
+        let encodedBytes = encodedBody.utf8.count
+        let size = "body base64 bytes=\(encodedBytes)"
+        guard status >= 400 else { return size }
+        let limit = 16_384
+        guard encodedBytes <= ((limit + 2) / 3) * 4 else { return size + "; rejection=oversized-body" }
+        guard encodedBytes.isMultiple(of: 4) else { return size + "; rejection=invalid-base64" }
+        let padding = encodedBody.hasSuffix("==") ? 2 : encodedBody.hasSuffix("=") ? 1 : 0
+        guard (encodedBytes / 4) * 3 - padding <= limit else { return size + "; rejection=oversized-body" }
+        guard let data = Data(base64Encoded: encodedBody) else { return size + "; rejection=invalid-base64" }
+        return responseDiagnostic(data, status: status)
+    }
+    /// Emit only fixed categories, never arbitrary server text (which can contain secrets).
+    static func responseDiagnostic(_ data: Data, status: Int) -> String {
+        guard status >= 400 else { return "bytes=\(data.count)" }
+        guard data.count <= 16_384 else { return "bytes=\(data.count); rejection=oversized-body" }
+        guard let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else {
+            let prefix = String(decoding: data.prefix(64), as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+            return "bytes=\(data.count); rejection=\(prefix.hasPrefix("<") ? "html" : "non-json")"
+        }
+        let known = ["Missing app request key.": "missing-app-request-key",
+                     "Refresh the local Galaxy session": "refresh-local-session"]
+        let reason = (json["error"] as? String).flatMap { known[$0] } ?? "unrecognized-json"
+        return "bytes=\(data.count); rejection=\(reason)"
+    }
     static func diagnosticPath(_ target: String) -> String {
         let path = String(target.prefix(512)).split(separator: "?", maxSplits: 1).first.map(String.init) ?? ""
         if ["/_bridge/health", "/data/runtime.json", "/api/navigation/status", "/api/navigation/action", "/api/companion/location", "/api/device/state"].contains(path) { return path }

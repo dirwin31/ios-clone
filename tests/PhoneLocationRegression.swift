@@ -1,7 +1,11 @@
 import CoreLocation
 import Foundation
 
-struct BridgeResponse { let status: Int; let bodyData: Data }
+struct BridgeResponse {
+    let status: Int
+    let bodyData: Data
+    var body: String { bodyData.base64EncodedString() }
+}
 enum Wire { static let maxBody = 1_048_576 }
 enum BridgeError: LocalizedError {
     case message(String)
@@ -10,6 +14,7 @@ enum BridgeError: LocalizedError {
 
 @MainActor final class RecordingComma: GalaxyRequestTransport {
     var connected = true
+    var status = 200
     var localRefreshDelay: TimeInterval?
     var bodies: [[String: Any]] = []
     var pauseNext = false
@@ -21,7 +26,7 @@ enum BridgeError: LocalizedError {
             pauseNext = false
             await withCheckedContinuation { release = $0 }
         }
-        return BridgeResponse(status: 200, bodyData: Data("{\"ok\":true}".utf8))
+        return BridgeResponse(status: status, bodyData: Data("{\"ok\":true}".utf8))
     }
 }
 
@@ -53,6 +58,8 @@ struct PhoneLocationRegression {
         UserDefaults.standard.set(true, forKey: "galaxy.phoneGps")
         let comma = RecordingComma()
         let sharing = PhoneLocation(transport: { comma }, manager: nil)
+        var gpsEvents: [String] = []
+        sharing.onEvent = { gpsEvents.append($0) }
         await sharing.deliver(fix(at: now), now: now)
         await sharing.deliver(fix(at: now.addingTimeInterval(0.5)), now: now.addingTimeInterval(0.5))
         precondition(comma.bodies.count == 1 && sharing.status == "Sharing GPS with comma")
@@ -62,6 +69,10 @@ struct PhoneLocationRegression {
         comma.connected = false
         await sharing.deliver(fix(at: now.addingTimeInterval(2)), now: now.addingTimeInterval(2))
         precondition(comma.bodies.count == 2 && sharing.status == "Waiting for comma")
+        precondition(sharing.diagnosticSummary.contains("throttled=1"))
+        precondition(sharing.diagnosticSummary.contains("disconnected=1"))
+        precondition(gpsEvents.contains { $0.contains("Upload #1 finished: HTTP 200") })
+        precondition(!gpsEvents.joined().contains("latitude") && !gpsEvents.joined().contains("longitude"))
         sharing.setSharing(false)
         comma.connected = true
         await sharing.deliver(fix(at: now.addingTimeInterval(3)), now: now.addingTimeInterval(3))
@@ -106,6 +117,28 @@ struct PhoneLocationRegression {
         await wifi.deliver(fix(at: now.addingTimeInterval(1.25)), now: now.addingTimeInterval(1.25))
         precondition(local.bodies.count == 3)
         wifi.setSharing(false)
+        // Routine traffic must stay bounded without hiding failure or recovery.
+        UserDefaults.standard.set(true, forKey: "galaxy.phoneGps")
+        let busy = RecordingComma()
+        let diagnostics = PhoneLocation(transport: { busy }, manager: nil, diagnosticClock: { 0 })
+        var busyEvents: [String] = []
+        diagnostics.onEvent = { busyEvents.append($0) }
+        for index in 0..<20 {
+            let offeredAt = now.addingTimeInterval(Double(index))
+            await diagnostics.deliver(fix(at: offeredAt), now: offeredAt)
+        }
+        precondition(busy.bodies.count == 20, "Diagnostic sampling must not throttle GPS delivery")
+        precondition(busyEvents.count == 1, "Routine GPS successes should not flood the timeline")
+        busy.status = 403
+        let failedAt = now.addingTimeInterval(21)
+        await diagnostics.deliver(fix(at: failedAt), now: failedAt)
+        precondition(busyEvents.count == 2 && busyEvents.last!.contains("HTTP 403"))
+        precondition(busyEvents.last!.contains("routine successes sampled=19"))
+        busy.status = 200
+        let recoveredAt = now.addingTimeInterval(22)
+        await diagnostics.deliver(fix(at: recoveredAt), now: recoveredAt)
+        precondition(busyEvents.count == 3 && busyEvents.last!.contains("HTTP 200"), "Recovery must be recorded immediately")
+        diagnostics.setSharing(false)
         UserDefaults.standard.removeObject(forKey: "galaxy.phoneGps")
         print("phone location ok")
     }

@@ -1,10 +1,11 @@
 import fs from 'node:fs'
 import vm from 'node:vm'
 import assert from 'node:assert/strict'
-const source = fs.readFileSync('tests/Fixtures/GalaxyWeb/js/toggle-search.js', 'utf8').replace(/^import .*\n/gm, '').replaceAll('export ', '')
-const settings = fs.readFileSync('tests/Fixtures/GalaxyWeb/js/settings.js', 'utf8')
+const readSource = path => fs.readFileSync(path, 'utf8').replaceAll('\r\n', '\n')
+const source = readSource('tests/Fixtures/GalaxyWeb/js/toggle-search.js').replace(/^import .*\n/gm, '').replaceAll('export ', '')
+const settings = readSource('tests/Fixtures/GalaxyWeb/js/settings.js')
 const sections = settings.slice(settings.indexOf('export const SETTINGS_SECTIONS'), settings.indexOf('\n\n// Crop')).replace('export ', '')
-const adapter = fs.readFileSync('GalaxyBluetooth/LoopbackServer.swift', 'utf8').match(/static let nativeSearchScript = #"""\n([\s\S]*?)    """#/)[1]
+const adapter = readSource('GalaxyBluetooth/LoopbackServer.swift').match(/static let nativeSearchScript = #"""\n([\s\S]*?)    """#/)[1]
 function probe(timeout = 20000) {
   const context = vm.createContext({ window: { __galaxyNative: true }, AbortController, DOMException,
     setTimeout: (fn, ms) => setTimeout(fn, ms === 20000 ? timeout : ms), clearTimeout })
