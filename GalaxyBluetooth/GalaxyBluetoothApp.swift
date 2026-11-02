@@ -796,6 +796,7 @@ struct GalaxyRootView: View {
     @State private var appTabsExpanded = true
     @Environment(\.colorScheme) private var systemColorScheme
     private var chromeBackground: LinearGradient {
+        if !DuoLayout.isEnabled {
         let dark = (galaxyColorScheme ?? systemColorScheme) == .dark
         if model.tab == .galaxy {
             let edge = dark ? Color(red: 0.035, green: 0.035, blue: 0.078) : Color(red: 0.94, green: 0.91, blue: 0.99)
@@ -803,6 +804,17 @@ struct GalaxyRootView: View {
         }
         return LinearGradient(colors: dark
             ? [Color(red: 0.035, green: 0.035, blue: 0.078), Color(red: 0.13, green: 0.07, blue: 0.22)]
+            : [Color(red: 0.94, green: 0.91, blue: 0.99), Color(red: 0.87, green: 0.81, blue: 0.96)],
+            startPoint: .topLeading, endPoint: .bottomTrailing)
+        }
+        let dark = (galaxyColorScheme ?? systemColorScheme) == .dark
+        if model.tab == .galaxy {
+            let edge = dark ? Color(red: 0.10, green: 0.09, blue: 0.15) : Color(red: 0.94, green: 0.91, blue: 0.99)
+            let lowerEdge = dark ? Color(red: 0.12, green: 0.14, blue: 0.20) : Color(red: 0.88, green: 0.94, blue: 0.98)
+            return LinearGradient(colors: [edge, lowerEdge], startPoint: .top, endPoint: .bottom)
+        }
+        return LinearGradient(colors: dark
+            ? [Color(red: 0.10, green: 0.09, blue: 0.15), Color(red: 0.17, green: 0.12, blue: 0.24)]
             : [Color(red: 0.94, green: 0.91, blue: 0.99), Color(red: 0.87, green: 0.81, blue: 0.96)],
             startPoint: .topLeading, endPoint: .bottomTrailing)
     }
@@ -818,6 +830,19 @@ struct GalaxyRootView: View {
         self.model = model; navigation = model.navigationServices.navigation; bluetooth = model.bluetooth; lan = model.lan; assets = model.assets; server = model.server; discovery = model.discovery; galaxyPage = model.galaxyPage
     }
     var body: some View {
+        if #available(iOS 27.1, *), DuoLayout.isEnabled {
+            AdaptiveCompanionChrome(model: model, tab: model.tab, select: select) {
+                rootContent
+            }
+        } else {
+            rootContent
+        }
+    }
+    private var usesAdaptiveChrome: Bool {
+        if #available(iOS 27.1, *) { return DuoLayout.isEnabled }
+        return false
+    }
+    private var rootContent: some View {
         VStack(spacing: 0) {
             ZStack {
                 if model.opened, let url = server.url {
@@ -826,9 +851,9 @@ struct GalaxyRootView: View {
                                   bluetooth: model.transport.label == "Bluetooth") {
                         model.galaxyPage.report(server: server, connection: model.transport.label)
                     }
-                        .ignoresSafeArea(.container, edges: .bottom)
+                        .ignoresSafeArea(.container, edges: DuoLayout.isEnabled ? [.top, .bottom] : .bottom)
                         .overlay(alignment: .top) {
-                            if !editorFocused {
+                            if !DuoLayout.isEnabled && !editorFocused {
                                 let dark = (galaxyColorScheme ?? systemColorScheme) == .dark
                                 let edge = dark ? Color(red: 0.035, green: 0.035, blue: 0.078) : Color(red: 0.94, green: 0.91, blue: 0.99)
                                 LinearGradient(colors: [edge, edge.opacity(0)], startPoint: .top, endPoint: .bottom)
@@ -858,7 +883,7 @@ struct GalaxyRootView: View {
 
         }
         .safeAreaInset(edge: .top, spacing: 0) {
-            if !editorFocused && model.tab != .navigation {
+            if !usesAdaptiveChrome && !editorFocused && model.tab != .navigation {
                 CompanionNavigationBar(tab: model.tab, developerMode: model.developerMode,
                     navigation: model.navigationServices.navigation, expanded: $appTabsExpanded,
                     compactIconOnly: true, statusModel: model, select: select)
@@ -868,7 +893,8 @@ struct GalaxyRootView: View {
             }
         }
         .background {
-            if model.navigationEnabled { chromeBackground.ignoresSafeArea() }
+            if DuoLayout.isEnabled && model.tab == .navigation { Color.clear }
+            else if model.navigationEnabled { chromeBackground.ignoresSafeArea() }
             else { Color(uiColor: .systemBackground).ignoresSafeArea() }
         }
         .preferredColorScheme(galaxyColorScheme)
@@ -1334,4 +1360,126 @@ private struct DeveloperLogsView: View {
             }
             .onChange(of: log.section) { _, _ in log.detail = previewReport(); log.copied = false }
     }
+}
+
+/// The system owns placement and safe-area reservation, including Duo's side rail.
+@available(iOS 27.1, *)
+private struct AdaptiveCompanionChrome<Content: View>: View {
+    @ObservedObject var model: AppModel
+    let tab: CompanionTab
+    let select: (CompanionTab) -> Void
+    @ViewBuilder var content: () -> Content
+    var body: some View {
+        NavigationStack {
+            AdaptiveCompanionLayout(model: model, tab: tab, select: select, content: content)
+        }
+    }
+}
+
+@available(iOS 27.1, *)
+private struct AdaptiveCompanionLayout<Content: View>: View {
+    @ObservedObject var model: AppModel
+    let tab: CompanionTab
+    let select: (CompanionTab) -> Void
+    @ViewBuilder var content: () -> Content
+    var body: some View {
+        content()
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    AdaptiveCompanionTabs(model: model, tab: tab, select: select)
+                }.axisBehavior(.verticalPreferred)
+                ToolbarItem(placement: .topBarTrailing) {
+                    AdaptiveConnectionStatus(model: model, openSettings: { select(.connections) })
+                }.axisBehavior(.verticalPreferred)
+            }
+            .toolbarVerticalBehavior(.automatic)
+    }
+}
+
+@available(iOS 27.1, *)
+private struct AdaptiveCompanionTabs: View {
+    @Environment(\.toolbarVerticalEdge) private var verticalEdge
+    @ObservedObject var model: AppModel
+    let tab: CompanionTab
+    let select: (CompanionTab) -> Void
+    private var tabs: [CompanionTab] {
+        model.navigationEnabled ? [.galaxy, .navigation, .connections] : [.galaxy, .connections]
+    }
+    var body: some View {
+        let layout = verticalEdge == nil ? AnyLayout(HStackLayout(spacing: 4)) : AnyLayout(VStackLayout(spacing: 4))
+        layout {
+            ForEach(tabs) { item in
+                Button { select(item) } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: item.icon)
+                        if verticalEdge == nil {
+                            Text(item.rawValue).font(.caption.weight(.semibold))
+                        }
+                    }
+                        .padding(.horizontal, verticalEdge == nil ? 10 : 0)
+                        .frame(minWidth: 44, minHeight: 44)
+                        .accessibilityLabel(item.rawValue)
+                        .foregroundStyle(tab == item && tab != .navigation ? Color.white : Color.primary)
+                        .background {
+                            if tab == item {
+                                if tab == .navigation {
+                                    Capsule().fill(Color.primary.opacity(0.12))
+                                } else {
+                                Capsule().fill(LinearGradient(colors: [Color(red: 0.61, green: 0.39, blue: 0.91), Color(red: 0.40, green: 0.22, blue: 0.69)], startPoint: .topLeading, endPoint: .bottomTrailing))
+                                }
+                            }
+                        }
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("main-tab-" + item.rawValue)
+                .accessibilityAddTraits(tab == item ? .isSelected : [])
+            }
+        }
+    }
+}
+
+@available(iOS 27.1, *)
+private struct AdaptiveConnectionStatus: View {
+    @Environment(\.toolbarVerticalEdge) private var verticalEdge
+    @ObservedObject var model: AppModel
+    let openSettings: () -> Void
+    @State private var showingConnection = false
+    var body: some View {
+        CompactConnectionStatus(model: model, compact: verticalEdge != nil) {
+            showingConnection = true
+        }
+        .popover(isPresented: $showingConnection) {
+            VStack(spacing: 12) {
+                Text("Connection").font(.headline)
+                CompactConnectionStatus(model: model) {
+                    showingConnection = false
+                    openSettings()
+                }
+                .fixedSize(horizontal: true, vertical: false)
+                Button("Connection settings") {
+                    showingConnection = false
+                    openSettings()
+                }
+            }
+            .padding(20)
+            .fixedSize()
+            .presentationCompactAdaptation(.popover)
+        }
+    }
+}
+
+/// Fail closed: only the identified Duo hardware/simulator uses the experimental layout.
+enum DuoLayout {
+    static let isEnabled: Bool = {
+        #if targetEnvironment(simulator)
+        return ProcessInfo.processInfo.environment["SIMULATOR_MODEL_IDENTIFIER"] == "iPhone19,4"
+        #else
+        var info = utsname()
+        uname(&info)
+        let identifier = withUnsafeBytes(of: &info.machine) { bytes in
+            String(decoding: bytes.prefix(while: { $0 != 0 }), as: UTF8.self)
+        }
+        return identifier == "iPhone19,4"
+        #endif
+    }()
 }

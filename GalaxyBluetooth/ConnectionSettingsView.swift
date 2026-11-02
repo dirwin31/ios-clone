@@ -63,6 +63,17 @@ struct ConnectionSettingsView: View {
     }
 
     var body: some View {
+        if DuoLayout.isEnabled {
+            GeometryReader { geometry in
+                let correction = (geometry.safeAreaInsets.trailing - geometry.safeAreaInsets.leading) / 2
+                settingsContent(width: min(460, max(0, geometry.size.width - abs(correction) * 2)), offset: correction)
+            }
+        } else {
+            settingsContent(width: nil, offset: 0)
+        }
+    }
+
+    private func settingsContent(width: CGFloat?, offset: CGFloat) -> some View {
         ScrollView {
             VStack(spacing: 8) {
                 HStack {
@@ -114,7 +125,7 @@ struct ConnectionSettingsView: View {
                 Text("StarPilot BT · \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "")")
                     .font(.system(size: 11)).foregroundStyle(muted)
             }.padding(.horizontal, 18).padding(.top, 0).padding(.bottom, 12)
-                .frame(maxWidth: 460).frame(maxWidth: .infinity)
+                .frame(width: width).frame(maxWidth: 460).frame(maxWidth: .infinity).offset(x: offset)
         }.scrollBounceBehavior(.basedOnSize).background {
             if model.navigationEnabled { LinearGradient(colors: [background, panel.opacity(0.8)], startPoint: .topLeading, endPoint: .bottomTrailing).ignoresSafeArea() }
             else { background.ignoresSafeArea() }
