@@ -19,6 +19,25 @@ final class BluetoothTransport: NSObject, ObservableObject, GalaxyRequestTranspo
     @Published var connected = false
     @Published var connecting = false
     @Published private(set) var connectionFailed = false
+    @Published private(set) var pairingRecoveryNeeded = false
+    private var authenticationFailures = 0
+
+    private func noteAuthenticationFailure(phase: String, message: String) {
+        // The bridge silently rejects unknown keys. Only repeated failures during
+        // key verification suggest re-pairing; this is not proof of a revoked key.
+        guard phase == "authentication" else { return }
+        let lower = message.lowercased()
+        guard lower.contains("timed out") || lower.contains("could not verify the encrypted response") else { return }
+        authenticationFailures += 1
+        pairingRecoveryNeeded = authenticationFailures >= 2
+        onEvent?("Bluetooth key verification failed; count=\(authenticationFailures); pairing recovery offered=\(pairingRecoveryNeeded); key rejection not confirmed")
+    }
+
+    func retrySavedPairing() {
+        pairingRecoveryNeeded = false
+        authenticationFailures = 0
+        reconnectNotBefore = 0
+    }
     @Published private(set) var fastReadFallback = false
     @Published var fastReads = UserDefaults.standard.bool(forKey: "galaxy.bluetooth.fastReads") {
         didSet {
@@ -127,6 +146,9 @@ final class BluetoothTransport: NSObject, ObservableObject, GalaxyRequestTranspo
     }
     func reconnectSaved(pairingKey: String) {
         guard !connected, !connecting, !isScanning else { return }
+        guard !pairingRecoveryNeeded else {
+            reconnectDecision("key verification repeatedly failed; waiting for pairing recovery or manual retry"); return
+        }
         guard ProcessInfo.processInfo.systemUptime >= reconnectNotBefore else {
             reconnectDecision("waiting after failed connection; failures=\(failedConnections)"); return
         }
@@ -158,6 +180,7 @@ final class BluetoothTransport: NSObject, ObservableObject, GalaxyRequestTranspo
 
     func forgetSavedDevice() {
         disconnect()
+        retrySavedPairing()
         UserDefaults.standard.removeObject(forKey: "galaxy.bluetooth.device")
     }
 
@@ -244,6 +267,7 @@ final class BluetoothTransport: NSObject, ObservableObject, GalaxyRequestTranspo
     }
 
     private func failConnection(_ message: String) {
+        noteAuthenticationFailure(phase: connectionPhase, message: message)
         recordConnectionFailure()
         if Self.shouldPauseFastReads(method: active?.method, notifications: activeNotifications,
                                      cancelled: message.lowercased().contains("cancelled")) {
@@ -611,6 +635,7 @@ final class BluetoothTransport: NSObject, ObservableObject, GalaxyRequestTranspo
 
     private func completeConnection() throws {
         try PairingKeyStore.save(keyText)
+        retrySavedPairing()
         connectionTimeout?.cancel()
         if let peripheral { UserDefaults.standard.set(peripheral.identifier.uuidString, forKey: "galaxy.bluetooth.device") }
         failedConnections = 0

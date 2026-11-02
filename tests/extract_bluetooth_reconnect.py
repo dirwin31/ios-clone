@@ -7,10 +7,16 @@ methods = source[start:end]
 property_start = source.index('    var hasSavedDevice: Bool {')
 property_end = source.index('    var diagnosticSummary:', property_start)
 methods = source[property_start:property_end] + methods
+recovery_start = source.index('    private func noteAuthenticationFailure(')
+recovery_end = source.index('    @Published private(set) var fastReadFallback', recovery_start)
+methods = source[recovery_start:recovery_end].replace('private func noteAuthenticationFailure', 'func noteAuthenticationFailure') + methods
 settings = Path('GalaxyBluetooth/ConnectionSettingsView.swift').read_text()
 ui_start = settings.index('    private var needsPairing: Bool {')
 ui_end = settings.index('    private var connecting:', ui_start)
 ui_property = settings[ui_start:ui_end].replace('private var needsPairing', 'var needsPairing')
+title_start = settings.index('    private var primaryTitle: String {')
+title_end = settings.index('    private var connectionCandidates:', title_start)
+ui_property += settings[title_start:title_end].replace('private var primaryTitle', 'var primaryTitle')
 probe = r'''
 import Foundation
 struct NearbyDevice { let id: UUID; let name: String; let signal: Int }
@@ -36,6 +42,8 @@ class Probe {
     var status = "", lastReconnectReason = ""
     var reconnectNotBefore: TimeInterval = 0
     var failedConnections = 0
+    var pairingRecoveryNeeded = false
+    var authenticationFailures = 0
     var reconnectTarget: (id: UUID, key: String)?
     var onEvent: ((String) -> Void)?
     var peripherals: [UUID: Peripheral] = [:]
@@ -52,10 +60,16 @@ tests = r'''
     }
 }
 enum Mode { case automatic, bluetooth, lan }
-struct Model { var mode = Mode.bluetooth; var pairingKey = String(repeating: "a", count: 64) }
+struct Model {
+    var mode = Mode.bluetooth
+    var pairingKey = String(repeating: "a", count: 64)
+    var opened = false, hasLANPairingSetup = false
+    var pairingFailure = ""
+}
 struct SettingsProbe {
     var model = Model()
     let bluetooth = Probe()
+    var pairing = false, connected = false, connecting = false
     UI_PROPERTY
 }
 @main struct ReconnectRegression {
@@ -89,10 +103,47 @@ struct SettingsProbe {
         precondition(noDevice.scans == 0 && noDevice.status.contains("No saved"))
         var settings = SettingsProbe()
         precondition(settings.needsPairing, "A saved key without a peripheral must offer pairing, not a dead-end Connect button")
+        precondition(settings.primaryTitle == "Connect over Local Wi-Fi first")
+        settings.model.hasLANPairingSetup = true
+        precondition(settings.primaryTitle == "Set up Bluetooth")
+        settings.model.pairingFailure = "Setup failed"
+        precondition(settings.primaryTitle == "Retry Bluetooth setup")
+        settings.pairing = true
+        precondition(settings.primaryTitle == "Pairing…")
+        settings.pairing = false
         UserDefaults.standard.saved = "invalid"
         precondition(settings.needsPairing, "An invalid peripheral ID must offer pairing")
         UserDefaults.standard.saved = saved.uuidString
         precondition(!settings.needsPairing, "A complete setup must retain reconnect")
+        precondition(settings.primaryTitle == "Reconnect Bluetooth")
+        settings.bluetooth.noteAuthenticationFailure(phase: "link", message: "Bluetooth connection timed out")
+        settings.bluetooth.noteAuthenticationFailure(phase: "ready", message: "Could not verify the encrypted response")
+        settings.bluetooth.noteAuthenticationFailure(phase: "authentication", message: "Unsupported bridge protocol")
+        precondition(!settings.needsPairing, "Range, established-session and protocol failures must not imply lost pairing")
+        settings.bluetooth.noteAuthenticationFailure(phase: "authentication", message: "Bluetooth request timed out")
+        precondition(!settings.needsPairing, "One ambiguous timeout must still allow automatic reconnect")
+        settings.bluetooth.noteAuthenticationFailure(phase: "authentication", message: "Bluetooth request timed out")
+        precondition(settings.needsPairing && settings.primaryTitle == "Pair Bluetooth again")
+        settings.bluetooth.reconnectSaved(pairingKey: key)
+        precondition(settings.bluetooth.central.lookups == 0 && settings.bluetooth.scans == 0,
+                     "Recovery must pause automatic retries so the action remains usable")
+        settings.model.hasLANPairingSetup = false
+        precondition(settings.primaryTitle == "Connect over Local Wi-Fi first")
+        settings.model.hasLANPairingSetup = true
+        settings.bluetooth.retrySavedPairing()
+        precondition(!settings.needsPairing && settings.primaryTitle == "Reconnect Bluetooth")
+        precondition(UserDefaults.standard.saved == saved.uuidString, "Recovery must preserve the saved device")
+        settings.connecting = true
+        precondition(settings.primaryTitle == "Connecting…")
+        settings.bluetooth.isScanning = true
+        precondition(settings.primaryTitle == "Finding comma…")
+        settings.connected = true
+        precondition(settings.primaryTitle == "Preparing Galaxy…")
+        settings.model.opened = true
+        precondition(settings.primaryTitle == "Open Galaxy")
+        settings.connected = false; settings.connecting = false; settings.bluetooth.isScanning = false
+        settings.model.pairingKey = "not-a-valid-key"
+        precondition(settings.needsPairing, "An invalid key must lead to setup instead of reconnect")
         settings.model.pairingKey = ""
         precondition(settings.needsPairing, "A peripheral without a key still needs pairing")
         for mode in [Mode.lan, .automatic] {

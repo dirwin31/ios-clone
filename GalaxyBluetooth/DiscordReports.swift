@@ -71,6 +71,26 @@ enum DiagnosticReportBudget {
     }
 }
 
+enum SubmissionDiagnostics {
+    static func capture(logs: () -> String, now: Date = Date(),
+                        version: String = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "unknown",
+                        build: String = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "unknown",
+                        maximumBytes: Int = DiagnosticReportBudget.maximumBytes) -> String {
+        let freshLogs = logs()
+        guard !freshLogs.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return "" }
+        let header = """
+        StarPilot report submission
+        Installed app at Send: \(version) (\(build))
+        Captured at Send (UTC): \(ISO8601DateFormatter().string(from: now))
+        Capture policy: fresh snapshot at first Send; retries preserve this snapshot.
+        Event history may include earlier events from this app session.
+
+        """
+        // Keep submission provenance outside trimming, including the fallback path.
+        return header + "\n" + DiagnosticReportBudget.fit(freshLogs, maximumBytes: maximumBytes - 2048)
+    }
+}
+
 private struct PendingDiscordReport {
     let description: String
     let logs: String
@@ -308,7 +328,9 @@ struct DiscordReportSheet: View {
     @State private var preparedLogs: String?
     private var reportLogs: String { restoredLogs ?? preparedLogs ?? logs }
     private var captureDetails: String {
-        reportLogs.components(separatedBy: "\n").prefix(4).filter { $0.hasPrefix("App:") || $0.hasSuffix("Z") }.joined(separator: " · ")
+        reportLogs.components(separatedBy: "\n").prefix(8).filter {
+            $0.hasPrefix("Installed app at Send:") || $0.hasPrefix("Captured at Send (UTC):") || $0.hasPrefix("App:") || $0.hasSuffix("Z")
+        }.joined(separator: " · ")
     }
     var body: some View {
         NavigationStack {
@@ -363,6 +385,9 @@ struct DiscordReportSheet: View {
                         if reportLogs.count > 24000 { Text("Preview shortened. The full diagnostics file will be attached.").font(.caption) }
                     }
                     Label("Diagnostics are always included", systemImage: "checkmark.circle.fill").disabled(attempted)
+                    if !attempted {
+                        Text("Send captures fresh diagnostics and the installed app version. This preview will be refreshed when you send.").font(.caption).foregroundStyle(.secondary)
+                    }
                     Text("Diagnostics can include device names, local network addresses and connection or navigation status. Review the preview before sending.").font(.caption).foregroundStyle(.secondary)
                 }
                 Section {
@@ -388,14 +413,22 @@ struct DiscordReportSheet: View {
                     ToolbarItem(placement: .confirmationAction) {
                         Button(discord.threadURL != nil ? "Done" : (attempted ? "Retry" : "Send")) {
                             if discord.threadURL != nil { dismiss() } else {
+                                if !attempted {
+                                    restoredLogs = nil
+                                    preparedLogs = SubmissionDiagnostics.capture(logs: captureLogs)
+                                }
                                 guard !reportLogs.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
                                     discord.status = "Diagnostics weren’t captured. Close this form and open Report a problem again."
                                     sendError = discord.status; showSendError = true
                                     return
                                 }
+                                let submissionLogs = reportLogs
+                                let submissionDescription = description
+                                let submissionReference = reference
+                                let submissionThread = selectedThread.isEmpty ? nil : selectedThread
                                 descriptionFocused = false; attempted = true
                                 Task {
-                                    await discord.send(description: description, logs: reportLogs, reference: reference, threadID: selectedThread.isEmpty ? nil : selectedThread)
+                                    await discord.send(description: submissionDescription, logs: submissionLogs, reference: submissionReference, threadID: submissionThread)
                                     guard !visitEnded else { return }
                                     if discord.threadURL != nil {
                                         dismiss()

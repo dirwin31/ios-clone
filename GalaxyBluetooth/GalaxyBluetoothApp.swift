@@ -879,7 +879,7 @@ struct GalaxyRootView: View {
                 } else if model.developerMode && (model.tab == .live || model.tab == .diagnostics) {
                     CompanionView(diagnostics: model.diagnostics)
                 } else if model.tab == .connections || !model.opened {
-                    ConnectionSettingsView(model: model, returningFromGalaxy: hasVisitedGalaxy, select: select)
+                    ConnectionSettingsView(model: model, returningFromGalaxy: hasVisitedGalaxy, select: select, submitReport: presentReport)
                 }
             }.frame(maxWidth: .infinity, maxHeight: .infinity)
 

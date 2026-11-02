@@ -14,6 +14,7 @@ struct ConnectionSettingsView: View {
     @ObservedObject var audio: AudioPairing
     let returningFromGalaxy: Bool
     let select: (CompanionTab) -> Void
+    let submitReport: () -> Void
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.openURL) private var openURL
     @AppStorage("galaxy.app.language") private var language = "en"
@@ -37,14 +38,20 @@ struct ConnectionSettingsView: View {
     private var connected: Bool { model.transport.connected }
     private var pairing: Bool { model.pairingInProgress }
     private var needsPairing: Bool {
-        model.mode == .bluetooth && (model.pairingKey.isEmpty || !bluetooth.hasSavedDevice)
+        model.mode == .bluetooth && (Data(hex: model.pairingKey)?.count != 32 || !bluetooth.hasSavedDevice || bluetooth.pairingRecoveryNeeded)
     }
     private var connecting: Bool { !connected && (bluetooth.connecting || bluetooth.isScanning) }
     private var primaryTitle: String {
         if pairing { return "Pairing…" }
         if connected { return model.opened ? "Open Galaxy" : "Preparing Galaxy…" }
-        if connecting { return "Connecting…" }
-        return needsPairing ? (model.hasLANPairingSetup ? "Pair with comma" : "Connect over Local Wi-Fi first") : "Connect"
+        if connecting { return bluetooth.isScanning ? "Finding comma…" : "Connecting…" }
+        if needsPairing {
+            if !model.hasLANPairingSetup { return "Connect over Local Wi-Fi first" }
+            if bluetooth.pairingRecoveryNeeded { return "Pair Bluetooth again" }
+            return model.pairingFailure.isEmpty ? "Set up Bluetooth" : "Retry Bluetooth setup"
+        }
+        if model.mode == .bluetooth { return "Reconnect Bluetooth" }
+        return "Connect"
     }
     private var connectionCandidates: [DiscoveredComma] {
         var devices = discovery.devices
@@ -58,8 +65,9 @@ struct ConnectionSettingsView: View {
     private var checking: Bool { model.matchingGalaxy || assets.checking }
     private var status: String { pairing ? "Pairing with comma…" : connected ? "Connected via \(model.transport.label)" : connecting ? "Connecting to comma…" : "Not connected" }
 
-    init(model: AppModel, returningFromGalaxy: Bool, select: @escaping (CompanionTab) -> Void) {
+    init(model: AppModel, returningFromGalaxy: Bool, select: @escaping (CompanionTab) -> Void, submitReport: @escaping () -> Void) {
         self.model = model; self.returningFromGalaxy = returningFromGalaxy; self.select = select
+        self.submitReport = submitReport
         bluetooth = model.bluetooth; lan = model.lan; assets = model.assets; server = model.server
         discovery = model.discovery; location = model.phoneLocation; audio = model.audioPairing
     }
@@ -166,10 +174,10 @@ struct ConnectionSettingsView: View {
             } message: {
                 Text("This hotspot address is available in the device list, but your iPhone couldn’t reach and verify comma there. In iPhone Settings → Wi-Fi, join comma’s TheGalaxy-… network using the hotspot password shown on comma. Then return here and tap the comma row again.")
             }
-            .alert("Reset Bluetooth pairing", isPresented: $showPairingHelp) {
+            .alert("Reconnect Bluetooth", isPresented: $showPairingHelp) {
                 Button("OK", role: .cancel) {}
             } message: {
-                Text("If Bluetooth still won’t connect, try a fresh pairing:\n\n1. In this app, open Advanced → Forget Bluetooth pairing.\n2. On comma, open Bluetooth settings and forget this iPhone. Remove its app pairing too if it is listed separately.\n3. On iPhone, open Settings → Bluetooth → ⓘ beside comma → Forget This Device, if listed.\n4. Connect to comma over Local Wi-Fi, then start Bluetooth setup in this app. The app opens pairing on comma automatically.\n\nThis resets device pairing, not the app’s Bluetooth permission.")
+                Text("1. Keep comma powered on and nearby, with Bluetooth enabled. Allow this app Bluetooth access in iPhone Settings.\n2. Try reconnecting. If key verification repeatedly fails, the main button will offer pairing again.\n3. To pair again, join comma’s Wi-Fi network or hotspot. If the saved address cannot be reached, choose Local Wi-Fi in this app and select comma, then return to Bluetooth.\n4. Tap the setup button. The app opens the pairing window on comma automatically and shows progress here.\n\nYou normally do not need to tap Pair on comma or forget devices in iPhone Bluetooth settings. Audio pairing is separate from this app connection.")
             }
             .confirmationDialog("Forget Bluetooth pairing?", isPresented: $confirmForget, titleVisibility: .visible) {
                 Button("Forget pairing", role: .destructive) {
@@ -229,6 +237,16 @@ struct ConnectionSettingsView: View {
                     .multilineTextAlignment(.center).frame(maxWidth: .infinity)
                     .fixedSize(horizontal: false, vertical: true).padding(.vertical, 3)
             }
+            if needsPairing && !pairing && !connecting {
+                if bluetooth.pairingRecoveryNeeded {
+                    Text("We found comma, but couldn’t verify your saved pairing after repeated attempts. The pairing may have changed, or the connection may be interrupted.")
+                        .font(.caption).foregroundStyle(muted).multilineTextAlignment(.center)
+                }
+                Text(model.hasLANPairingSetup
+                     ? "1. Keep comma on and nearby.\n2. Join the same Wi-Fi as comma, or comma’s hotspot.\n3. Tap the button below. This app opens pairing on comma automatically, then connects over Bluetooth."
+                     : "1. Join the same Wi-Fi as comma, or comma’s hotspot.\n2. Tap below and select your comma.\n3. Once Local Wi-Fi connects, select Bluetooth here to finish setup.")
+                    .font(.caption).foregroundStyle(muted).multilineTextAlignment(.center)
+            }
             if model.mode != .bluetooth && !connected && !pairing && (discovery.searching || !connectionCandidates.isEmpty) {
                 discoveredCommas
             } else {
@@ -255,6 +273,12 @@ struct ConnectionSettingsView: View {
                     .foregroundStyle(Color(red: 0.12, green: 0.06, blue: 0.19))
             }.buttonStyle(.plain).disabled(pairing || connecting || (connected && !model.opened))
             }
+            if bluetooth.pairingRecoveryNeeded && model.mode == .bluetooth && !pairing && !connecting && !connected {
+                Button("Try saved pairing once more") {
+                    bluetooth.retrySavedPairing()
+                    model.connect()
+                }.font(.caption).frame(maxWidth: .infinity, minHeight: 44)
+            }
             if pairing {
                 Button("Cancel pairing") { model.cancelPairing() }.font(.system(size: 12)).frame(maxWidth: .infinity, minHeight: 30)
             } else if !model.pairingFailure.isEmpty {
@@ -263,8 +287,20 @@ struct ConnectionSettingsView: View {
                 connectionMessage(model.connectionMessage)
             }
             if !pairing && (!model.pairingFailure.isEmpty || (bluetooth.connectionFailed && model.mode != .lan)) {
-                Button("Bluetooth trouble? Try resetting pairing") { showPairingHelp = true }
+                Button("Bluetooth connection help") { showPairingHelp = true }
                     .font(.system(size: 11)).foregroundStyle(accent).frame(minHeight: 30)
+            }
+            if !pairing && !connecting && !connected {
+                VStack(spacing: 4) {
+                    Text("Still not working? Submit a log so we can investigate. Describe what happened and which steps you tried.")
+                        .font(.caption).foregroundStyle(muted).multilineTextAlignment(.center)
+                    Button(action: submitReport) {
+                        Label("Submit connection log", systemImage: "bubble.left.and.exclamationmark.bubble.right")
+                            .font(.system(size: 12, weight: .medium)).frame(maxWidth: .infinity, minHeight: 44)
+                    }
+                    Text("Review your report before sending. Includes the installed app build and a fresh diagnostic snapshot when you tap Send. Internet access is needed to send it.")
+                        .font(.caption2).foregroundStyle(muted).multilineTextAlignment(.center)
+                }
             }
         }.padding(14).background(LinearGradient(colors: [panel, background], startPoint: .topLeading, endPoint: .bottomTrailing), in: RoundedRectangle(cornerRadius: 22))
             .overlay(RoundedRectangle(cornerRadius: 22).stroke(accent.opacity(0.25)))

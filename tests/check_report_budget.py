@@ -5,6 +5,24 @@ helper = source[source.index('enum DiagnosticReportBudget'):source.index('privat
 probe = 'import Foundation\n' + helper + r'''
 let small = "normal diagnostics"
 precondition(DiagnosticReportBudget.fit(small) == small)
+var captureCount = 0
+var liveLogs = "Latest connection event"
+let submitted = SubmissionDiagnostics.capture(logs: { captureCount += 1; return liveLogs },
+    now: Date(timeIntervalSince1970: 0), version: "1.0.5", build: "87")
+precondition(captureCount == 1)
+precondition(submitted.contains("Installed app at Send: 1.0.5 (87)"))
+precondition(submitted.contains("Captured at Send (UTC): 1970-01-01T00:00:00Z"))
+precondition(submitted.contains(liveLogs))
+liveLogs = "Later connection event"
+precondition(!submitted.contains(liveLogs), "Retry snapshot must remain immutable")
+let next = SubmissionDiagnostics.capture(logs: { captureCount += 1; return liveLogs }, version: "1.0.6", build: "88")
+precondition(captureCount == 2 && next.contains(liveLogs) && next.contains("1.0.6 (88)"))
+precondition(SubmissionDiagnostics.capture(logs: { "  \n" }).isEmpty)
+let oversizedSubmission = SubmissionDiagnostics.capture(logs: { String(repeating: "x", count: 200000) },
+    version: "1.0.5", build: "87", maximumBytes: 128 * 1024)
+precondition(oversizedSubmission.hasPrefix("StarPilot report submission\nInstalled app at Send: 1.0.5 (87)"))
+let submissionSize = try JSONEncoder().encode(oversizedSubmission).count
+precondition(submissionSize < 64 * 1024)
 let routineMessages = [
     "Request completed: HTTP 200; cancelled=false",
     "Upload finished: HTTP 204; consecutive failures=0; cancelled=false",
