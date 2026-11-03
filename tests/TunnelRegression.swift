@@ -24,10 +24,14 @@ import Foundation
     var identity = "0123456789abcdef"
     var status = 200
     var requests: [URLRequest] = []
+    var errorBody: Data?
     var legacyOnly = false
     var htmlEverywhere = false
     func load(_ request: URLRequest, _ limit: Int) async throws -> (Data, HTTPURLResponse) {
         requests.append(request)
+        if let errorBody, status >= 500 {
+            return (errorBody, HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: ["Content-Type": "application/json", "CF-Ray": "0123456789abcdef-YYZ", "Retry-After": "30", "Set-Cookie": "secret-cookie"])!)
+        }
         if htmlEverywhere || (legacyOnly && request.url!.path.hasSuffix("/api/companion/runtime")) {
             return (Data(("<html>private response " + String(repeating: "x", count: 2580)).utf8), HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: ["Content-Type":"text/html"])!)
         }
@@ -89,6 +93,37 @@ import Foundation
         try denied.configure(TunnelCredential(url: url, cookie: "opaque-token", deviceID: ""))
         let deniedResult = await denied.probe()
         precondition(!deniedResult && deniedServer.requests.count == 1, "Do not retry an authentication rejection through another path")
+        let unavailableServer = TunnelServer()
+        unavailableServer.status = 503
+        unavailableServer.errorBody = Data(#"{"error":"Comma cannot be reached: private-url secret-cookie", "code":"private-code"}"#.utf8)
+        let unavailable = TunnelTransport(load: { try await unavailableServer.load($0, $1) })
+        try unavailable.configure(TunnelCredential(url: url, cookie: "secret-cookie", deviceID: ""))
+        var failureEvents: [String] = []
+        unavailable.onDiagnostic = { failureEvents.append($0) }
+        let unavailableResult = await unavailable.probe()
+        precondition(!unavailableResult && !unavailable.connected)
+        precondition(unavailableServer.requests.map { $0.url!.path } == ["/abcdefghijklmnop/api/companion/runtime", "/abcdefghijklmnop/data/runtime.json", "/abcdefghijklmnop/api/auth/session"])
+        precondition(unavailableServer.requests.allSatisfy { $0.httpMethod == "GET" })
+        let failureText = failureEvents.joined()
+        precondition(failureText.contains("category=upstream-unreachable") && failureText.contains("cf-ray=0123456789abcdef-YYZ") && failureText.contains("retry-after seconds=30"))
+        for secret in ["private-url", "secret-cookie", "private-code", "abcdefghijklmnop"] { precondition(!failureText.contains(secret)) }
+        let repeatedFailure = await unavailable.probe()
+        precondition(!repeatedFailure && unavailableServer.requests.count == 4, "Failure comparisons are rate limited")
+        let diagnosticSuccess = TunnelTransport(load: { request, _ in
+            let primary = request.url!.path.hasSuffix("/api/companion/runtime")
+            let body = primary ? Data(#"{"error":"offline"}"#.utf8) : Data(#"{"schemaVersion":1,"monitor":"local","instance":"0123456789abcdef","authenticated":true,"gatewayAccess":true}"#.utf8)
+            return (body, HTTPURLResponse(url: request.url!, statusCode: primary ? 503 : 200, httpVersion: nil, headerFields: nil)!)
+        })
+        try diagnosticSuccess.configure(TunnelCredential(url: url, cookie: "opaque-token", deviceID: ""))
+        var comparisonEvents: [String] = []
+        diagnosticSuccess.onDiagnostic = { comparisonEvents.append($0) }
+        let comparisonVerified = await diagnosticSuccess.probe()
+        precondition(!comparisonVerified && !diagnosticSuccess.connected, "Diagnostic success must not override the failing primary probe")
+        precondition(comparisonEvents.contains { $0.contains("authenticated=true; gatewayAccess=true") })
+        let unsafeHeaders = HTTPURLResponse(url: URL(string: url)!, statusCode: 503, httpVersion: nil, headerFields: ["CF-Ray": "secret-cookie", "Location": url, "Retry-After": "secret-cookie"])!
+        let unknownFailure = TunnelTransport.failureDiagnostic(Data(#"{"error":"secret-cookie"}"#.utf8), unsafeHeaders)
+        precondition(unknownFailure.contains("category=unclassified") && unknownFailure.contains("redirect present=true"))
+        precondition(!unknownFailure.contains("secret-cookie") && !unknownFailure.contains(url))
         let wifi = RouteStub("wifi"), remote = RouteStub("tunnel"), ble = RouteStub("ble")
         let preferred = PreferredTransport(lan: wifi, bluetooth: ble, tunnel: remote,
             invalidateTunnel: { _ in remote.connected = false }, invalidateLAN: { _ in wifi.connected = false })

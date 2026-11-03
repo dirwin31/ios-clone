@@ -516,6 +516,7 @@ final class TunnelTransport: ObservableObject, GalaxyRequestTransport {
     private var probeNumber = 0
     private var runtimePath = "/api/companion/runtime"
     private var lastProbeDetail = "Not attempted"
+    private var lastFailureComparison = -Double.infinity
     var diagnosticSummary: String {
         "configured=\(credential != nil); expected identity saved=\(expectedDeviceID != nil); credential identity saved=\(!(credential?.deviceID.isEmpty ?? true)); preferred runtime path=\(runtimePath); last probe=\(lastProbeDetail)"
     }
@@ -562,11 +563,36 @@ final class TunnelTransport: ObservableObject, GalaxyRequestTransport {
                 lastProbeDetail = Self.probeDetail(path, data, response)
                 onDiagnostic?("Tunnel probe \(attempt): \(lastProbeDetail)")
             }
+            // Diagnostic reads never verify a connection or replace the primary response.
+            // Rate-limit during outages and retain cancellation/session boundaries.
+            if (500...599).contains(response.statusCode), onDiagnostic != nil,
+               ProcessInfo.processInfo.systemUptime - lastFailureComparison >= 120 {
+                lastFailureComparison = ProcessInfo.processInfo.systemUptime
+                for diagnosticPath in [path == "/api/companion/runtime" ? "/data/runtime.json" : "/api/companion/runtime", "/api/auth/session"] {
+                    do {
+                        let (sample, reply) = try await send(path: diagnosticPath, method: "GET", headers: [:], body: Data(), limit: 4096)
+                        guard !Task.isCancelled, generation == original else { return false }
+                        onDiagnostic?("Tunnel failure comparison: \(Self.probeDetail(diagnosticPath, sample, reply))")
+                        if diagnosticPath == "/api/auth/session", reply.statusCode == 200,
+                           let json = try? JSONSerialization.jsonObject(with: sample) as? [String: Any],
+                           let authenticated = json["authenticated"] as? Bool {
+                            onDiagnostic?("Tunnel session comparison: authenticated=\(authenticated); gatewayAccess=\(json["gatewayAccess"] as? Bool == true)")
+                        }
+                    } catch {
+                        guard !Task.isCancelled, generation == original else { return false }
+                        onDiagnostic?("Tunnel failure comparison \(diagnosticPath): \(LANTransport.failureCode(error))")
+                    }
+                }
+            }
             let persistent = LANTransport.persistentIdentity(url: Self.endpoint(credential.url)!)
             let savedCredentialMatches = !credential.deviceID.hasPrefix("galaxy:") || credential.deviceID == persistent
             let runtime = LANTransport.deviceID(data)
             let savedDeviceMatches = runtime.map { LANTransport.matches(expectedDeviceID, runtime: $0, persistent: persistent) } ?? false
+            if response.statusCode == 200 {
             onDiagnostic?("Tunnel identity check: valid runtime=\(runtime != nil); saved credential matches URL=\(savedCredentialMatches); saved comma matches=\(savedDeviceMatches); legacy identity=\(!credential.deviceID.isEmpty && !credential.deviceID.hasPrefix("galaxy:"))")
+            } else {
+                onDiagnostic?("Tunnel identity check skipped: server returned HTTP \(response.statusCode); saved credential matches URL=\(savedCredentialMatches)")
+            }
             guard response.statusCode == 200, let runtime,
                   // The authenticated, fixed tunnel URL identifies the saved tunnel across restarts.
                   (!credential.deviceID.hasPrefix("galaxy:") || credential.deviceID == persistent),
@@ -594,7 +620,32 @@ final class TunnelTransport: ObservableObject, GalaxyRequestTransport {
         }
     }
     private static func probeDetail(_ path: String, _ data: Data, _ response: HTTPURLResponse) -> String {
-        "\(path): \(LANTransport.responseDiagnostic(data, response))"
+        if response.statusCode == 200, path == "/api/auth/session" {
+            return "\(path): HTTP 200; bytes=\(data.count); JSON object=\((try? JSONSerialization.jsonObject(with: data)) is [String: Any])"
+        }
+        if response.statusCode == 200 {
+            return "\(path): \(LANTransport.responseDiagnostic(data, response))"
+        }
+        return "\(path): \(failureDiagnostic(data, response))"
+    }
+    static func failureDiagnostic(_ data: Data, _ response: HTTPURLResponse) -> String {
+        // Never emit arbitrary server text, URLs, cookies or header values.
+        // A digest correlates repeated unknown responses without retaining their payload.
+        let fingerprint = SHA256.hash(data: data).prefix(8).map { String(format: "%02x", $0) }.joined()
+        let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+        let message = ((json?["error"] as? String) ?? (json?["message"] as? String) ?? "").lowercased()
+        let category: String
+        if message.contains("unreachable") || message.contains("cannot be reached") || message.contains("could not be reached") { category = "upstream-unreachable" }
+        else if message.contains("offline") { category = "upstream-offline" }
+        else if message.contains("timed out") || message.contains("timeout") { category = "upstream-timeout" }
+        else if message.contains("sign in") || message.contains("unauthorized") || message.contains("session") { category = "authentication-related" }
+        else { category = "unclassified" }
+        let mime = response.mimeType?.lowercased() ?? ""
+        let type = mime.contains("json") ? "JSON" : mime.contains("html") ? "HTML" : "other"
+        let retry = response.value(forHTTPHeaderField: "Retry-After").flatMap(Int.init).map { String(min(max($0, 0), 86400)) } ?? "absent-or-date"
+        let ray = response.value(forHTTPHeaderField: "CF-Ray") ?? ""
+        let safeRay = ray.range(of: "^[0-9a-fA-F]{16,32}-[A-Z]{3}$", options: .regularExpression) != nil ? ray : "absent-or-redacted"
+        return "HTTP \(response.statusCode); bytes=\(data.count); content-type=\(type); category=\(category); body fingerprint=\(fingerprint); error field=\(json?["error"] != nil); message field=\(json?["message"] != nil); code field=\(json?["code"] != nil); retry-after seconds=\(retry); cf-ray=\(safeRay); redirect present=\(response.value(forHTTPHeaderField: "Location") != nil)"
     }
     private func send(path: String, method: String, headers: [String: String], body: Data, limit: Int) async throws -> (Data, HTTPURLResponse) {
         guard let credential, let endpoint = Self.endpoint(credential.url),
