@@ -17,6 +17,7 @@ struct ConnectionSettingsView: View {
     let submitReport: () -> Void
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.openURL) private var openURL
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @AppStorage("galaxy.app.language") private var language = "en"
     @AppStorage("galaxy.app.followGalaxyLanguage") private var followGalaxyLanguage = true
     @AppStorage("galaxy.location.hideIndicator") private var hideLocationIndicator = false
@@ -73,17 +74,14 @@ struct ConnectionSettingsView: View {
     }
 
     var body: some View {
-        if DuoLayout.isEnabled {
-            GeometryReader { geometry in
-                let correction = (geometry.safeAreaInsets.trailing - geometry.safeAreaInsets.leading) / 2
-                settingsContent(width: min(460, max(0, geometry.size.width - abs(correction) * 2)), offset: correction)
-            }
-        } else {
-            settingsContent(width: nil, offset: 0)
+        GeometryReader { geometry in
+            // Use available content width, after the system reserves its side rail.
+            let wide = DuoLayout.isEnabled && geometry.size.width >= 640 && !dynamicTypeSize.isAccessibilitySize
+            settingsContent(wide: wide)
         }
     }
 
-    private func settingsContent(width: CGFloat?, offset: CGFloat) -> some View {
+    private func settingsContent(wide: Bool) -> some View {
         ScrollView {
             VStack(spacing: 8) {
                 HStack {
@@ -98,19 +96,27 @@ struct ConnectionSettingsView: View {
                     Spacer(minLength: 0)
                     Color.clear.frame(width: 44, height: 44)
                 }
-                ConnectionOrbit(route: connected ? model.transport.label : "", pairing: pairing)
-                    .padding(.bottom, 10)
-                connectionPanel
-                Text("PREFERENCES").font(.system(size: 11, weight: .medium)).tracking(1.2)
-                    .foregroundStyle(muted).frame(maxWidth: .infinity, alignment: .leading)
-                preferences
-                row("network", title: "Galaxy tunnel", subtitle: model.tunnel.credential == nil ? "Not set up" : model.tunnel.status) {
-                    Button(model.tunnel.credential == nil ? "Set up" : "Manage") { showTunnel = true }.accessibilityIdentifier("tunnel-setup")
-                }.padding(14).background(panel, in: RoundedRectangle(cornerRadius: 16))
-                DisclosureGroup(isExpanded: $advanced) { advancedControls.padding(.top, 8) } label: {
-                    Text("Advanced connection options").font(.system(size: 13)).frame(minHeight: 30)
-                }.tint(accent).padding(.horizontal, 14).padding(.vertical, 7).background(panel, in: RoundedRectangle(cornerRadius: 16))
-                    .overlay(RoundedRectangle(cornerRadius: 16).stroke(accent.opacity(0.16)))
+                if wide {
+                    HStack(alignment: .top, spacing: 20) {
+                        VStack(alignment: .leading, spacing: 8) {
+                            preferencesHeading
+                            preferences
+                        }.frame(maxWidth: .infinity)
+
+                        VStack(spacing: 8) {
+                            connectionPanel
+                            connectionExtras
+                        }.frame(maxWidth: .infinity)
+                    }
+                    .padding(.top, 12)
+                } else {
+                    ConnectionOrbit(route: connected ? model.transport.label : "", pairing: pairing)
+                        .padding(.bottom, 10)
+                    connectionPanel
+                    preferencesHeading
+                    preferences
+                    connectionExtras
+                }
                 HStack(spacing: 18) {
                     Button(model.loadingLegacyURL ? "Getting link…" : "Legacy Galaxy") {
                         Task { if let url = await model.fetchLegacyURL() {
@@ -135,7 +141,7 @@ struct ConnectionSettingsView: View {
                 Text("StarPilot BT · \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "")")
                     .font(.system(size: 11)).foregroundStyle(muted)
             }.padding(.horizontal, 18).padding(.top, 0).padding(.bottom, 12)
-                .frame(width: width).frame(maxWidth: 460).frame(maxWidth: .infinity).offset(x: offset)
+                .frame(maxWidth: wide ? 1200 : 460).frame(maxWidth: .infinity)
         }.scrollBounceBehavior(.basedOnSize).background {
             if model.navigationEnabled { LinearGradient(colors: [background, panel.opacity(0.8)], startPoint: .topLeading, endPoint: .bottomTrailing).ignoresSafeArea() }
             else { background.ignoresSafeArea() }
@@ -185,6 +191,23 @@ struct ConnectionSettingsView: View {
                     lan.bind(to: nil); UserDefaults.standard.removeObject(forKey: "galaxy.comma.identity")
                 }
             } message: { Text("This removes the saved app pairing. Pair your phone again to reconnect.") }
+    }
+
+    private var preferencesHeading: some View {
+        Text("PREFERENCES").font(.system(size: 11, weight: .medium)).tracking(1.2)
+            .foregroundStyle(muted).frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var connectionExtras: some View {
+        VStack(spacing: 8) {
+            row("network", title: "Galaxy tunnel", subtitle: model.tunnel.credential == nil ? "Not set up" : model.tunnel.status) {
+                Button(model.tunnel.credential == nil ? "Set up" : "Manage") { showTunnel = true }.accessibilityIdentifier("tunnel-setup")
+            }.padding(14).background(panel, in: RoundedRectangle(cornerRadius: 16))
+            DisclosureGroup(isExpanded: $advanced) { advancedControls.padding(.top, 8) } label: {
+                Text("Advanced connection options").font(.system(size: 13)).frame(minHeight: 30)
+            }.tint(accent).padding(.horizontal, 14).padding(.vertical, 7).background(panel, in: RoundedRectangle(cornerRadius: 16))
+                .overlay(RoundedRectangle(cornerRadius: 16).stroke(accent.opacity(0.16)))
+        }
     }
 
     private func openReconnectedGalaxy() {
