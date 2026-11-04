@@ -134,6 +134,7 @@ final class AppModel: ObservableObject {
             if mode == .lan { bluetooth.disconnect() }
             if mode == .bluetooth { discovery.stop(); lan.invalidate(reason: "Bluetooth-only mode selected") }
             if mode != .automatic { tunnelProbeTask?.cancel(); tunnel.invalidate("Tunnel paused in " + mode.title) }
+            if oldValue != mode { resumeAutomaticTunnel() }
             logConnection("Connection mode selected: \(mode.title)")
         }
     }
@@ -154,6 +155,15 @@ final class AppModel: ObservableObject {
     }
     private var tunnelProbeTask: Task<Void, Never>?
     private var lastTunnelProbe = Date.distantPast
+    private func resumeAutomaticTunnel() {
+        guard mode == .automatic else { return }
+        // A user returning to Automatic should not inherit the paused route's cooldown.
+        // The monitor starts the next check after any cancelled probe has unwound.
+        lastTunnelProbe = .distantPast
+        if tunnel.credential != nil {
+            tunnel.invalidate("Tunnel check pending in Automatic")
+        }
+    }
     func forgetTunnel() {
         tunnelProbeTask?.cancel()
         tunnel.forget(); TunnelKeyStore.remove()

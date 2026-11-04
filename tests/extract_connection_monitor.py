@@ -35,6 +35,12 @@ enum ConnectionMode: String { case automatic, bluetooth, lan }
         return false
     }
 }
+@MainActor final class Tunnel {
+    var credential: String? = "saved"
+    var status = "Tunnel paused in Bluetooth only"
+    var invalidations = 0
+    func invalidate(_ reason: String) { status = reason; invalidations += 1 }
+}
 @MainActor final class Transport {
     let label = "Reconnecting…"
     var connected = false
@@ -45,6 +51,7 @@ enum ConnectionMode: String { case automatic, bluetooth, lan }
 @MainActor final class Log { func recordState(_ key: String, _ event: String) {} }
 @MainActor final class MonitorProbe {
     let connectionLog = Log()
+    let tunnel = Tunnel()
     let bluetooth = Bluetooth(), lan = LAN(), transport = Transport(), discovery = Discovery()
     let assets = Assets()
     let audioPairing = Audio()
@@ -81,6 +88,20 @@ tests = r'''
             precondition(fresh.wantsConnection)
             precondition(fresh.discovery.searching == (mode != .bluetooth), "First connection must browse LAN unless Bluetooth-only")
         }
+        let resuming = MonitorProbe()
+        resuming.lastTunnelProbe = Date()
+        resuming.mode = .bluetooth
+        let pausedDate = resuming.lastTunnelProbe
+        resuming.resumeAutomaticTunnel()
+        precondition(resuming.lastTunnelProbe == pausedDate && resuming.tunnel.invalidations == 0, "Bluetooth-only must not resume the tunnel")
+        resuming.mode = .automatic
+        resuming.resumeAutomaticTunnel()
+        precondition(Date().timeIntervalSince(resuming.lastTunnelProbe) >= 30, "Returning to Automatic allows the next monitor tick to probe immediately")
+        precondition(resuming.tunnel.status == "Tunnel check pending in Automatic" && resuming.tunnel.invalidations == 1, "Do not retain a Bluetooth-only pause label in Automatic")
+        let unconfigured = MonitorProbe()
+        unconfigured.tunnel.credential = nil
+        unconfigured.resumeAutomaticTunnel()
+        precondition(unconfigured.tunnel.invalidations == 0, "Do not imply a tunnel is configured when it is not")
         let saved = MonitorProbe()
         saved.address = "192.168.1.20"
         saved.connect()
@@ -120,4 +141,4 @@ tests = r'''
     }
 }
 '''
-Path(sys.argv[1]).write_text(stubs + '\n' + method('    func connect()') + '\n' + method('    private func probeLocalConnection()') + '\n' + method('    func monitor() async') + tests)
+Path(sys.argv[1]).write_text(stubs + '\n' + method('    private func resumeAutomaticTunnel()').replace('private func', 'func') + '\n' + method('    func connect()') + '\n' + method('    private func probeLocalConnection()') + '\n' + method('    func monitor() async') + tests)
