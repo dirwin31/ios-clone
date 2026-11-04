@@ -74,14 +74,27 @@ struct ConnectionSettingsView: View {
     }
 
     var body: some View {
-        GeometryReader { geometry in
-            // Use available content width, after the system reserves its side rail.
-            let wide = DuoLayout.isEnabled && geometry.size.width >= 640 && !dynamicTypeSize.isAccessibilitySize
-            settingsContent(wide: wide)
+        if DuoLayout.isEnabled {
+            GeometryReader { geometry in
+                // Measure the full horizontal viewport and reserve the system rail once.
+                // Centering in this inset rectangle also works when the rail changes sides.
+                let leading = geometry.safeAreaInsets.leading
+                let trailing = geometry.safeAreaInsets.trailing
+                let width = max(0, geometry.size.width - leading - trailing)
+                let wide = width >= 640 && !dynamicTypeSize.isAccessibilitySize
+                let breathingRoom: CGFloat = wide ? min(12, max(0, (geometry.size.height - 500) / 16)) : 0
+                settingsContent(wide: wide, breathingRoom: breathingRoom)
+                    .frame(width: width, height: geometry.size.height)
+                    .padding(.leading, leading)
+                    .padding(.trailing, trailing)
+            }
+            .ignoresSafeArea(.container, edges: .horizontal)
+        } else {
+            settingsContent(wide: false)
         }
     }
 
-    private func settingsContent(wide: Bool) -> some View {
+    private func settingsContent(wide: Bool, breathingRoom: CGFloat = 0) -> some View {
         ScrollView {
             VStack(spacing: 8) {
                 HStack {
@@ -98,23 +111,24 @@ struct ConnectionSettingsView: View {
                 }
                 if wide {
                     HStack(alignment: .top, spacing: 20) {
-                        VStack(alignment: .leading, spacing: 8) {
+                        VStack(alignment: .leading, spacing: 8 + breathingRoom) {
                             preferencesHeading
-                            preferences
+                            preferences(breathingRoom: breathingRoom)
                         }.frame(maxWidth: .infinity)
 
-                        VStack(spacing: 8) {
-                            connectionPanel
+                        VStack(spacing: 8 + breathingRoom) {
+                            connectionPanel(breathingRoom: breathingRoom)
                             connectionExtras
                         }.frame(maxWidth: .infinity)
                     }
-                    .padding(.top, 12)
+                    .padding(.top, 12 + breathingRoom)
+                    .padding(.bottom, breathingRoom)
                 } else {
                     ConnectionOrbit(route: connected ? model.transport.label : "", pairing: pairing)
                         .padding(.bottom, 10)
-                    connectionPanel
+                    connectionPanel()
                     preferencesHeading
-                    preferences
+                    preferences()
                     connectionExtras
                 }
                 HStack(spacing: 18) {
@@ -216,8 +230,8 @@ struct ConnectionSettingsView: View {
         select(.galaxy)
     }
 
-    private var connectionPanel: some View {
-        VStack(alignment: .leading, spacing: 10) {
+    private func connectionPanel(breathingRoom: CGFloat = 0) -> some View {
+        VStack(alignment: .leading, spacing: 10 + breathingRoom) {
             HStack(spacing: 10) {
                 Image(model.transport.label == "Tunnel" ? "ConnectionNetwork" : model.transport.label == "Local Wi-Fi" ? "ConnectionWiFi" : "ConnectionBluetooth").renderingMode(.template).resizable().scaledToFit().frame(width: 20, height: 20).foregroundStyle(accent)
                     .frame(width: 38, height: 38).background(accent.opacity(0.15), in: RoundedRectangle(cornerRadius: 12))
@@ -407,8 +421,8 @@ struct ConnectionSettingsView: View {
         }
     }
 
-    private var preferences: some View {
-        VStack(spacing: 0) {
+    private func preferences(breathingRoom: CGFloat = 0) -> some View {
+        VStack(spacing: breathingRoom / 2) {
             row("music.note", title: "Phone music", subtitle: pairing ? "Waiting for app pairing" : audio.summary) {
                 Button("Set up") { model.startAudioPairing() }.disabled(!connected || pairing).font(.system(size: 12)).frame(minHeight: 44)
             }
