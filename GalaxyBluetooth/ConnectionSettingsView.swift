@@ -89,25 +89,8 @@ struct ConnectionSettingsView: View {
     }
 
     private func settingsContent(wide: Bool) -> some View {
-        Group {
-            if wide {
-                // Choose spacing by the height of the entire page, including its footer.
-                // A non-scrolling candidate is used whenever all controls fit.
-                ViewThatFits(in: .vertical) {
-                    settingsPage(wide: true, breathingRoom: 12)
-                        .fixedSize(horizontal: false, vertical: true)
-                    settingsPage(wide: true, breathingRoom: 6)
-                        .fixedSize(horizontal: false, vertical: true)
-                    settingsPage(wide: true)
-                        .fixedSize(horizontal: false, vertical: true)
-                    // Expanded advanced controls, errors, or long device lists remain reachable.
-                    ScrollView { settingsPage(wide: true) }
-                }
-                .frame(maxHeight: .infinity, alignment: .top)
-            } else {
-                ScrollView { settingsPage(wide: false) }
-            }
-
+        ScrollView {
+            settingsPage(wide: wide)
         }.scrollBounceBehavior(.basedOnSize).background {
             if model.navigationEnabled { LinearGradient(colors: [background, panel.opacity(0.8)], startPoint: .topLeading, endPoint: .bottomTrailing).ignoresSafeArea() }
             else { background.ignoresSafeArea() }
@@ -159,8 +142,10 @@ struct ConnectionSettingsView: View {
             } message: { Text("This removes the saved app pairing. Pair your phone again to reconnect.") }
     }
 
-    private func settingsPage(wide: Bool, breathingRoom: CGFloat = 0) -> some View {
-        VStack(spacing: 8) {
+    private func settingsPage(wide: Bool) -> AnyView {
+        // Bound the concrete SwiftUI type at the page boundary. Keep one page tree
+        // instead of nesting multiple complete pages in a fitting container.
+        AnyView(VStack(spacing: 8) {
             HStack {
                 if returningFromGalaxy && model.opened {
                     Button { select(.galaxy) } label: {
@@ -175,18 +160,17 @@ struct ConnectionSettingsView: View {
             }
             if wide {
                 HStack(alignment: .top, spacing: 20) {
-                    VStack(alignment: .leading, spacing: 8 + breathingRoom) {
+                    VStack(alignment: .leading, spacing: 8) {
                         preferencesHeading
-                        preferences(breathingRoom: breathingRoom)
+                        preferences()
                     }.frame(maxWidth: .infinity)
 
-                    VStack(spacing: 8 + breathingRoom) {
-                        connectionPanel(breathingRoom: breathingRoom)
+                    VStack(spacing: 8) {
+                        connectionPanel()
                         connectionExtras
                     }.frame(maxWidth: .infinity)
                 }
-                .padding(.top, 12 + breathingRoom)
-                .padding(.bottom, breathingRoom)
+                .padding(.top, 12)
             } else {
                 ConnectionOrbit(route: connected ? model.transport.label : "", pairing: pairing)
                     .padding(.bottom, 10)
@@ -219,7 +203,7 @@ struct ConnectionSettingsView: View {
             Text("StarPilot BT · \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "")")
                 .font(.system(size: 11)).foregroundStyle(muted)
         }.padding(.horizontal, 18).padding(.top, 0).padding(.bottom, 12)
-            .frame(maxWidth: wide ? 1200 : 460).frame(maxWidth: .infinity)
+            .frame(maxWidth: wide ? 1200 : 460).frame(maxWidth: .infinity))
     }
 
     private var preferencesHeading: some View {
@@ -245,8 +229,8 @@ struct ConnectionSettingsView: View {
         select(.galaxy)
     }
 
-    private func connectionPanel(breathingRoom: CGFloat = 0) -> some View {
-        VStack(alignment: .leading, spacing: 10 + breathingRoom) {
+    private func connectionPanel() -> some View {
+        VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 10) {
                 Image(model.transport.label == "Tunnel" ? "ConnectionNetwork" : model.transport.label == "Local Wi-Fi" ? "ConnectionWiFi" : "ConnectionBluetooth").renderingMode(.template).resizable().scaledToFit().frame(width: 20, height: 20).foregroundStyle(accent)
                     .frame(width: 38, height: 38).background(accent.opacity(0.15), in: RoundedRectangle(cornerRadius: 12))
@@ -436,8 +420,8 @@ struct ConnectionSettingsView: View {
         }
     }
 
-    private func preferences(breathingRoom: CGFloat = 0) -> some View {
-        VStack(spacing: breathingRoom / 2) {
+    private func preferences() -> some View {
+        VStack(spacing: 0) {
             row("music.note", title: "Phone music", subtitle: pairing ? "Waiting for app pairing" : audio.summary) {
                 Button("Set up") { model.startAudioPairing() }.disabled(!connected || pairing).font(.system(size: 12)).frame(minHeight: 44)
             }
