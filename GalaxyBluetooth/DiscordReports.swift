@@ -62,7 +62,7 @@ enum DiagnosticReportBudget {
         // Defensive fallback for an unusually large non-event snapshot.
         let characters = Array(fitted)
         low = 0; high = characters.count
-        let notice = "Upload size limit: diagnostic snapshot shortened. Full capture is available through Share diagnostics.\n"
+        let notice = "Upload size limit: diagnostic snapshot shortened. Full capture is available under Troubleshooting → Export logs.\n"
         while low < high {
             let middle = (low + high + 1) / 2
             if fits(notice + String(characters.suffix(middle))) { low = middle } else { high = middle - 1 }
@@ -221,7 +221,7 @@ final class DiscordReports: NSObject, ObservableObject, ASWebAuthenticationPrese
                 guard let updated = self.credentials else { return }; credentials = updated
             }
             let payload = ["description": description, "logs": logs, "reference": reference]
-            guard try JSONSerialization.data(withJSONObject: payload).count <= DiagnosticReportBudget.maximumBytes else { throw ReportError("This report is too large. Use Share diagnostics instead.") }
+            guard try JSONSerialization.data(withJSONObject: payload).count <= DiagnosticReportBudget.maximumBytes else { throw ReportError("This report is too large. Use Troubleshooting → Export logs instead.") }
             if let pending = pendingReport {
                 guard pending.reference == reference, pending.description == description, pending.logs == logs, pending.threadID == threadID else { throw ReportError("Reopen the report to retry the saved submission.") }
                 guard pending.userID == credentials.userID else { throw ReportError("Reconnect the Discord account used for this report, or discard it first.") }
@@ -246,7 +246,7 @@ final class DiscordReports: NSObject, ObservableObject, ASWebAuthenticationPrese
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         if let token { request.setValue("Bearer " + token, forHTTPHeaderField: "Authorization") }
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
-        guard (request.httpBody?.count ?? 0) <= DiagnosticReportBudget.maximumBytes else { throw ReportError("This report is too large. Use Share diagnostics instead.") }
+        guard (request.httpBody?.count ?? 0) <= DiagnosticReportBudget.maximumBytes else { throw ReportError("This report is too large. Use Troubleshooting → Export logs instead.") }
         let (data, response) = try await URLSession.shared.data(for: request)
         let result = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:]
         guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {

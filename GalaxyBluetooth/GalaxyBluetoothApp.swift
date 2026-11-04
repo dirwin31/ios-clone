@@ -1288,12 +1288,12 @@ private struct DeveloperLogsView: View {
                 VStack(alignment: .leading, spacing: 14) {
                     Label("Need a hand?", systemImage: "bubble.left.and.exclamationmark.bubble.right.fill")
                         .font(.headline).foregroundStyle(accent)
-                    Text("Tell us what happened and send diagnostics to the support forum.")
+                    Text("Report a problem through Discord to keep your logs and support replies together.")
                         .font(.subheadline).foregroundStyle(muted)
                     Button {
                         submitReport()
                     } label: {
-                        Label("Report a problem", systemImage: "bubble.left.and.exclamationmark.bubble.right")
+                        Label("Report a problem on Discord", systemImage: "bubble.left.and.exclamationmark.bubble.right")
                             .font(.headline).frame(maxWidth: .infinity).padding(.vertical, 13)
                             .foregroundStyle(.white).background(accent, in: Capsule())
                     }.buttonStyle(.plain)
@@ -1301,60 +1301,65 @@ private struct DeveloperLogsView: View {
                     .background(panel, in: RoundedRectangle(cornerRadius: 22))
                 DisclosureGroup {
                     VStack(alignment: .leading, spacing: 14) {
-                    Text("Preview your logs or share a file. Nothing is sent until you choose to share or submit it.")
-                        .font(.subheadline).foregroundStyle(muted)
-                    Picker("Report", selection: $log.section) {
-                        ForEach(["Connections", "Galaxy", "Live View"], id: \.self) { Text($0).tag($0) }
-                    }.pickerStyle(.segmented)
-                    HStack {
-                        Button(log.copied ? "Copied" : "Copy selected", systemImage: "doc.on.doc") {
-                            UIPasteboard.general.string = selectedReport(); log.copied = true
-                        }
-                        Spacer()
-                        Button("Refresh", systemImage: "arrow.clockwise") { log.detail = previewReport(); log.copied = false }
-                    }.font(.subheadline.weight(.semibold)).foregroundStyle(accent)
-                    Button("Copy all diagnostics", systemImage: "doc.on.doc") {
-                        UIPasteboard.general.string = allReports(); log.copied = true
-                    }.font(.subheadline.weight(.semibold)).foregroundStyle(accent)
-                Button(exporting ? "Preparing report…" : "Share diagnostics .txt", systemImage: "square.and.arrow.up") {
-                    guard !exporting else { return }
-                    exporting = true; exportStatus = ""
-                    let report = allReports()
-                    Task {
-                        do {
-                            let url = try await Task.detached(priority: .utility) {
-                                let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+                        DisclosureGroup("View diagnostic logs") {
+                            VStack(alignment: .leading, spacing: 14) {
+                                Picker("Report", selection: $log.section) {
+                                    ForEach(["Connections", "Galaxy", "Live View"], id: \.self) { Text($0).tag($0) }
+                                }.pickerStyle(.segmented)
+                                HStack {
+                                    Button(log.copied ? "Copied" : "Copy selected", systemImage: "doc.on.doc") {
+                                        UIPasteboard.general.string = selectedReport(); log.copied = true
+                                    }
+                                    Spacer()
+                                    Button("Refresh", systemImage: "arrow.clockwise") { log.detail = previewReport(); log.copied = false }
+                                }.font(.subheadline.weight(.semibold)).foregroundStyle(accent)
+                                Button("Copy all diagnostics", systemImage: "doc.on.doc") {
+                                    UIPasteboard.general.string = allReports(); log.copied = true
+                                }.font(.subheadline.weight(.semibold)).foregroundStyle(accent)
+                                Text("Preview shows the latest 150 connection events. Copy or share includes the full retained log.")
+                                .font(.caption).foregroundStyle(.secondary)
+                                Text(log.detail)
+                                .font(.system(.caption, design: .monospaced)).textSelection(.enabled)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(14).background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 20))
+                                Button("Clear connection history") { log.clear(); log.detail = previewReport() }
+                                .font(.caption).foregroundStyle(muted)
+                            }
+                        }.font(.subheadline).tint(muted)
+                        Divider()
+                        Button(exporting ? "Preparing report…" : "Export logs (.txt)") {
+                            guard !exporting else { return }
+                            exporting = true; exportStatus = ""
+                            let report = allReports()
+                            Task {
                                 do {
-                                    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-                                    let name = "StarPilot-diagnostics-" + ISO8601DateFormatter().string(from: Date()).replacingOccurrences(of: ":", with: "-") + ".txt"
-                                    let url = directory.appendingPathComponent(name)
-                                    try report.write(to: url, atomically: true, encoding: .utf8)
-                                    return url
-                                } catch {
-                                    try? FileManager.default.removeItem(at: directory)
-                                    throw error
-                                }
-                            }.value
-                            reportDirectory = url.deletingLastPathComponent()
-                            sharedReport = GalaxyDownloadedFile(url: url)
-                        } catch { exportStatus = "Couldn’t prepare diagnostics. Try again or copy the report." }
-                        exporting = false
-                    }
-                }.buttonStyle(.bordered).buttonBorderShape(.capsule).disabled(exporting).accessibilityIdentifier("save-diagnostics-txt")
-                if !exportStatus.isEmpty { Text(exportStatus).font(.caption).foregroundStyle(.secondary) }
-                Text("Preview shows the latest 150 connection events. Copy or share includes the full retained log.")
-                    .font(.caption).foregroundStyle(.secondary)
-                Text(log.detail)
-                    .font(.system(.caption, design: .monospaced)).textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(14).background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 20))
-                Button("Clear connection history") { log.clear(); log.detail = previewReport() }
-                    .font(.caption).foregroundStyle(muted)
-                    }
+                                    let url = try await Task.detached(priority: .utility) {
+                                        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+                                        do {
+                                            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+                                            let name = "StarPilot-diagnostics-" + ISO8601DateFormatter().string(from: Date()).replacingOccurrences(of: ":", with: "-") + ".txt"
+                                            let url = directory.appendingPathComponent(name)
+                                            try report.write(to: url, atomically: true, encoding: .utf8)
+                                            return url
+                                        } catch {
+                                            try? FileManager.default.removeItem(at: directory)
+                                            throw error
+                                        }
+                                    }.value
+                                    reportDirectory = url.deletingLastPathComponent()
+                                    sharedReport = GalaxyDownloadedFile(url: url)
+                                } catch { exportStatus = "Couldn’t prepare diagnostics. Try again or copy the report." }
+                                exporting = false
+                            }
+                        }.buttonStyle(.plain).font(.footnote).foregroundStyle(muted)
+                            .frame(minHeight: 44, alignment: .leading).disabled(exporting).accessibilityIdentifier("save-diagnostics-txt")
+                        if !exportStatus.isEmpty { Text(exportStatus).font(.caption).foregroundStyle(.secondary) }
+                        Text("For manual troubleshooting when needed.")
+                            .font(.caption).foregroundStyle(muted)
+                    }.padding(.top, 12)
                 } label: {
-                    Label("Manual Log Submission", systemImage: "doc.text.magnifyingglass")
-                        .font(.headline).foregroundStyle(accent)
-                }.padding(18).background(panel, in: RoundedRectangle(cornerRadius: 22))
+                    Text("Troubleshooting").font(.subheadline).foregroundStyle(muted)
+                }.tint(muted)
             }.padding(20)
         }.background(background.ignoresSafeArea())
             .sheet(item: $sharedReport, onDismiss: {
