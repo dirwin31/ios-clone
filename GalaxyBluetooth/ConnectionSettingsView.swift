@@ -554,31 +554,32 @@ private struct TunnelSetupView: View {
     @State private var saving = false
     @State private var loginTask: Task<Void, Never>?
     @State private var store = WKWebsiteDataStore.nonPersistent()
-    private static func validCookie(_ cookie: HTTPCookie) -> Bool {
-        guard cookie.name == "galaxy_session", cookie.isSecure else { return false }
-        guard cookie.domain == "galaxy.firestar.link" || cookie.domain == ".galaxy.firestar.link" else { return false }
-        return cookie.expiresDate.map { $0 > Date() } ?? true
-    }
 
     var body: some View {
         NavigationStack {
             VStack(spacing: 12) {
                 if let loginURL {
-                    TunnelLoginView(url: loginURL, store: store)
+                    TunnelLoginView(url: loginURL, store: store, diagnostic: { model.connectionLog.record("Tunnel login: " + $0) })
                     Text("Sign in above, then tap Use tunnel. Enter your Galaxy password on this page. The app remembers your sign-in, not your password.").font(.footnote).padding(.horizontal)
                     Button(saving ? "Verifying…" : "Use tunnel") {
                         saving = true; error = ""
                         loginTask = Task { @MainActor in
                             defer { saving = false }
+                            model.connectionLog.record("Tunnel login: Use tunnel tapped; checking session cookie")
                             let cookies = await store.httpCookieStore.allCookies()
-                            guard let cookie = cookies.first(where: Self.validCookie) else {
+                            model.connectionLog.record("Tunnel login: cookie check; session present=\(cookies.contains { $0.name == "galaxy_session" }); valid session=\(TunnelTransport.loginCookie(cookies, url: loginURL) != nil)")
+                            guard let cookie = TunnelTransport.loginCookie(cookies, url: loginURL) else {
+                                model.connectionLog.record("Tunnel login rejected: no valid secure unexpired session cookie")
                                 error = "Finish signing in to Galaxy first."; return
                             }
                             do {
                                 try await model.acceptTunnel(url: loginURL, cookie: cookie.value)
                                 try Task.checkCancellation()
                                 dismiss()
-                            } catch { if !Task.isCancelled { self.error = error.localizedDescription } }
+                            } catch {
+                                model.connectionLog.record("Tunnel login verification failed; cancelled=\(Task.isCancelled); \(LANTransport.failureCode(error))")
+                                if !Task.isCancelled { self.error = error.localizedDescription }
+                            }
                         }
                     }.buttonStyle(.borderedProminent).disabled(saving).padding(.bottom)
                 } else {
@@ -603,7 +604,7 @@ private struct TunnelSetupView: View {
                                     Task { if let url = await model.fetchLegacyURL() { address = url.absoluteString } else { error = model.legacyMessage } }
                                 }
                             }
-                        } header: { Text("Your Galaxy link") } footer: { Text("Scan the Galaxy QR code on comma or paste its private link, then sign in with your Galaxy password. Both phone and comma need internet for Tunnel. Automatic uses your saved connection order.") }
+                        } header: { Text("Your Galaxy link") } footer: { Text("Scan the Galaxy QR code on comma or paste its private link, then sign in with your Galaxy password. Connect over Bluetooth or Local Wi-Fi when setting up Tunnel so the app can confirm the link with your comma. Both phone and comma need internet for Tunnel. Automatic uses your saved connection order.") }
                         if model.tunnel.credential != nil {
                             Section { Button("Forget saved tunnel", role: .destructive) { model.forgetTunnel(); address = "" } }
                         }
@@ -633,7 +634,8 @@ private struct TunnelSetupView: View {
 private struct TunnelLoginView: UIViewRepresentable {
     let url: URL
     let store: WKWebsiteDataStore
-    func makeCoordinator() -> Coordinator { Coordinator() }
+    let diagnostic: (String) -> Void
+    func makeCoordinator() -> Coordinator { Coordinator(diagnostic: diagnostic) }
     func makeUIView(context: Context) -> WKWebView {
         let configuration = WKWebViewConfiguration()
         configuration.websiteDataStore = store
@@ -644,10 +646,43 @@ private struct TunnelLoginView: UIViewRepresentable {
     }
     func updateUIView(_ uiView: WKWebView, context: Context) {}
     final class Coordinator: NSObject, WKNavigationDelegate {
+        let diagnostic: (String) -> Void
+        private var attempt = 0
+        private var started = ProcessInfo.processInfo.systemUptime
+        init(diagnostic: @escaping (String) -> Void) { self.diagnostic = diagnostic }
+        func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
+            attempt += 1; started = ProcessInfo.processInfo.systemUptime
+            diagnostic("navigation #\(attempt) started")
+        }
+        func webView(_ webView: WKWebView, didReceiveServerRedirectForProvisionalNavigation navigation: WKNavigation!) {
+            diagnostic("navigation #\(attempt) redirected")
+        }
+        func webView(_ webView: WKWebView, decidePolicyFor navigationResponse: WKNavigationResponse,
+                     decisionHandler: @escaping (WKNavigationResponsePolicy) -> Void) {
+            if let response = navigationResponse.response as? HTTPURLResponse {
+                diagnostic("navigation #\(attempt) response: HTTP \(response.statusCode); main frame=\(navigationResponse.isForMainFrame); displayable=\(navigationResponse.canShowMIMEType)")
+            }
+            decisionHandler(.allow)
+        }
+        func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+            diagnostic("navigation #\(attempt) finished; elapsed=\(String(format: "%.3f", ProcessInfo.processInfo.systemUptime - started))s")
+        }
+        func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+            diagnostic("navigation #\(attempt) failed before page load: " + LANTransport.failureCode(error))
+        }
+        func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+            diagnostic("navigation #\(attempt) failed: " + LANTransport.failureCode(error))
+        }
+        func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+            diagnostic("web content process terminated")
+        }
         func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction,
                      decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
             guard let url = navigationAction.request.url, url.scheme == "https", url.host == "galaxy.firestar.link",
-                  url.port == nil, url.user == nil, url.password == nil else { decisionHandler(.cancel); return }
+                  url.port == nil, url.user == nil, url.password == nil else {
+                diagnostic("navigation blocked: destination outside allowed HTTPS Galaxy host")
+                decisionHandler(.cancel); return
+            }
             decisionHandler(.allow)
         }
     }

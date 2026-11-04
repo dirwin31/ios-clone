@@ -36,6 +36,7 @@ enum ConnectionMode: String { case automatic, bluetooth, lan }
     }
 }
 @MainActor final class Tunnel {
+    var connected = false
     var credential: String? = "saved"
     var status = "Tunnel paused in Bluetooth only"
     var invalidations = 0
@@ -68,6 +69,8 @@ enum ConnectionMode: String { case automatic, bluetooth, lan }
     var mode = ConnectionMode.automatic
     var pairingKey = "saved", address = "", connectionMessage = "", lastRoute = ""
     var lastReconnect = Date.distantPast, lastGalaxyMatch = Date.distantPast
+    var tunnelProbeTask: Task<Void, Never>?
+    var phoneActive = true, carPlayActive = false
     var lanProbeTask: Task<Void, Never>?
     func learnAddress() async {}
     func discoverAutomaticLAN() {}

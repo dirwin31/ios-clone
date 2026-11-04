@@ -46,6 +46,20 @@ import Foundation
         for bad in ["http://galaxy.firestar.link/abcdefghijklmnop", "https://evil.test/abcdefghijklmnop", url + "?cookie=x", url + "/api", "https://user@galaxy.firestar.link/abcdefghijklmnop", "https://galaxy.firestar.link:443/abcdefghijklmnop"] {
             precondition(TunnelTransport.endpoint(bad) == nil)
         }
+        func sessionCookie(path: String, value: String, expired: Bool = false, secure: Bool = true, domain: String = "galaxy.firestar.link") -> HTTPCookie {
+            var properties: [HTTPCookiePropertyKey: Any] = [.name: "galaxy_session", .value: value, .domain: domain, .path: path,
+                .expires: Date().addingTimeInterval(expired ? -3600 : 3600)]
+            if secure { properties[.secure] = "TRUE" }
+            return HTTPCookie(properties: properties)!
+        }
+        let rootCookie = sessionCookie(path: "/", value: "root-token")
+        let matchingCookie = sessionCookie(path: "/abcdefghijklmnop", value: "matching-token")
+        let wrongCookie = sessionCookie(path: "/ponmlkjihgfedcba", value: "wrong-token")
+        precondition(TunnelTransport.loginCookie([wrongCookie, rootCookie, matchingCookie], url: URL(string: url)!)?.value == "matching-token")
+        precondition(TunnelTransport.loginCookie([wrongCookie], url: URL(string: url)!) == nil)
+        precondition(TunnelTransport.loginCookie([sessionCookie(path: "/abcdefghijklmno", value: "prefix-token")], url: URL(string: url)!) == nil)
+        precondition(TunnelTransport.loginCookie([sessionCookie(path: "/", value: "expired", expired: true), sessionCookie(path: "/", value: "insecure", secure: false), sessionCookie(path: "/", value: "foreign", domain: "evil.test")], url: URL(string: url)!) == nil)
+        precondition(TunnelTransport.loginCookie([rootCookie], url: URL(string: url)!)?.value == "root-token")
         precondition(ConnectionRoute.normalized(["bluetooth", "bluetooth", "unknown"]) == [.bluetooth, .lan, .tunnel])
         let server = TunnelServer(), tunnel = TunnelTransport(load: { request, limit in try await server.load(request, limit) })
         try tunnel.configure(TunnelCredential(url: url, cookie: "opaque-token", deviceID: server.identity))

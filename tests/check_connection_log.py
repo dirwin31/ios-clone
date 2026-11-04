@@ -33,6 +33,11 @@ probe = "import Foundation\nimport Combine\n" + source[start:end] + "}\n" + r'''
         precondition(log.failureEvents.count == 256)
         precondition(log.failureEvents.first!.hasSuffix("request failed 44"))
         log.clear(); precondition(log.failureEvents.isEmpty)
+        for event in ["Tunnel login rejected: missing session", "navigation blocked: destination", "web content process terminated"] {
+            log.record(event)
+        }
+        precondition(log.failureEvents.count == 3, "Sign-in and browser failures must survive routine polling")
+        log.clear()
         let beforeStates = publications
         for _ in 0..<10000 {
             log.recordState("bluetooth", "Bluetooth waiting")

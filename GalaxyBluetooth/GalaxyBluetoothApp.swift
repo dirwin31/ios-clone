@@ -113,7 +113,7 @@ final class AppModel: ObservableObject {
     private var carPlayActive = false
     private var monitorTask: Task<Void, Never>?
     func setPhoneActive(_ active: Bool) { connectionLog.record("Lifecycle: phone active=\(active); tab=\(tab.rawValue); navigation=\(navigationActive)"); phoneActive = active; if !active { automaticLAN?.cancel(); firstConnection?.cancel(); firstConnection = nil }; diagnostics.phoneActive = active; discovery.setActive(active); updateMonitoring() }
-    func setCarPlayActive(_ active: Bool) { carPlayActive = active; diagnostics.carPlayActive = active; updateMonitoring() }
+    func setCarPlayActive(_ active: Bool) { connectionLog.record("Lifecycle: CarPlay active=\(active)"); carPlayActive = active; diagnostics.carPlayActive = active; updateMonitoring() }
     private func updateMonitoring() {
         // Sharing phone GPS keeps the app running in the background, so keep reconnecting too.
         if phoneActive || carPlayActive || phoneLocation.sharing || navigationActive {
@@ -168,8 +168,53 @@ final class AppModel: ObservableObject {
         tunnelProbeTask?.cancel()
         tunnel.forget(); TunnelKeyStore.remove()
     }
+    private func confirmedTunnelURL() async throws -> URL {
+        let identity = lan.expectedDeviceID
+        let localGeneration = lan.generation
+        let bluetoothSession = bluetooth.sessionIdentifier
+        let direct: any GalaxyRequestTransport
+        let usingBluetooth: Bool
+        if bluetooth.connected { direct = bluetooth; usingBluetooth = true }
+        else if lan.connected { direct = lan; usingBluetooth = false }
+        else {
+            connectionLog.record("Tunnel link confirmation blocked: no verified Bluetooth or Local Wi-Fi connection")
+            throw BridgeError.message("Connect to your comma over Bluetooth or Local Wi-Fi to confirm its Galaxy link first.")
+        }
+        connectionLog.record("Tunnel link confirmation started over \(usingBluetooth ? "Bluetooth" : "Local Wi-Fi")")
+        do {
+            let response = try await direct.request(path: "/api/galaxy/status", method: "GET", headers: [:], body: Data())
+            try Task.checkCancellation()
+            guard lan.expectedDeviceID == identity, direct.connected,
+                  usingBluetooth ? bluetooth.sessionIdentifier == bluetoothSession : lan.generation == localGeneration else {
+                throw BridgeError.message("Comma connection changed while confirming the link. Try again.")
+            }
+            guard response.status == 200 else {
+                throw BridgeError.message("Comma link confirmation returned HTTP \(response.status). Try again over Bluetooth or Local Wi-Fi.")
+            }
+            let status = try JSONDecoder().decode(LegacyGalaxyStatus.self, from: response.bodyData)
+            guard status.paired, let url = status.browserURL,
+                  let normalized = TunnelTransport.endpoint(url.absoluteString) else {
+                throw BridgeError.message("Set up Galaxy pairing on your comma before using Tunnel.")
+            }
+            connectionLog.record("Tunnel link confirmed directly with comma; paired=true; valid format=true")
+            return normalized
+        } catch {
+            connectionLog.record("Tunnel link confirmation failed: " + LANTransport.failureCode(error))
+            throw error
+        }
+    }
     func acceptTunnel(url: URL, cookie: String) async throws {
+        // Never ask the tunnel to attest to its own link. Require a fresh direct read.
+        let confirmedURL = try await confirmedTunnelURL()
+        guard TunnelTransport.endpoint(url.absoluteString) == confirmedURL else {
+            connectionLog.record("Tunnel setup rejected: entered link differs from comma's current link")
+            throw BridgeError.message("This link doesn’t match your comma. Use Get link from comma, then sign in again.")
+        }
         let candidate = TunnelTransport()
+        connectionLog.record("Tunnel setup: verification started; saved comma identity=\(lan.expectedDeviceID != nil)")
+        candidate.onDiagnostic = { [weak self] in self?.connectionLog.record("Tunnel setup: " + $0) }
+        candidate.onEvent = { [weak self] in self?.connectionLog.record("Tunnel setup: " + $0) }
+        defer { connectionLog.record("Tunnel setup: verification finished; verified=\(candidate.connected); cancelled=\(Task.isCancelled)") }
         let previousIdentity = lan.expectedDeviceID
         candidate.expectedDeviceID = previousIdentity
         try candidate.configure(TunnelCredential(url: url.absoluteString, cookie: cookie, deviceID: ""))
@@ -179,6 +224,7 @@ final class AppModel: ObservableObject {
             throw BridgeError.message("This tunnel belongs to a different comma.")
         }
         try TunnelKeyStore.save(credential)
+        connectionLog.record("Tunnel setup: verified credential saved to Keychain")
         tunnelProbeTask?.cancel()
         try tunnel.configure(credential)
         lan.bind(to: credential.deviceID)
@@ -593,38 +639,18 @@ final class AppModel: ObservableObject {
     }
     func fetchLegacyURL() async -> URL? {
         guard !loadingLegacyURL else { return nil }
-        legacyMessage = ""
-        legacyURL = nil
-        guard wantsConnection, transport.connected else {
-            legacyMessage = "Connect to your comma first to get its Galaxy link."
-            return nil
-        }
+        legacyMessage = ""; legacyURL = nil
         loadingLegacyURL = true
         defer { loadingLegacyURL = false }
-        let lanSession = lan.generation
-        let bluetoothSession = bluetooth.sessionIdentifier
         do {
-            let response = try await transport.request(path: "/api/galaxy/status", method: "GET", headers: [:], body: Data())
-            guard wantsConnection, transport.connected, lan.generation == lanSession,
-                  bluetooth.sessionIdentifier == bluetoothSession else {
-                throw BridgeError.message("Connection changed. Try opening legacy Galaxy again.")
-            }
-            guard response.status == 200 else {
-                throw BridgeError.message("Couldn’t get your comma’s Galaxy link (HTTP \(response.status)).")
-            }
-            let status = try JSONDecoder().decode(LegacyGalaxyStatus.self, from: response.bodyData)
-            guard status.paired else {
-                throw BridgeError.message("Set up legacy Galaxy pairing on your comma first. Bluetooth pairing is separate.")
-            }
-            guard let url = status.browserURL else {
-                throw BridgeError.message("Your comma hasn’t provided a valid Galaxy link. Check its legacy Galaxy pairing.")
-            }
+            let url = try await confirmedTunnelURL()
             legacyURL = url
-            connectionLog.record("Comma-specific legacy Galaxy link validated")
+            let savedLink = tunnel.credential.flatMap { TunnelTransport.endpoint($0.url) }
+            connectionLog.record("Comma-specific Galaxy link obtained directly; saved link present=\(savedLink != nil); matches saved link=\(savedLink == url); remote reachability not yet checked")
             return url
         } catch {
             connectionLog.record("Comma-specific legacy Galaxy link unavailable")
-            legacyMessage = (error as? BridgeError)?.localizedDescription ?? "Couldn’t get your comma’s Galaxy link. Check the connection and try again."
+            legacyMessage = (error as? BridgeError)?.localizedDescription ?? "Couldn’t get your comma’s Galaxy link. Check Bluetooth or Local Wi-Fi and try again."
             return nil
         }
     }
@@ -752,7 +778,7 @@ final class AppModel: ObservableObject {
 
     func monitor() async {
         while !Task.isCancelled {
-            connectionLog.recordState("monitor", "Connection monitor: requested=\(wantsConnection); mode=\(mode.rawValue); pairing=\(pairingInProgress); selecting device=\(selectingDiscoveredComma); Bluetooth key saved=\(!pairingKey.isEmpty); Bluetooth connected=\(bluetooth.connected); connecting=\(bluetooth.connecting); scanning=\(bluetooth.isScanning); LAN connected=\(lan.connected); LAN probe active=\(lanProbeTask != nil)")
+            connectionLog.recordState("monitor", "Connection monitor: requested=\(wantsConnection); mode=\(mode.rawValue); pairing=\(pairingInProgress); selecting device=\(selectingDiscoveredComma); Bluetooth key saved=\(!pairingKey.isEmpty); Bluetooth connected=\(bluetooth.connected); connecting=\(bluetooth.connecting); scanning=\(bluetooth.isScanning); LAN connected=\(lan.connected); LAN probe active=\(lanProbeTask != nil); tunnel configured=\(tunnel.credential != nil); tunnel verified=\(tunnel.connected); tunnel probe active=\(tunnelProbeTask != nil); selected route=\(transport.label); phone active=\(phoneActive); CarPlay active=\(carPlayActive)")
             if wantsConnection && !pairingInProgress && !selectingDiscoveredComma {
                 if mode != .lan, !bluetooth.connected, !bluetooth.connecting, !bluetooth.isScanning,
                    Date().timeIntervalSince(lastReconnect) >= bluetooth.reconnectDelay {
@@ -1145,7 +1171,7 @@ final class ConnectionEventLog: ObservableObject {
         return (0..<failureCount).map { failureStorage[(start + $0) % failureStorage.count] }
     }
     private static let failurePattern = try! NSRegularExpression(pattern:
-        #"(?i:failed|timeout|timed out|disconnected|replay blocked|exhausted|HTTP [45][0-9]{2})"#)
+        #"(?i:failed|rejected|blocked|terminated|timeout|timed out|disconnected|replay blocked|exhausted|HTTP [45][0-9]{2})"#)
     private var nextEvent = 0
     private var retained = 0
     private var sequence = 0
@@ -1211,6 +1237,7 @@ final class ConnectionEventLog: ObservableObject {
         let info = Bundle.main.infoDictionary ?? [:]
         return """
         StarPilot BT connection diagnostics
+        Connection diagnostics revision: 2 (sign-in stages, candidate verification, session lifecycle)
         \(ISO8601DateFormatter().string(from: Date()))
         App: \(info["CFBundleShortVersionString"] ?? "?") (\(info["CFBundleVersion"] ?? "?"))
         iOS: \(UIDevice.current.systemVersion)

@@ -534,6 +534,7 @@ final class BluetoothTransport: NSObject, ObservableObject, GalaxyRequestTranspo
         guard rx != nil, tx != nil, let info = service.characteristics?.first(where: { $0.uuid == CBUUID(string: Wire.info) }) else {
             failConnection("The comma bridge has incompatible Bluetooth characteristics."); return
         }
+        onEvent?("Bluetooth capabilities: characteristics=\(service.characteristics?.count ?? 0); RX properties=\(rx?.properties.rawValue ?? 0); TX properties=\(tx?.properties.rawValue ?? 0); notify present=\(notify != nil); write limit=\(peripheral.maximumWriteValueLength(for: .withResponse))")
         beginConnectionPhase("challenge")
         onEvent?("Bluetooth characteristics ready; reading handshake challenge")
         peripheral.readValue(for: info)
@@ -650,6 +651,7 @@ final class BluetoothTransport: NSObject, ObservableObject, GalaxyRequestTranspo
 
     func peripheral(_ peripheral: CBPeripheral, didUpdateNotificationStateFor characteristic: CBCharacteristic, error: Error?) {
         guard peripheral == self.peripheral, characteristic.uuid == CBUUID(string: Wire.notify), pairingVerified else { return }
+        onEvent?("Bluetooth notification subscription: notifying=\(characteristic.isNotifying); active request=\(active != nil); result=\(error.map { LANTransport.failureCode($0) } ?? "ok")")
         guard error == nil, characteristic.isNotifying else {
             supportsNotifications = false
             if activeNotifications && active != nil {

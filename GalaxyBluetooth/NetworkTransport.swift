@@ -249,17 +249,25 @@ final class LANTransport: ObservableObject, GalaxyRequestTransport {
         if let cookie { return cookie }
         let token: UUID
         let pending: Task<String, Error>
-        if let existing = sessionTask { (token, pending) = existing }
+        if let existing = sessionTask {
+            onDiagnostic?("LAN session: joining authentication already in progress")
+            (token, pending) = existing
+        }
         else {
             token = UUID()
             pending = Task {
+                let started = ProcessInfo.processInfo.systemUptime
+                onDiagnostic?("LAN session: authentication started; timeout=8s")
+                defer { onDiagnostic?("LAN session: authentication finished; elapsed=\(String(format: "%.3f", ProcessInfo.processInfo.systemUptime - started))s; cancelled=\(Task.isCancelled); superseded=\(original != generation)") }
                 var request = URLRequest(url: endpoint.appendingPathComponent("api/auth/session"))
                 request.timeoutInterval = 8
                 let (data, response) = try await load(request, 65_536)
+                onDiagnostic?("LAN session: HTTP \(response.statusCode); bytes=\(data.count)")
                 let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
                 let cookies = HTTPCookie.cookies(withResponseHeaderFields: response.allHeaderFields.reduce(into: [String: String]()) {
                     if let key = $1.key as? String { $0[key] = String(describing: $1.value) }
                 }, for: endpoint)
+                onDiagnostic?("LAN session: authenticated=\(json?["authenticated"] as? Bool == true); local access=\(json?["localAccess"] as? Bool == true); session cookie present=\(cookies.contains { $0.name == "galaxy_session" && !$0.value.isEmpty })")
                 guard response.statusCode == 200, json?["authenticated"] as? Bool == true,
                       json?["localAccess"] as? Bool == true,
                       let value = cookies.first(where: { $0.name == "galaxy_session" && !$0.value.isEmpty }) else {
@@ -270,7 +278,12 @@ final class LANTransport: ObservableObject, GalaxyRequestTransport {
             sessionTask = (token, pending)
         }
         defer { if sessionTask?.0 == token { sessionTask = nil } }
-        let value = try await pending.value
+        let value: String
+        do { value = try await pending.value }
+        catch {
+            onDiagnostic?("LAN session failed: \(Self.failureCode(error)); cancelled=\(Task.isCancelled); superseded=\(original != generation)")
+            throw error
+        }
         try Task.checkCancellation()
         guard original == generation, self.endpoint == endpoint else { throw CancellationError() }
         cookie = value
@@ -310,6 +323,7 @@ final class LANTransport: ObservableObject, GalaxyRequestTransport {
             if attempt == 0, result.1.statusCode == 401,
                message?["error"] as? String == "Refresh the local Galaxy session" {
                 // The server rejected this operation before execution. Retry only this explicit response.
+                onDiagnostic?("LAN session: explicit refresh rejection; retrying once; method=\(method); path=\(SecretGoodGalaxy.diagnosticPath(path))")
                 if cookie == usedCookie { cookie = nil }
                 continue
             }
@@ -471,7 +485,7 @@ final class PreferredTransport: ObservableObject, GalaxyRequestTransport {
             }
         }
         diagnosticFailurePending = true
-        recordDiagnostic("Request #\(requestID) \(method) \(SecretGoodGalaxy.diagnosticPath(path)) exhausted available routes; mode=\(mode.rawValue)")
+        recordDiagnostic("Request #\(requestID) \(method) \(SecretGoodGalaxy.diagnosticPath(path)) exhausted available routes; mode=\(mode.rawValue); \(diagnosticAvailability)")
         throw lastError
     }
 }
@@ -528,6 +542,19 @@ final class TunnelTransport: ObservableObject, GalaxyRequestTransport {
               url.user == nil, url.password == nil, url.query == nil, url.fragment == nil,
               url.path.range(of: "^/[A-Za-z0-9]{16}/?$", options: .regularExpression) != nil else { return nil }
         return URL(string: "https://galaxy.firestar.link/" + url.path.split(separator: "/")[0])
+    }
+    /// Match the cookie to this comma's API path, not just the shared gateway host.
+    static func loginCookie(_ cookies: [HTTPCookie], url: URL, now: Date = Date()) -> HTTPCookie? {
+        guard let endpoint = endpoint(url.absoluteString) else { return nil }
+        let requestPath = endpoint.path + "/api/companion/runtime"
+        return cookies.filter { cookie in
+            guard cookie.name == "galaxy_session", cookie.isSecure, !cookie.value.isEmpty,
+                  cookie.domain == "galaxy.firestar.link" || cookie.domain == ".galaxy.firestar.link",
+                  cookie.expiresDate.map({ $0 > now }) ?? true else { return false }
+            let path = cookie.path
+            return requestPath == path || (requestPath.hasPrefix(path) &&
+                (path.hasSuffix("/") || requestPath.dropFirst(path.count).hasPrefix("/")))
+        }.sorted { $0.path.count > $1.path.count }.first
     }
     func configure(_ value: TunnelCredential) throws {
         guard Self.endpoint(value.url) != nil, !value.cookie.isEmpty, value.cookie.utf8.count <= 4096,
