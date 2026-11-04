@@ -76,19 +76,15 @@ struct ConnectionSettingsView: View {
     var body: some View {
         if DuoLayout.isEnabled {
             GeometryReader { geometry in
-                // Measure the full horizontal viewport and reserve the system rail once.
-                // Centering in this inset rectangle also works when the rail changes sides.
-                let leading = geometry.safeAreaInsets.leading
-                let trailing = geometry.safeAreaInsets.trailing
-                let width = max(0, geometry.size.width - leading - trailing)
+                // Keep the system-provided safe-area width. Ignoring the horizontal
+                // safe area here lets the cards extend behind Duo's toolbar rail.
+                let width = max(0, geometry.size.width)
                 let wide = width >= 640 && !dynamicTypeSize.isAccessibilitySize
-                let breathingRoom: CGFloat = wide ? min(12, max(0, (geometry.size.height - 500) / 16)) : 0
+                // Only vertical gaps grow with height; column widths stay unchanged.
+                let breathingRoom: CGFloat = wide ? min(24, max(0, (geometry.size.height - 500) / 8)) : 0
                 settingsContent(wide: wide, breathingRoom: breathingRoom)
                     .frame(width: width, height: geometry.size.height)
-                    .padding(.leading, leading)
-                    .padding(.trailing, trailing)
             }
-            .ignoresSafeArea(.container, edges: .horizontal)
         } else {
             settingsContent(wide: false)
         }
