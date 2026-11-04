@@ -80,9 +80,7 @@ struct ConnectionSettingsView: View {
                 // safe area here lets the cards extend behind Duo's toolbar rail.
                 let width = max(0, geometry.size.width)
                 let wide = width >= 640 && !dynamicTypeSize.isAccessibilitySize
-                // Only vertical gaps grow with height; column widths stay unchanged.
-                let breathingRoom: CGFloat = wide ? min(24, max(0, (geometry.size.height - 500) / 8)) : 0
-                settingsContent(wide: wide, breathingRoom: breathingRoom)
+                settingsContent(wide: wide)
                     .frame(width: width, height: geometry.size.height)
             }
         } else {
@@ -90,68 +88,26 @@ struct ConnectionSettingsView: View {
         }
     }
 
-    private func settingsContent(wide: Bool, breathingRoom: CGFloat = 0) -> some View {
-        ScrollView {
-            VStack(spacing: 8) {
-                HStack {
-                    if returningFromGalaxy && model.opened {
-                        Button { select(.galaxy) } label: {
-                            Image(systemName: "chevron.left").frame(width: 44, height: 44)
-                        }.accessibilityLabel("Back to Galaxy")
-                    } else { Color.clear.frame(width: 44, height: 44) }
-                    Spacer(minLength: 0)
-                    Text(returningFromGalaxy ? "Settings" : "StarPilot BT")
-                        .font(.custom("Sora-Regular", size: 22).weight(.medium)).lineLimit(1)
-                    Spacer(minLength: 0)
-                    Color.clear.frame(width: 44, height: 44)
+    private func settingsContent(wide: Bool) -> some View {
+        Group {
+            if wide {
+                // Choose spacing by the height of the entire page, including its footer.
+                // A non-scrolling candidate is used whenever all controls fit.
+                ViewThatFits(in: .vertical) {
+                    settingsPage(wide: true, breathingRoom: 12)
+                        .fixedSize(horizontal: false, vertical: true)
+                    settingsPage(wide: true, breathingRoom: 6)
+                        .fixedSize(horizontal: false, vertical: true)
+                    settingsPage(wide: true)
+                        .fixedSize(horizontal: false, vertical: true)
+                    // Expanded advanced controls, errors, or long device lists remain reachable.
+                    ScrollView { settingsPage(wide: true) }
                 }
-                if wide {
-                    HStack(alignment: .top, spacing: 20) {
-                        VStack(alignment: .leading, spacing: 8 + breathingRoom) {
-                            preferencesHeading
-                            preferences(breathingRoom: breathingRoom)
-                        }.frame(maxWidth: .infinity)
+                .frame(maxHeight: .infinity, alignment: .top)
+            } else {
+                ScrollView { settingsPage(wide: false) }
+            }
 
-                        VStack(spacing: 8 + breathingRoom) {
-                            connectionPanel(breathingRoom: breathingRoom)
-                            connectionExtras
-                        }.frame(maxWidth: .infinity)
-                    }
-                    .padding(.top, 12 + breathingRoom)
-                    .padding(.bottom, breathingRoom)
-                } else {
-                    ConnectionOrbit(route: connected ? model.transport.label : "", pairing: pairing)
-                        .padding(.bottom, 10)
-                    connectionPanel()
-                    preferencesHeading
-                    preferences()
-                    connectionExtras
-                }
-                HStack(spacing: 18) {
-                    Button(model.loadingLegacyURL ? "Getting link…" : "Legacy Galaxy") {
-                        Task { if let url = await model.fetchLegacyURL() {
-                            openURL(url) { accepted in if !accepted { model.legacyMessage = "Couldn’t open your browser. Try again." } }
-                        } }
-                    }.disabled(model.loadingLegacyURL || pairing)
-                    Link("Support", destination: URL(string: "https://wiki.firestar.link/ticketsystem/")!)
-                    Link("Privacy", destination: URL(string: "https://github.com/natehuby76/ios-clone/blob/codex/secretgood-galaxy/docs/privacy.md")!)
-                }.font(.system(size: 12)).frame(minHeight: 44)
-                Menu {
-                    Button("English") { language = "en" }
-                    Button("Español") { language = "es" }
-                    Button("Français") { language = "fr" }
-                    Button("한국어") { language = "ko" }
-                    Button("简体中文") { language = "zh-Hans" }
-                } label: {
-                    Label("Language", systemImage: "globe")
-                }.font(.system(size: 12)).frame(minHeight: 44)
-                    .accessibilityIdentifier("setup-language")
-                if !model.legacyMessage.isEmpty { message(model.legacyMessage) }
-                if !server.error.isEmpty { message(server.error) }
-                Text("StarPilot BT · \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "")")
-                    .font(.system(size: 11)).foregroundStyle(muted)
-            }.padding(.horizontal, 18).padding(.top, 0).padding(.bottom, 12)
-                .frame(maxWidth: wide ? 1200 : 460).frame(maxWidth: .infinity)
         }.scrollBounceBehavior(.basedOnSize).background {
             if model.navigationEnabled { LinearGradient(colors: [background, panel.opacity(0.8)], startPoint: .topLeading, endPoint: .bottomTrailing).ignoresSafeArea() }
             else { background.ignoresSafeArea() }
@@ -201,6 +157,69 @@ struct ConnectionSettingsView: View {
                     lan.bind(to: nil); UserDefaults.standard.removeObject(forKey: "galaxy.comma.identity")
                 }
             } message: { Text("This removes the saved app pairing. Pair your phone again to reconnect.") }
+    }
+
+    private func settingsPage(wide: Bool, breathingRoom: CGFloat = 0) -> some View {
+        VStack(spacing: 8) {
+            HStack {
+                if returningFromGalaxy && model.opened {
+                    Button { select(.galaxy) } label: {
+                        Image(systemName: "chevron.left").frame(width: 44, height: 44)
+                    }.accessibilityLabel("Back to Galaxy")
+                } else { Color.clear.frame(width: 44, height: 44) }
+                Spacer(minLength: 0)
+                Text(returningFromGalaxy ? "Settings" : "StarPilot BT")
+                    .font(.custom("Sora-Regular", size: 22).weight(.medium)).lineLimit(1)
+                Spacer(minLength: 0)
+                Color.clear.frame(width: 44, height: 44)
+            }
+            if wide {
+                HStack(alignment: .top, spacing: 20) {
+                    VStack(alignment: .leading, spacing: 8 + breathingRoom) {
+                        preferencesHeading
+                        preferences(breathingRoom: breathingRoom)
+                    }.frame(maxWidth: .infinity)
+
+                    VStack(spacing: 8 + breathingRoom) {
+                        connectionPanel(breathingRoom: breathingRoom)
+                        connectionExtras
+                    }.frame(maxWidth: .infinity)
+                }
+                .padding(.top, 12 + breathingRoom)
+                .padding(.bottom, breathingRoom)
+            } else {
+                ConnectionOrbit(route: connected ? model.transport.label : "", pairing: pairing)
+                    .padding(.bottom, 10)
+                connectionPanel()
+                preferencesHeading
+                preferences()
+                connectionExtras
+            }
+            HStack(spacing: 18) {
+                Button(model.loadingLegacyURL ? "Getting link…" : "Legacy Galaxy") {
+                    Task { if let url = await model.fetchLegacyURL() {
+                        openURL(url) { accepted in if !accepted { model.legacyMessage = "Couldn’t open your browser. Try again." } }
+                    } }
+                }.disabled(model.loadingLegacyURL || pairing)
+                Link("Support", destination: URL(string: "https://wiki.firestar.link/ticketsystem/")!)
+                Link("Privacy", destination: URL(string: "https://github.com/natehuby76/ios-clone/blob/codex/secretgood-galaxy/docs/privacy.md")!)
+            }.font(.system(size: 12)).frame(minHeight: 44)
+            Menu {
+                Button("English") { language = "en" }
+                Button("Español") { language = "es" }
+                Button("Français") { language = "fr" }
+                Button("한국어") { language = "ko" }
+                Button("简体中文") { language = "zh-Hans" }
+            } label: {
+                Label("Language", systemImage: "globe")
+            }.font(.system(size: 12)).frame(minHeight: 44)
+                .accessibilityIdentifier("setup-language")
+            if !model.legacyMessage.isEmpty { message(model.legacyMessage) }
+            if !server.error.isEmpty { message(server.error) }
+            Text("StarPilot BT · \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "")")
+                .font(.system(size: 11)).foregroundStyle(muted)
+        }.padding(.horizontal, 18).padding(.top, 0).padding(.bottom, 12)
+            .frame(maxWidth: wide ? 1200 : 460).frame(maxWidth: .infinity)
     }
 
     private var preferencesHeading: some View {
