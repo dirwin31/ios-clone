@@ -324,6 +324,8 @@ struct DiscordReportSheet: View {
     @State private var confirmDiscard = false
     @State private var explainDiscord = false
     @State private var selectedThread = ""
+    @State private var showDestination = false
+    @State private var sendAfterDestination = false
     @State private var loadedReports = false
     @State private var preparedLogs: String?
     private var reportLogs: String { restoredLogs ?? preparedLogs ?? logs }
@@ -332,6 +334,36 @@ struct DiscordReportSheet: View {
             $0.hasPrefix("Installed app at Send:") || $0.hasPrefix("Captured at Send (UTC):") || $0.hasPrefix("App:") || $0.hasSuffix("Z")
         }.joined(separator: " · ")
     }
+    private func submitReport() {
+        guard !discord.busy, !visitEnded, discord.connected else { return }
+        if !attempted {
+            restoredLogs = nil
+            preparedLogs = SubmissionDiagnostics.capture(logs: captureLogs)
+        }
+        guard !reportLogs.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            discord.status = "Diagnostics weren’t captured. Close this form and open Report a problem again."
+            sendError = discord.status; showSendError = true
+            return
+        }
+        let submissionLogs = reportLogs
+        let submissionDescription = description
+        let submissionReference = reference
+        let submissionThread = selectedThread.isEmpty ? nil : selectedThread
+        descriptionFocused = false; attempted = true
+        Task {
+            await discord.send(description: submissionDescription, logs: submissionLogs, reference: submissionReference, threadID: submissionThread)
+            guard !visitEnded else { return }
+            if discord.threadURL != nil {
+                dismiss()
+                onSent()
+            } else {
+                attempted = discord.pendingReport != nil
+                sendError = discord.status
+                showSendError = true
+            }
+        }
+    }
+
     var body: some View {
         NavigationStack {
             Form {
@@ -351,19 +383,6 @@ struct DiscordReportSheet: View {
                             }
                                 .frame(maxWidth: .infinity).padding(.vertical, 5)
                         }.buttonStyle(.borderedProminent).disabled(discord.busy)
-                    }
-                }
-                if discord.connected {
-                    Section("Report") {
-                        Picker("Send to", selection: $selectedThread) {
-                            Text("New report").tag("")
-                            ForEach(discord.reports) { report in Text(report.title).tag(report.id) }
-                            if !selectedThread.isEmpty && !discord.reports.contains(where: { $0.id == selectedThread }) {
-                                Text("Saved report thread").tag(selectedThread)
-                            }
-                        }.disabled(attempted)
-                        Button("Refresh your reports", systemImage: "arrow.clockwise") { Task { await discord.loadReports() } }.disabled(discord.busy || attempted)
-                        Text("Report titles and thread IDs are saved with your Discord account so you can follow up. Older reports may not be listed.").font(.caption).foregroundStyle(.secondary)
                     }
                 }
                 if attempted {
@@ -413,35 +432,49 @@ struct DiscordReportSheet: View {
                     ToolbarItem(placement: .confirmationAction) {
                         Button(discord.threadURL != nil ? "Done" : (attempted ? "Retry" : "Send")) {
                             if discord.threadURL != nil { dismiss() } else {
-                                if !attempted {
-                                    restoredLogs = nil
-                                    preparedLogs = SubmissionDiagnostics.capture(logs: captureLogs)
-                                }
-                                guard !reportLogs.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-                                    discord.status = "Diagnostics weren’t captured. Close this form and open Report a problem again."
-                                    sendError = discord.status; showSendError = true
-                                    return
-                                }
-                                let submissionLogs = reportLogs
-                                let submissionDescription = description
-                                let submissionReference = reference
-                                let submissionThread = selectedThread.isEmpty ? nil : selectedThread
-                                descriptionFocused = false; attempted = true
-                                Task {
-                                    await discord.send(description: submissionDescription, logs: submissionLogs, reference: submissionReference, threadID: submissionThread)
-                                    guard !visitEnded else { return }
-                                    if discord.threadURL != nil {
-                                        dismiss()
-                                        onSent()
-                                    } else {
-                                        attempted = discord.pendingReport != nil
-                                        sendError = discord.status
-                                        showSendError = true
-                                    }
-                                }
+                                descriptionFocused = false
+                                if attempted { submitReport() }
+                                else { showDestination = true }
                             }
                         }.tint(.blue).disabled(discord.busy || (discord.threadURL == nil && (!discord.connected || description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || description.count > 1000)))
                     }
+                }
+                .sheet(isPresented: $showDestination, onDismiss: {
+                    guard sendAfterDestination else { return }
+                    sendAfterDestination = false
+                    submitReport()
+                }) {
+                    NavigationStack {
+                        Form {
+                            Section("Where should this report go?") {
+                                Picker("Send to", selection: $selectedThread) {
+                                    Text("New thread").tag("")
+                                    ForEach(discord.reports) { report in Text(report.title).tag(report.id) }
+                                    if !selectedThread.isEmpty && !discord.reports.contains(where: { $0.id == selectedThread }) {
+                                        Text("Saved report thread").tag(selectedThread)
+                                    }
+                                }.pickerStyle(.inline)
+                                Button("Refresh your reports", systemImage: "arrow.clockwise") {
+                                    Task { await discord.loadReports() }
+                                }.disabled(discord.busy)
+                                Text("Choose an existing thread for a follow-up, or start a new thread for a different problem. Older reports may not be listed.")
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }
+                        }
+                        .navigationTitle("Choose report thread")
+                        .navigationBarTitleDisplayMode(.inline)
+                        .toolbar {
+                            ToolbarItem(placement: .cancellationAction) {
+                                Button("Cancel") { showDestination = false }
+                            }
+                            ToolbarItem(placement: .confirmationAction) {
+                                Button("Send report") {
+                                    sendAfterDestination = true
+                                    showDestination = false
+                                }.disabled(discord.busy || !discord.connected)
+                            }
+                        }
+                    }.presentationDetents([.medium, .large])
                 }
                 .interactiveDismissDisabled(discord.busy)
                 .alert("Report not confirmed", isPresented: $showSendError) {
@@ -471,6 +504,8 @@ struct DiscordReportSheet: View {
                 }
                 .onChange(of: scenePhase) { _, phase in
                     if phase == .background {
+                        sendAfterDestination = false
+                        showDestination = false
                         visitEnded = true
                         discord.pendingReport = nil
                         dismiss()

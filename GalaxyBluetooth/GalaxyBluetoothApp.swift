@@ -889,7 +889,7 @@ struct GalaxyRootView: View {
                                   bluetooth: model.transport.label == "Bluetooth") {
                         model.galaxyPage.report(server: server, connection: model.transport.label)
                     }
-                        .ignoresSafeArea(.container, edges: DuoLayout.isEnabled ? [.top, .bottom] : .bottom)
+                        .modifier(CompanionWebSafeArea())
                         .overlay(alignment: .top) {
                             if !DuoLayout.isEnabled && !editorFocused {
                                 let dark = (galaxyColorScheme ?? systemColorScheme) == .dark
@@ -1102,10 +1102,12 @@ struct CompactConnectionStatus: View {
     @ObservedObject private var tunnel: TunnelTransport
     let openSettings: () -> Void
     var compact: Bool
+    var nativeToolbar: Bool
 
-    init(model: AppModel, compact: Bool = false, openSettings: @escaping () -> Void) {
+    init(model: AppModel, compact: Bool = false, nativeToolbar: Bool = false, openSettings: @escaping () -> Void) {
         self.model = model
         self.compact = compact
+        self.nativeToolbar = nativeToolbar
         bluetooth = model.bluetooth
         lan = model.lan
         tunnel = model.tunnel
@@ -1125,24 +1127,34 @@ struct CompactConnectionStatus: View {
         model.transport.connected ? .green : bluetooth.connecting || bluetooth.isScanning ? .orange : .secondary
     }
     var body: some View {
-        Button(action: openSettings) {
-            HStack(spacing: compact ? 0 : 7) {
-                Circle().fill(tint).frame(width: 7, height: 7)
-                Text(label).font(.system(size: 13, weight: .medium))
-                    .monospacedDigit().lineLimit(1).truncationMode(.middle)
-                    .frame(width: compact ? 0 : nil).opacity(compact ? 0 : 1)
-                    .clipped()
+        if nativeToolbar {
+            Button(action: openSettings) {
+                Label("Connection: " + label, systemImage: "circle.fill")
             }
-            .foregroundStyle(.primary)
-            .padding(.horizontal, 12).frame(height: 44)
-            .background {
-                Capsule().fill(.regularMaterial).opacity(compact ? 0 : 1)
+            .tint(tint)
+            .accessibilityLabel("Connection settings")
+            .accessibilityValue(model.transport.connected ? "Connected via " + label : label)
+            .accessibilityIdentifier("bluetooth-connection-status")
+        } else {
+            Button(action: openSettings) {
+                HStack(spacing: compact ? 0 : 7) {
+                    Circle().fill(tint).frame(width: 7, height: 7)
+                    Text(label).font(.system(size: 13, weight: .medium))
+                        .monospacedDigit().lineLimit(1).truncationMode(.middle)
+                        .frame(width: compact ? 0 : nil).opacity(compact ? 0 : 1)
+                        .clipped()
+                }
+                .foregroundStyle(.primary)
+                .padding(.horizontal, 12).frame(height: 44)
+                .background {
+                    Capsule().fill(.regularMaterial).opacity(compact ? 0 : 1)
+                }
             }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Connection settings")
+            .accessibilityValue(model.transport.connected ? "Connected via " + label : label)
+            .accessibilityIdentifier("bluetooth-connection-status")
         }
-        .buttonStyle(.plain)
-        .accessibilityLabel("Connection settings")
-        .accessibilityValue(model.transport.connected ? "Connected via " + label : label)
-        .accessibilityIdentifier("bluetooth-connection-status")
     }
 }
 
@@ -1420,17 +1432,47 @@ private struct AdaptiveCompanionChrome<Content: View>: View {
     }
 }
 
+private struct CompanionWebSafeArea: ViewModifier {
+    @Environment(\.companionVerticalBar) private var verticalBar
+    func body(content: Content) -> some View {
+        content.ignoresSafeArea(.container, edges: verticalBar ? [.top, .bottom] : .bottom)
+    }
+}
+
+private struct CompanionVerticalBarKey: EnvironmentKey {
+    static let defaultValue = false
+}
+private extension EnvironmentValues {
+    var companionVerticalBar: Bool {
+        get { self[CompanionVerticalBarKey.self] }
+        set { self[CompanionVerticalBarKey.self] = newValue }
+    }
+}
+
 @available(iOS 27.1, *)
 private struct AdaptiveCompanionLayout<Content: View>: View {
+    @Environment(\.toolbarVerticalEdge) private var verticalEdge
     @ObservedObject var model: AppModel
     let tab: CompanionTab
     let select: (CompanionTab) -> Void
     @ViewBuilder var content: () -> Content
+    private var tabs: [CompanionTab] {
+        model.navigationEnabled ? [.galaxy, .navigation, .connections] : [.galaxy, .connections]
+    }
     var body: some View {
         content()
+            .environment(\.companionVerticalBar, verticalEdge != nil)
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    AdaptiveCompanionTabs(model: model, tab: tab, select: select)
+                // Each action is a real toolbar item; the system owns its size and spacing.
+                ToolbarItemGroup(placement: .topBarLeading) {
+                    ForEach(tabs) { item in
+                        Button { select(item) } label: {
+                            Label(item.rawValue, systemImage: item.icon)
+                        }
+                        .tint(tab == item ? Color.purple : Color.primary)
+                        .accessibilityIdentifier("main-tab-" + item.rawValue)
+                        .accessibilityAddTraits(tab == item ? .isSelected : [])
+                    }
                 }.axisBehavior(.verticalPreferred)
                 ToolbarItem(placement: .topBarTrailing) {
                     AdaptiveConnectionStatus(model: model, openSettings: { select(.connections) })
@@ -1441,55 +1483,12 @@ private struct AdaptiveCompanionLayout<Content: View>: View {
 }
 
 @available(iOS 27.1, *)
-private struct AdaptiveCompanionTabs: View {
-    @Environment(\.toolbarVerticalEdge) private var verticalEdge
-    @ObservedObject var model: AppModel
-    let tab: CompanionTab
-    let select: (CompanionTab) -> Void
-    private var tabs: [CompanionTab] {
-        model.navigationEnabled ? [.galaxy, .navigation, .connections] : [.galaxy, .connections]
-    }
-    var body: some View {
-        let layout = verticalEdge == nil ? AnyLayout(HStackLayout(spacing: 4)) : AnyLayout(VStackLayout(spacing: 4))
-        layout {
-            ForEach(tabs) { item in
-                Button { select(item) } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: item.icon)
-                        if verticalEdge == nil {
-                            Text(item.rawValue).font(.caption.weight(.semibold))
-                        }
-                    }
-                        .padding(.horizontal, verticalEdge == nil ? 10 : 0)
-                        .frame(minWidth: 44, minHeight: 44)
-                        .accessibilityLabel(item.rawValue)
-                        .foregroundStyle(tab == item && tab != .navigation ? Color.white : Color.primary)
-                        .background {
-                            if tab == item {
-                                if tab == .navigation {
-                                    Capsule().fill(Color.primary.opacity(0.12))
-                                } else {
-                                Capsule().fill(LinearGradient(colors: [Color(red: 0.61, green: 0.39, blue: 0.91), Color(red: 0.40, green: 0.22, blue: 0.69)], startPoint: .topLeading, endPoint: .bottomTrailing))
-                                }
-                            }
-                        }
-                }
-                .buttonStyle(.plain)
-                .accessibilityIdentifier("main-tab-" + item.rawValue)
-                .accessibilityAddTraits(tab == item ? .isSelected : [])
-            }
-        }
-    }
-}
-
-@available(iOS 27.1, *)
 private struct AdaptiveConnectionStatus: View {
-    @Environment(\.toolbarVerticalEdge) private var verticalEdge
     @ObservedObject var model: AppModel
     let openSettings: () -> Void
     @State private var showingConnection = false
     var body: some View {
-        CompactConnectionStatus(model: model, compact: verticalEdge != nil) {
+        CompactConnectionStatus(model: model, nativeToolbar: true) {
             showingConnection = true
         }
         .popover(isPresented: $showingConnection) {
