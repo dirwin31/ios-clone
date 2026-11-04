@@ -162,11 +162,11 @@ struct ConnectionSettingsView: View {
                 HStack(alignment: .top, spacing: 20) {
                     VStack(alignment: .leading, spacing: 8) {
                         preferencesHeading
-                        preferences()
+                        preferences(extraSpacing: 3)
                     }.frame(maxWidth: .infinity)
 
                     VStack(spacing: 8) {
-                        connectionPanel()
+                        connectionPanel(extraSpacing: 6)
                         connectionExtras
                     }.frame(maxWidth: .infinity)
                 }
@@ -179,31 +179,52 @@ struct ConnectionSettingsView: View {
                 preferences()
                 connectionExtras
             }
-            HStack(spacing: 18) {
-                Button(model.loadingLegacyURL ? "Getting link…" : "Legacy Galaxy") {
-                    Task { if let url = await model.fetchLegacyURL() {
-                        openURL(url) { accepted in if !accepted { model.legacyMessage = "Couldn’t open your browser. Try again." } }
-                    } }
-                }.disabled(model.loadingLegacyURL || pairing)
-                Link("Support", destination: URL(string: "https://wiki.firestar.link/ticketsystem/")!)
-                Link("Privacy", destination: URL(string: "https://github.com/natehuby76/ios-clone/blob/codex/secretgood-galaxy/docs/privacy.md")!)
-            }.font(.system(size: 12)).frame(minHeight: 44)
-            Menu {
-                Button("English") { language = "en" }
-                Button("Español") { language = "es" }
-                Button("Français") { language = "fr" }
-                Button("한국어") { language = "ko" }
-                Button("简体中文") { language = "zh-Hans" }
-            } label: {
-                Label("Language", systemImage: "globe")
-            }.font(.system(size: 12)).frame(minHeight: 44)
-                .accessibilityIdentifier("setup-language")
+            if wide {
+                HStack(spacing: 24) {
+                    footerLinks
+                    languageMenu
+                    versionLabel
+                }.frame(maxWidth: .infinity).padding(.top, 8)
+            } else {
+                footerLinks
+                languageMenu
+            }
             if !model.legacyMessage.isEmpty { message(model.legacyMessage) }
             if !server.error.isEmpty { message(server.error) }
-            Text("StarPilot BT · \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "")")
-                .font(.system(size: 11)).foregroundStyle(muted)
+            if !wide { versionLabel }
+
         }.padding(.horizontal, 18).padding(.top, 0).padding(.bottom, 12)
             .frame(maxWidth: wide ? 1200 : 460).frame(maxWidth: .infinity))
+    }
+
+    private var footerLinks: some View {
+        HStack(spacing: 18) {
+            Button(model.loadingLegacyURL ? "Getting link…" : "Legacy Galaxy") {
+                Task { if let url = await model.fetchLegacyURL() {
+                    openURL(url) { accepted in if !accepted { model.legacyMessage = "Couldn’t open your browser. Try again." } }
+                } }
+            }.disabled(model.loadingLegacyURL || pairing)
+            Link("Support", destination: URL(string: "https://wiki.firestar.link/ticketsystem/")!)
+            Link("Privacy", destination: URL(string: "https://github.com/natehuby76/ios-clone/blob/codex/secretgood-galaxy/docs/privacy.md")!)
+        }.font(.system(size: 12)).frame(minHeight: 44)
+    }
+
+    private var languageMenu: some View {
+        Menu {
+            Button("English") { language = "en" }
+            Button("Español") { language = "es" }
+            Button("Français") { language = "fr" }
+            Button("한국어") { language = "ko" }
+            Button("简体中文") { language = "zh-Hans" }
+        } label: {
+            Label("Language", systemImage: "globe")
+        }.font(.system(size: 12)).frame(minHeight: 44)
+            .accessibilityIdentifier("setup-language")
+    }
+
+    private var versionLabel: some View {
+        Text("StarPilot BT · \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "")")
+            .font(.system(size: 11)).foregroundStyle(muted)
     }
 
     private var preferencesHeading: some View {
@@ -229,8 +250,8 @@ struct ConnectionSettingsView: View {
         select(.galaxy)
     }
 
-    private func connectionPanel() -> some View {
-        VStack(alignment: .leading, spacing: 10) {
+    private func connectionPanel(extraSpacing: CGFloat = 0) -> some View {
+        VStack(alignment: .leading, spacing: 10 + extraSpacing) {
             HStack(spacing: 10) {
                 Image(model.transport.label == "Tunnel" ? "ConnectionNetwork" : model.transport.label == "Local Wi-Fi" ? "ConnectionWiFi" : "ConnectionBluetooth").renderingMode(.template).resizable().scaledToFit().frame(width: 20, height: 20).foregroundStyle(accent)
                     .frame(width: 38, height: 38).background(accent.opacity(0.15), in: RoundedRectangle(cornerRadius: 12))
@@ -420,8 +441,8 @@ struct ConnectionSettingsView: View {
         }
     }
 
-    private func preferences() -> some View {
-        VStack(spacing: 0) {
+    private func preferences(extraSpacing: CGFloat = 0) -> some View {
+        VStack(spacing: extraSpacing) {
             row("music.note", title: "Phone music", subtitle: pairing ? "Waiting for app pairing" : audio.summary) {
                 Button("Set up") { model.startAudioPairing() }.disabled(!connected || pairing).font(.system(size: 12)).frame(minHeight: 44)
             }
