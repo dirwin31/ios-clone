@@ -7,6 +7,7 @@ const json = (data, status = 200) => Response.json(data, {status, headers: {'Cac
 class InputError extends Error {}
 const platformOf = value => value === undefined ? 'ios' : ['ios', 'android'].includes(value) ? value : null;
 const platformLabel = value => value === 'android' ? 'Android' : 'iOS';
+const reportMaintainer = (env, platform) => platform === 'android' ? env.ANDROID_REPORT_MAINTAINER_ID ?? env.REPORT_MAINTAINER_ID : env.REPORT_MAINTAINER_ID;
 const reportKey = (platform, reference) => 'report:' + (platform === 'android' ? 'android:' : '') + reference;
 const referenceKey = (platform, reference) => 'reference:' + (platform === 'android' ? 'android:' : '') + reference.toUpperCase();
 const validNonce = value => typeof value === 'string' && /^[A-Za-z0-9_-]{43,128}$/.test(value);
@@ -42,7 +43,7 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
     try {
-      if (request.method === 'GET' && url.pathname === '/') return json({service: 'StarPilot log relay', version: 15});
+      if (request.method === 'GET' && url.pathname === '/') return json({service: 'StarPilot log relay', version: 16});
       const releaseRoute = /^\/v1\/(android|ios)\/build-notice(?:\/status)?$/.exec(url.pathname);
       if (request.method === 'POST' && releaseRoute) {
         // Each platform has its own credential; neither grants Discord sign-in or cross-platform release access.
@@ -255,7 +256,7 @@ export class Reports {
       await this.ctx.storage.setAlarm(now + 86400000);
       const name = (body.user.global_name || body.user.username).replace(/[\r\n]/g, ' ').slice(0, 80);
       const title = existingThread?.title || previous?.title || await reportTitle(this.env.AI, body.description, platform);
-      const maintainer = this.env.REPORT_MAINTAINER_ID || '';
+      const maintainer = reportMaintainer(this.env, platform) || '';
       const recipients = [...new Set([body.user.id, ...(/^\d+$/.test(maintainer) ? [maintainer] : [])])];
       const notify = maintainer && maintainer !== body.user.id && /^\d+$/.test(maintainer) ? `\nFor <@${maintainer}>` : '';
       const payload = {thread_name: title,
@@ -328,7 +329,7 @@ export class Reports {
     if (!notice.ready) return json({state:'not_ready'});
     if (previous && previous.state !== 'rate_limited') return json({state:previous.state});
     if (previous?.retryAt > Date.now()) return json({state:'rate_limited'});
-    const maintainer = this.env.REPORT_MAINTAINER_ID;
+    const maintainer = reportMaintainer(this.env, platform);
     if (!/^\d{1,20}$/.test(maintainer || '')) return json({state:'maintainer_not_configured'}, 503);
     let webhook;
     try {

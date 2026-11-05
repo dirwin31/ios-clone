@@ -31,6 +31,32 @@ function storage(){
 }
 const body={reference:'12345678-1234-1234-1234-123456789abc',description:'Bluetooth failed @everyone',logs:'synthetic diagnostics',user:{id:'789',username:'tester'}};
 
+test('platform maintainer is used on new reports, followups and build notices',async()=>{
+ const old=globalThis.fetch;
+ try {
+  for(const platform of ['android','ios']) {
+   const e={...env,ANDROID_REPORT_MAINTAINER_ID:'420178305073938433'}, messages=[];
+   const expected=platform==='android'?e.ANDROID_REPORT_MAINTAINER_ID:e.REPORT_MAINTAINER_ID;
+   globalThis.fetch=async(url,options)=>{
+    if(options.method!=='POST') return Response.json({guild_id:'333',channel_id:String(url).includes('/456/')?'666':'777'});
+    if(String(url).includes('/456/')) return Response.json({id:'555',channel_id:'666'});
+    messages.push(JSON.parse(options.body));return Response.json({id:'111',channel_id:'222'});
+   };
+   const object=new Reports({storage:storage()},e);
+   assert.equal((await object.fetch(request('/submit',{...body,platform}))).status,200);
+   assert.equal((await object.fetch(request('/submit',{...body,platform,reference:'22345678-1234-1234-1234-123456789abc',threadID:'222'}))).status,200);
+   const notice={platform,userID:body.user.id,reference:body.reference,version:'1.0.6',build:'124',stage:platform==='android'?'available':'testflight',ready:true,message:'Updated connection recovery.'};
+   assert.equal((await (await object.fetch(request('/build-notice',notice))).json()).state,'sent');
+   assert.equal(messages.length,3);
+   for(const message of messages) {
+    assert.deepEqual(message.allowed_mentions.users,['789',expected]);
+    assert.ok(message.content.includes('<@'+expected+'>'));
+    assert.ok(!message.content.includes('<@'+(platform==='android'?e.REPORT_MAINTAINER_ID:e.ANDROID_REPORT_MAINTAINER_ID)+'>'));
+   }
+  }
+ }finally{globalThis.fetch=old;}
+});
+
 test('iOS release key is isolated from Android and requires TestFlight availability',async()=>{
  const calls=[], ios='i'.repeat(43), android='a'.repeat(43);
  const e={...env,IOS_RELEASE_KEY:ios,ANDROID_RELEASE_KEY:android,REPORTS:{idFromName:id=>id,get:()=>({fetch:async(url,options)=>{calls.push({url,body:JSON.parse(options.body)});return Response.json({state:'pending'});}})}};

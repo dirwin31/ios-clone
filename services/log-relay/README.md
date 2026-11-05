@@ -309,3 +309,18 @@ TestFlight access. Use `notify-android.mjs` for Android, with its separate key.
 Both require the original reporter's Discord user ID and report UUID. Both use
 the existing stored destination and shared duplicate protection, including old
 iOS receipts. Neither starts a build or changes tester groups.
+
+## Platform maintainer mentions (Worker version 16)
+
+`ANDROID_REPORT_MAINTAINER_ID` selects the Android developer mentioned on new
+Android reports, follow-ups, and Android build notices. Production uses
+`420178305073938433`. iOS keeps `REPORT_MAINTAINER_ID` (`524762496373096459`).
+The reporter is still mentioned on both platforms. An absent Android setting
+falls back to the existing maintainer for backward compatibility. Private
+diagnostic uploads do not send mentions; existing posts are not edited.
+
+A live Android integration test must use a Discord OAuth access token issued
+through this Worker's sign-in flow, not a release-notification key. Submit
+`platform:android`, a fresh UUID, a clearly labeled test description and synthetic
+diagnostic text to `/v1/logs`. Check Android/Open tags, developer mention, private
+attachment and returned thread URL. No real device diagnostics are needed.
