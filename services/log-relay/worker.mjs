@@ -45,8 +45,8 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
     try {
-      if (request.method === 'GET' && url.pathname === '/') return json({service: 'StarPilot log relay', version: 18});
-      if (request.method === 'GET' && url.pathname === '/dashboard') return dashboardPage();
+      if (request.method === 'GET' && url.pathname === '/') return json({service: 'StarPilot log relay', version: 19});
+      if (request.method === 'GET' && /^\/dashboard(?:\/(?:ios|android))?$/.test(url.pathname)) return dashboardPage();
       const authRoute=/^\/v1\/(ios|android)\/dashboard\/auth\/(state|setup|login|logout)$/.exec(url.pathname);
       if(request.method==='POST'&&authRoute){
         const body=await readJSON(request,2048);
@@ -78,7 +78,7 @@ export default {
           const body=await readJSON(request,2048);if(!['ios','android'].includes(body.platform))return json({error:'Invalid platform'},400);
           const response=await env.REPORTS.get(env.REPORTS.idFromName('dashboard:'+body.platform)).fetch('https://reports/auth-invite',{method:'POST',body:'{}'});
           if(!response.ok)return response;const {invite}=await response.json();
-          return json({url:BASE+'/dashboard#platform='+body.platform+'&invite='+invite});
+          return json({url:BASE+'/dashboard/'+body.platform+'?invite='+invite});
         }
         if (url.pathname.includes('/dashboard/')) return await dashboardAPI(request, env, platform, readJSON, json);
         const body = await readJSON(request, 8192);

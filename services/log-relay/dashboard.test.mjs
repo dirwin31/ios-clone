@@ -1,4 +1,5 @@
 import test from 'node:test';import assert from 'node:assert/strict';
+import vm from 'node:vm';
 import worker,{Reports} from './worker.mjs';import {dashboardHTML} from './dashboard-ui.mjs';
 const ref='12345678-1234-1234-1234-123456789ABC';
 function storage(){const data=new Map();let pending=Promise.resolve();return {get:async k=>data.get(k),put:async(k,v)=>data.set(k,structuredClone(v)),delete:async k=>data.delete(k),setAlarm:async()=>{},list:async({prefix='',limit=Infinity,startAfter}={})=>new Map([...data].filter(([k])=>k.startsWith(prefix)&&(!startAfter||k>startAfter)).sort(([a],[b])=>a.localeCompare(b)).slice(0,limit)),transaction(f){const p=pending.then(()=>f(this));pending=p.catch(()=>{});return p;}};}
@@ -8,12 +9,36 @@ const internal=(object,path,body)=>object.fetch(new Request('https://reports/'+p
 const authReq=(platform,action,body={})=>new Request('https://relay/v1/'+platform+'/dashboard/auth/'+action,{method:'POST',headers:{'Content-Type':'application/json','CF-Connecting-IP':'192.0.2.1'},body:JSON.stringify(body)});
 const sessionReq=(platform,token)=>new Request('https://relay/v1/'+platform+'/dashboard/reports',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Session '+token},body:'{}'});
 
+test('platform setup survives reload, handles old fragment links and confirms password creation',async()=>{
+ const elements=new Map(),events={};
+ const element=id=>{if(!elements.has(id))elements.set(id,{value:id==='platform'?'ios':'',textContent:'',hidden:false,replaceChildren(){},removeAttribute(){},querySelectorAll:()=>[],children:[]});return elements.get(id);};
+ const location={pathname:'/dashboard/android',hash:'',search:'?invite=example'};
+ const paths=[];
+ const context=vm.createContext({URLSearchParams,AbortSignal,TypeError,Error,Date,JSON,Set,location,
+  document:{getElementById:element,querySelectorAll:()=>[]},window:{addEventListener:(name,handler)=>events[name]=handler},
+  history:{replaceState:(_,__,url)=>{location.pathname=url;location.hash='';}},
+  fetch:async(path)=>{paths.push(path);return {ok:true,json:async()=>path.endsWith('/state')?{configured:false}:path.endsWith('/setup')?{token:'x'}:path.endsWith('/reports')?{reports:[],cursor:null}:{source:{repo:'android',branch:'Play-Dev'},commits:[]}};}});
+ // No rows are rendered in this fixture, but the empty state creates one paragraph.
+ context.document.createElement=()=>({append(){},classList:{remove(){},add(){}}});element('reportList').append=()=>{};
+ vm.runInContext(dashboardHTML.match(/<script nonce="\{\{nonce\}\}">([\s\S]*?)<\/script>/)[1],context);
+ await new Promise(resolve=>setImmediate(resolve));
+ assert.equal(element('platform').value,'android');assert.equal(element('unlock').textContent,'Set Android password');assert.equal(location.pathname,'/dashboard/android');
+ element('key').value='test password';element('login').onsubmit({preventDefault(){}});await new Promise(resolve=>setImmediate(resolve));
+ assert.ok(paths.includes('/v1/android/dashboard/auth/setup'));assert.match(element('status').textContent,/Android password created successfully/);
+ location.hash='#platform=ios&invite=legacy';events.hashchange();await new Promise(resolve=>setImmediate(resolve));
+ assert.equal(element('platform').value,'ios');assert.equal(element('unlock').textContent,'Set iOS password');assert.equal(location.pathname,'/dashboard/ios');
+});
+
+test('both platform-specific dashboard addresses serve the password page',async()=>{
+ for(const platform of ['ios','android'])assert.equal((await worker.fetch(new Request('https://relay/dashboard/'+platform),{})).status,200);
+});
+
 test('first-time password setup, sign-in, platform isolation and logout',async()=>{
  const {env,get}=environment();
  assert.equal((await (await worker.fetch(authReq('ios','state'),env)).json()).configured,false);
  assert.equal((await worker.fetch(authReq('ios','setup',{password:'my new password'}),env)).status,403);
  const link=await (await worker.fetch(req('ios/dashboard/setup-link',{platform:'ios'}),env)).json();
- const invite=new URLSearchParams(new URL(link.url).hash.slice(1)).get('invite');
+ const invite=new URL(link.url).searchParams.get('invite');
  const response=await worker.fetch(authReq('ios','setup',{password:'my new password',invite}),env);assert.equal(response.status,200);
  const {token}=await response.json();assert.equal((await worker.fetch(sessionReq('ios',token),env)).status,200);
  assert.equal((await worker.fetch(sessionReq('android',token),env)).status,401);
@@ -30,7 +55,7 @@ test('setup invites are owner-only, single-use and atomic',async()=>{
  const {env}=environment();
  assert.equal((await worker.fetch(req('android/dashboard/setup-link',{platform:'android'},'a'.repeat(43)),env)).status,403);
  const result=await (await worker.fetch(req('ios/dashboard/setup-link',{platform:'android'}),env)).json();
- const invite=new URLSearchParams(new URL(result.url).hash.slice(1)).get('invite');
+ const invite=new URL(result.url).searchParams.get('invite');
  const results=await Promise.all(['first password','second password'].map(password=>worker.fetch(authReq('android','setup',{password,invite}),env)));
  assert.equal(results.filter(r=>r.status===200).length,1);assert.equal(results.filter(r=>r.status!==200).length,1);
 });

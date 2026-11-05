@@ -420,3 +420,11 @@ No public first-visitor claim is allowed: initial setup requires the platform in
 
 The older release-key login instructions above describe version 17; normal browser
 users now use their chosen password. API-key instructions still apply to CLI usage.
+
+## Platform setup links (version 19)
+
+Use /dashboard/ios and /dashboard/android for platform-specific sign-in. Setup links
+now carry their one-use invite in the query string, removed immediately after page
+load. Legacy fragment links are still supported, including same-tab navigation.
+The button names the platform and is unavailable until setup state is loaded.
+Successful setup explicitly confirms the platform password was created.
