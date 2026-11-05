@@ -82,3 +82,129 @@ Report-to-thread references and notification receipts persist without diagnostic
 contents or tokens. The original seven-day retry receipt expiry is unchanged.
 Older reports can resolve from their unexpired receipt; missing older mappings
 must be investigated rather than guessing the destination.
+
+
+## Android and iOS integration (Worker version 13)
+
+Use the same Worker base URL and Discord application on both platforms. Webhook
+URLs, the Discord client secret, and release administration credentials stay on
+the server. Deploy version 13 before enabling Android submissions: older Workers
+ignore the platform field and would label Android reports as iOS.
+
+### Sign-in
+
+1. Generate independent cryptographically random state and PKCE verifier values
+   (base64url without padding, 43–128 characters). Keep them for this attempt.
+2. Compute code_challenge = base64url(SHA256(verifier)), without padding.
+3. Open GET /auth/discord/start?state=STATE&code_challenge=CHALLENGE in the
+   platform's authentication browser. Do not embed the Discord client secret.
+4. Register starpilot-discord://callback in Android. The Worker forwards code,
+   state, error and iss to that address. Validate the callback scheme/host,
+   match state to the outstanding attempt, and require iss=https://discord.com.
+   Handle cancellation/errors without exchanging a code. Consume an attempt once.
+5. POST /auth/discord/exchange with JSON {"code":"...","verifier":"..."}.
+   Save the returned access_token, refresh_token, expires_in and user_id using
+   Android's secure credential storage. Never include them in diagnostic logs.
+6. POST /auth/discord/refresh with {"refresh_token":"..."} before expiry and
+   replace stored tokens with the response. Disconnect via /auth/discord/revoke
+   with {"token":"REFRESH_TOKEN"}.
+
+Discord's registered OAuth redirect remains the Worker's HTTPS
+/auth/discord/callback URL, not the app's custom scheme. Both platforms use PKCE;
+the callback scheme itself does not authenticate an app.
+
+### Submit and list reports
+
+POST /v1/logs with Content-Type: application/json and Authorization: Bearer TOKEN:
+
+```json
+{
+  "platform": "android",
+  "reference": "12345678-1234-1234-1234-123456789abc",
+  "description": "Bluetooth connects but Tunnel cannot reach comma.",
+  "logs": "StarPilot Android diagnostics\nApp version: ...\nRecent events:\n..."
+}
+```
+
+Generate a fresh UUID per new report; preserve it and the original payload for
+retries. Description is required, at most 1000 characters. Logs are required
+nonempty text; no particular header or event format is parsed. The full encoded
+JSON body must fit within 16 MiB (leave headroom for JSON escaping). Redact secrets
+on-device and let users review before sending. Logs go only to private diagnostics.
+
+Success returns {sent:true,reference,threadURL}. Only show success after this
+confirmation. A 409 may mean delivery is uncertain: do not silently resubmit under
+a new UUID. A retryable rejection can be retried with the original unchanged
+payload; never recreate diagnostics during that retry. Honor rate limiting.
+
+POST /v1/reports with {"platform":"android"} and the same bearer token returns
+{reports:[{id,title,platform,created}]}. Older iOS records may omit platform.
+Pass the selected id as optional threadID on /v1/logs to follow up. Lists are
+account-scoped and platform-filtered; cross-platform follow-ups are rejected.
+Missing platform defaults to ios; explicit values other than ios/android fail.
+Existing iOS clients need no update. The five-report hourly limit remains shared
+per Discord user across devices/platforms.
+
+### Platform tags
+
+Set IOS_FORUM_TAG_IDS and ANDROID_FORUM_TAG_IDS to comma-separated existing tag
+IDs from the public forum (up to five per platform). Missing IOS_FORUM_TAG_IDS
+falls back to the existing FORUM_TAG_IDS for backward compatibility. Android
+never inherits the legacy iOS tag list. With no Android IDs configured it sends
+without tags; if the forum requires a tag, configure IDs before live testing.
+These settings affect new public threads, not existing threads or private tags.
+
+### Android build updates
+
+Add an explicitly selected release entry to BUILD_NOTIFICATIONS:
+
+```json
+[{"platform":"android","userID":"DISCORD_USER_ID","reference":"REPORT_UUID","version":"2.0-beta1","build":"123","stage":"available","ready":false,"message":"Updated Tunnel connection recovery."}]
+```
+
+Replace placeholders with real IDs. Android version is the versionName (1–64
+ASCII letters/digits/dots/underscores/pluses/hyphens, starting alphanumeric);
+build is the positive decimal versionCode as a string (up to ten digits).
+Android requires stage=available. The operator verifies that this recipient can
+actually download the intended release before changing ready to true. There is
+no automatic Google Play/GitHub release detection and no client-facing send API.
+The existing five-minute scheduler and delivery rules apply.
+
+Notifications must resolve to a report on the same platform. New dedup keys
+include platform/version/build/thread. Existing iOS notification receipts are
+still honored, including uncertain deliveries; do not delete or reset them.
+Report retry receipts and reference mappings also separate Android from iOS.
+/release-status includes platform, without exposing report identities or links.
+Keep existing BUILD_NOTIFICATIONS entries and all secrets/bindings when deploying.
+
+Suggested first diagnostics: report UUID, timestamp/timezone, app version/build,
+phone/OS, selected and active connection, last error, comma version if known,
+Galaxy pairing state, and timestamped recent events. Unknown is acceptable.
+Never include session cookies, passwords, OAuth tokens or private tunnel URLs.
+
+### Configured public forum tags
+
+Public forum: `1565235002734809168`. New threads receive Open plus their platform.
+Follow-ups preserve existing tags; the relay does not reopen closed threads.
+New threads also receive matching topic tags from the written description.
+
+| Tag | ID |
+| --- | --- |
+| Open | 1565236988913913887 |
+| In Progress | 1565237023265263657 |
+| CLOSED | 1565237052524466207 |
+| Navigation | 1565237084447445122 |
+| CarPlay | 1565237111391527112 |
+| iOS | 1567744790856990730 |
+| Android | 1567744808926322811 |
+
+| Galaxy | 1567747425047941200 |
+
+Automatic topic matching uses only the user-written description, not diagnostics
+or AI-generated titles. CarPlay (including Car Play/Car-Play) adds CarPlay;
+navigation/nav, routing/routes, maps, directions or destination adds Navigation;
+Galaxy or tunnel adds Galaxy. Matching is case-insensitive and whole-word based.
+Mentions identify topics, not which subsystem caused the fault; for example,
+“Bluetooth works but Tunnel fails” adds Galaxy. Missing/invalid topic tag bindings
+are ignored. Duplicate IDs are removed and Discord’s five-tag limit is respected.
+Open and platform tags take precedence. In Progress and CLOSED remain manual.

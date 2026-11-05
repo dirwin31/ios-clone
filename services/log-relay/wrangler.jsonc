@@ -5,10 +5,40 @@
   "account_id": "99a95f1b8f51e83e8d1af8e8a71bc36d",
   "workers_dev": true,
   "preview_urls": false,
-  "triggers": { "crons": ["*/5 * * * *"] },
-  "ai": { "binding": "AI" },
-  "vars": { "REPORT_MAINTAINER_ID": "524762496373096459", "DISCORD_PRIVATE_FORUM": "true" },
-  "observability": { "enabled": false },
-  "durable_objects": { "bindings": [{ "name": "REPORTS", "class_name": "Reports" }] },
-  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Reports"] }]
+  "triggers": {
+    "crons": [
+      "*/5 * * * *"
+    ]
+  },
+  "ai": {
+    "binding": "AI"
+  },
+  "vars": {
+    "REPORT_MAINTAINER_ID": "524762496373096459",
+    "DISCORD_PRIVATE_FORUM": "true",
+    "IOS_FORUM_TAG_IDS": "1565236988913913887,1567744790856990730",
+    "ANDROID_FORUM_TAG_IDS": "1565236988913913887,1567744808926322811",
+    "CARPLAY_FORUM_TAG_ID": "1565237111391527112",
+    "NAVIGATION_FORUM_TAG_ID": "1565237084447445122",
+    "GALAXY_FORUM_TAG_ID": "1567747425047941200"
+  },
+  "observability": {
+    "enabled": false
+  },
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "REPORTS",
+        "class_name": "Reports"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": [
+        "Reports"
+      ]
+    }
+  ]
 }

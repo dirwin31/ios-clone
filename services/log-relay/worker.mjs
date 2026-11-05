@@ -5,6 +5,10 @@ const API = 'https://discord.com/api/v10';
 const MAX = 1024 * 1024;
 const json = (data, status = 200) => Response.json(data, {status, headers: {'Cache-Control': 'no-store'}});
 class InputError extends Error {}
+const platformOf = value => value === undefined ? 'ios' : ['ios', 'android'].includes(value) ? value : null;
+const platformLabel = value => value === 'android' ? 'Android' : 'iOS';
+const reportKey = (platform, reference) => 'report:' + (platform === 'android' ? 'android:' : '') + reference;
+const referenceKey = (platform, reference) => 'reference:' + (platform === 'android' ? 'android:' : '') + reference.toUpperCase();
 const validNonce = value => typeof value === 'string' && /^[A-Za-z0-9_-]{43,128}$/.test(value);
 export async function readJSON(request, limit = MAX) {
   if (!request.headers.get('content-type')?.startsWith('application/json')) throw new InputError('Expected JSON');
@@ -38,7 +42,7 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
     try {
-      if (request.method === 'GET' && url.pathname === '/') return json({service: 'StarPilot log relay', version: 12});
+      if (request.method === 'GET' && url.pathname === '/') return json({service: 'StarPilot log relay', version: 13});
       // Read-only operational status: no reporter IDs, report references, or thread links.
       if (request.method === 'GET' && url.pathname === '/release-status') {
         const releases = [];
@@ -46,7 +50,7 @@ export default {
           const id = env.REPORTS.idFromName(notice.userID);
           const response = await env.REPORTS.get(id).fetch('https://reports/build-notice-status', {method:'POST', body:JSON.stringify(notice)});
           const result = await response.json();
-          releases.push({version:notice.version, build:notice.build, ready:notice.ready, state:result.state});
+          releases.push({platform:platformOf(notice.platform), version:notice.version, build:notice.build, ready:notice.ready, state:result.state});
         }
         return json({releases});
       }
@@ -99,14 +103,16 @@ export default {
         const auth = await identity.json();
         if (auth.application?.id !== env.DISCORD_CLIENT_ID || !auth.scopes?.includes('identify') || !/^\d+$/.test(auth.user?.id || '')) return json({error: 'Invalid Discord authorization'}, 403);
         const body = await readJSON(request, url.pathname === '/v1/logs' ? 16 * MAX : MAX);
+        const platform = platformOf(body.platform);
+        if (!platform) return json({error:'Invalid platform; use ios or android'}, 400);
         if (url.pathname === '/v1/reports') {
           const id = env.REPORTS.idFromName(auth.user.id);
-          return env.REPORTS.get(id).fetch('https://reports/list', {method:'POST', body:'{}'});
+          return env.REPORTS.get(id).fetch('https://reports/list', {method:'POST', body:JSON.stringify({platform})});
         }
         if (body.threadID !== undefined && !/^\d{1,20}$/.test(body.threadID)) return json({error:'Invalid report'}, 400);
         if (!/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(body.reference || '') || typeof body.description !== 'string' || !body.description.trim() || body.description.length > 1000 || typeof body.logs !== 'string' || !body.logs.trim()) return json({error: 'Add a short description and diagnostics'}, 400);
         const id = env.REPORTS.idFromName(auth.user.id);
-        return env.REPORTS.get(id).fetch('https://reports/submit', {method: 'POST', body: JSON.stringify({...body, user: auth.user})});
+        return env.REPORTS.get(id).fetch('https://reports/submit', {method: 'POST', body: JSON.stringify({...body, platform, user: auth.user})});
       }
       return json({error: 'Not found'}, 404);
     } catch (error) {
@@ -124,18 +130,34 @@ export function buildNotifications(env) {
     if (!Array.isArray(notices) || notices.length > 25) return [];
     if (!notices.every(n => n && typeof n.userID === 'string' && /^\d{1,20}$/.test(n.userID) &&
       typeof n.reference === 'string' && /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(n.reference) &&
-      typeof n.build === 'string' && /^[1-9]\d{0,8}$/.test(n.build) &&
-      typeof n.version === 'string' && /^\d{1,4}\.\d{1,4}(\.\d{1,4})?$/.test(n.version) &&
-      (n.stage === undefined || ['archived','testflight'].includes(n.stage)) &&
+      platformOf(n.platform) !== null && typeof n.build === 'string' && /^[1-9]\d{0,9}$/.test(n.build) &&
+      typeof n.version === 'string' && (platformOf(n.platform) === 'android' ? /^[A-Za-z0-9][A-Za-z0-9._+-]{0,63}$/.test(n.version) : /^\d{1,4}\.\d{1,4}(\.\d{1,4})?$/.test(n.version)) &&
+      (platformOf(n.platform) === 'android' ? n.stage === 'available' : (n.stage === undefined || ['archived','testflight'].includes(n.stage))) &&
       typeof n.ready === 'boolean' && typeof n.message === 'string' && n.message.trim() && n.message.length <= 1200)) return [];
     return notices;
   } catch { return []; }
 }
 
+// Classify only the reporter's description, never private diagnostic contents.
+// Status transitions remain manual; follow-ups preserve the thread's existing tags.
+export function reportTags(env, platform, description) {
+  const configured = platform === 'android' ? env.ANDROID_FORUM_TAG_IDS : env.IOS_FORUM_TAG_IDS ?? env.FORUM_TAG_IDS;
+  const tags = (configured || '').split(',').map(s => s.trim()).filter(s => /^\d+$/.test(s));
+  const text = description.normalize('NFKC').toLowerCase();
+  const topics = [
+    [env.CARPLAY_FORUM_TAG_ID, /\bcar[ -]?play\b/.test(text)],
+    [env.NAVIGATION_FORUM_TAG_ID, /\b(navigation|navigate|navigating|nav|routing|route|routes|directions|destination|destinations|maps?)\b/.test(text)],
+    [env.GALAXY_FORUM_TAG_ID, /\b(galaxy|tunnel)\b/.test(text)]
+  ];
+  for (const [id, matches] of topics) if (matches && typeof id === 'string' && /^\d+$/.test(id)) tags.push(id);
+  return [...new Set(tags)].slice(0, 5);
+}
+
 // Use only the written description. The diagnostics attachment never goes to the model.
-export async function reportTitle(ai, description) {
+export async function reportTitle(ai, description, platform = 'ios') {
+  const prefix = platformLabel(platform) + ' — ';
   const fallback = description.trim().split('\n')[0].replace(/[\r\n\x00-\x1f]/g, ' ').trim();
-  if (!ai) return ('iOS — ' + fallback).slice(0, 100);
+  if (!ai) return (prefix + fallback).slice(0, 100);
   try {
     const result = await ai.run('@cf/meta/llama-3.1-8b-instruct-fp8', {
         messages: [
@@ -145,10 +167,10 @@ export async function reportTitle(ai, description) {
       });
     const title = typeof result?.response === 'string' ? result.response.replace(/[\r\n\x00-\x1f]+/g, ' ').replace(/^\s*["“”]+|["“”]+\s*$/g, '').trim() : '';
     if (!title || title.length > 90) console.warn(JSON.stringify({event: 'report_title_fallback', reason: 'invalid_model_output'}));
-    return ('iOS — ' + (title && title.length <= 90 ? title : fallback)).slice(0, 100);
+    return (prefix + (title && title.length <= 90 ? title : fallback)).slice(0, 100);
   } catch (error) {
     console.warn(JSON.stringify({event: 'report_title_fallback', reason: 'model_error'}));
-    return ('iOS — ' + fallback).slice(0, 100);
+    return (prefix + fallback).slice(0, 100);
   }
 }
 
@@ -160,14 +182,17 @@ export class Reports {
       const body = await request.json();
       const path = new URL(request.url).pathname;
       if (path === '/build-notice' || path === '/build-notice-status') return this.buildNotice(body, path === '/build-notice-status');
+      const platform = platformOf(body.platform);
+      if (!platform) return json({error:'Invalid platform'}, 400);
       if (new URL(request.url).pathname === '/list') {
         const items = await this.ctx.storage.list({prefix:'thread:'});
-        return json({reports:[...items.values()].sort((a,b) => b.created - a.created).slice(0,100)});
+        return json({reports:[...items.values()].filter(item => platformOf(item.platform) === platform).sort((a,b) => b.created - a.created).slice(0,100)});
       }
       if (path !== '/submit') return json({error:'Not found'}, 404);
       const existingThread = body.threadID ? await this.ctx.storage.get('thread:' + body.threadID) : null;
       if (body.threadID && !existingThread) return json({error:'Report not found for this Discord account'}, 403);
-      const key = 'report:' + body.reference;
+      if (existingThread && platformOf(existingThread.platform) !== platform) return json({error:'Report belongs to another platform'}, 409);
+      const key = reportKey(platform, body.reference);
       const previous = await this.ctx.storage.get(key);
       if (previous && !previous.retryable) return json(previous.result, previous.status);
       const fingerprint = [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(JSON.stringify([body.description, body.logs, body.threadID || null]))))].map(b => b.toString(16).padStart(2, '0')).join('');
@@ -205,14 +230,14 @@ export class Reports {
       if (reservation) return json(reservation.result, reservation.status);
       await this.ctx.storage.setAlarm(now + 86400000);
       const name = (body.user.global_name || body.user.username).replace(/[\r\n]/g, ' ').slice(0, 80);
-      const title = existingThread?.title || previous?.title || await reportTitle(this.env.AI, body.description);
+      const title = existingThread?.title || previous?.title || await reportTitle(this.env.AI, body.description, platform);
       const maintainer = this.env.REPORT_MAINTAINER_ID || '';
       const recipients = [...new Set([body.user.id, ...(/^\d+$/.test(maintainer) ? [maintainer] : [])])];
       const notify = maintainer && maintainer !== body.user.id && /^\d+$/.test(maintainer) ? `\nFor <@${maintainer}>` : '';
       const payload = {thread_name: title,
         content: `Report from <@${body.user.id}> (${name})${notify}\nReference: ${body.reference}\n\n${body.description}`,
         allowed_mentions: {parse: [], users: recipients},
-        applied_tags: (this.env.FORUM_TAG_IDS || '').split(',').map(s => s.trim()).filter(s => /^\d+$/.test(s)).slice(0, 5)};
+        applied_tags: reportTags(this.env, platform, body.description)};
       if (existingThread) { delete payload.thread_name; delete payload.applied_tags; webhook.searchParams.set('thread_id', body.threadID); }
       uncertain.title = title;
       // Persist progress only, never diagnostic contents. Unknown outcomes stay blocked.
@@ -249,9 +274,9 @@ export class Reports {
         if (!/^\d+$/.test(message.id || '') || !/^\d+$/.test(message.channel_id || '') || (existingThread && message.channel_id !== body.threadID)) return json(uncertain.result, 409);
         const response = {sent: true, reference: body.reference, threadURL: `https://discord.com/channels/${hook.guild_id}/${message.channel_id}/${message.id}`};
         await this.ctx.storage.transaction(async storage => {
-          if (!existingThread) await storage.put('thread:' + message.channel_id, {id:message.channel_id, title, created:now});
+          if (!existingThread) await storage.put('thread:' + message.channel_id, {id:message.channel_id, title, platform, created:now});
           await storage.put(key, {status: 200, result: response, at: now});
-          await storage.put('reference:' + body.reference.toUpperCase(), {threadURL:response.threadURL});
+          await storage.put(referenceKey(platform, body.reference), {threadURL:response.threadURL});
         });
         return json(response);
       } catch { return json(uncertain.result, 409); }
@@ -260,16 +285,21 @@ export class Reports {
   async buildNotice(notice, statusOnly) {
     if (!buildNotifications({BUILD_NOTIFICATIONS:JSON.stringify([notice])}).length) return json({state:'invalid_selection'}, 400);
     const storage = this.ctx.storage;
+    const platform = platformOf(notice.platform);
     const reference = notice.reference.toUpperCase();
-    let mapping = await storage.get('reference:' + reference);
+    let mapping = await storage.get(referenceKey(platform, reference));
     if (!mapping) {
-      const report = await storage.get('report:' + reference) || await storage.get('report:' + reference.toLowerCase());
+      const report = await storage.get(reportKey(platform, reference)) || await storage.get(reportKey(platform, reference.toLowerCase()));
       if (report?.status === 200 && report.result?.sent) mapping = report.result;
     }
     const match = /^https:\/\/discord\.com\/channels\/(\d+)\/(\d+)\/\d+$/.exec(mapping?.threadURL || '');
     if (!match || !await storage.get('thread:' + match[2])) return json({state:'report_not_found'}, 404);
-    const key = `build-notice:${notice.version}:${notice.build}:${match[2]}`;
-    const previous = await storage.get(key);
+    const thread = await storage.get('thread:' + match[2]);
+    if (platformOf(thread.platform) !== platform) return json({state:'platform_mismatch'}, 409);
+    const key = `build-notice:${platform}:${notice.version}:${notice.build}:${match[2]}`;
+    const legacyKey = `build-notice:${notice.version}:${notice.build}:${match[2]}`;
+    const receipt = async store => await store.get(key) || (platform === 'ios' ? await store.get(legacyKey) : null);
+    const previous = await receipt(storage);
     if (statusOnly) return json({state:previous?.state || 'pending'});
     if (!notice.ready) return json({state:'not_ready'});
     if (previous && previous.state !== 'rate_limited') return json({state:previous.state});
@@ -286,16 +316,16 @@ export class Reports {
     } catch { return json({state:'destination_unavailable'}, 503); }
     // Reserve before posting. Unknown outcomes stay blocked, even after restarts.
     const reserved = await storage.transaction(async store => {
-      const current = await store.get(key);
+      const current = await receipt(store);
       if (current && (current.state !== 'rate_limited' || current.retryAt > Date.now())) return false;
       await store.put(key, {state:'unconfirmed', at:Date.now()});
-      await store.put('reference:' + reference, {threadURL:mapping.threadURL});
+      await store.put(referenceKey(platform, reference), {threadURL:mapping.threadURL});
       return true;
     });
-    if (!reserved) return json({state:(await storage.get(key)).state});
+    if (!reserved) return json({state:(await receipt(storage)).state});
     const users = [...new Set([notice.userID, maintainer])];
     const milestone = notice.stage === 'archived' ? 'archived' : 'ready';
-    const payload = {content: `${users.map(id => `<@${id}>`).join(' ')}\nBuild ${notice.build} ${milestone}.\n\n${notice.message.trim()}`,
+    const payload = {content: `${users.map(id => `<@${id}>`).join(' ')}\n${platformLabel(platform)} Build ${notice.build} ${milestone}.\n\n${notice.message.trim()}`,
       allowed_mentions:{parse:[], users}};
     webhook.searchParams.set('thread_id', match[2]);
     webhook.searchParams.set('wait', 'true');

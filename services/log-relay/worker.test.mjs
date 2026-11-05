@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import worker, {Reports, reportTitle, readJSON} from './worker.mjs';
+import worker, {Reports, reportTitle, readJSON, buildNotifications, reportTags} from './worker.mjs';
 const env = {REPORT_MAINTAINER_ID:'524762496373096459',DISCORD_CLIENT_ID:'123', DISCORD_CLIENT_SECRET:'test', DISCORD_PRIVATE_WEBHOOK_URL:'https://discord.com/api/webhooks/456/privatefake', DISCORD_WEBHOOK_URL:'https://discord.com/api/webhooks/123/fake'};
 const request = (path, body, token) => new Request('https://relay'+path, {method:'POST',headers:{'Content-Type':'application/json', ...(token ? {Authorization:token}: {})},body:JSON.stringify(body)});
 test('OAuth uses fixed callback and PKCE, rejects invalid state', async () => {
@@ -239,7 +239,7 @@ test('rate-limited notification respects delay then retries only the selected th
  globalThis.fetch=async(url,options)=>{if(options.method!=='POST')return Response.json({guild_id:'333'});posts++;return posts===1?Response.json({retry_after:10},{status:429}):Response.json({id:'888',channel_id:'222'});};
  try{
   await reports.fetch(request('/build-notice',notice));await reports.fetch(request('/build-notice',notice));assert.equal(posts,1);
-  await s.put('build-notice:1.0.3:79:222',{state:'rate_limited',retryAt:0});
+  await s.put('build-notice:ios:1.0.3:79:222',{state:'rate_limited',retryAt:0});
   assert.equal((await(await reports.fetch(request('/build-notice',notice))).json()).state,'sent');assert.equal(posts,2);
  }finally{globalThis.fetch=old;}
 });
@@ -260,4 +260,84 @@ test('archive notice does not claim TestFlight access',async()=>{
   return Response.json({id:'888',channel_id:'222'});
  };
  try{const r=new Reports({storage:await noticeStore()},env);assert.equal((await (await r.fetch(request('/build-notice',{...notice,stage:'archived'}))).json()).state,'sent');assert.ok(posted);}finally{globalThis.fetch=old;}
+});
+
+
+test('platform API defaults to iOS, forwards Android and rejects unknown values', async()=>{
+ const old=globalThis.fetch; const calls=[];
+ globalThis.fetch=async()=>Response.json({application:{id:'123'},scopes:['identify'],user:{id:'789'}});
+ const e={...env,REPORTS:{idFromName:id=>id,get:id=>({fetch:async(url,o)=>{calls.push(JSON.parse(o.body));return Response.json({reports:[]});}})}};
+ try {
+  for(const platform of [undefined,'ios','android']) {
+   assert.equal((await worker.fetch(request('/v1/reports',{platform},'Bearer test'),e)).status,200);
+   assert.equal(calls.at(-1).platform,platform??'ios');
+  }
+  for(const platform of [null,'Android','web',1]) assert.equal((await worker.fetch(request('/v1/logs',{...body,platform},'Bearer test'),e)).status,400);
+ }finally{globalThis.fetch=old;}
+});
+
+test('Android titles, tags, private attachment, thread filtering and follow-up isolation',async()=>{
+ const old=globalThis.fetch; const posts=[]; const s=storage();
+ await s.put('thread:999',{id:'999',title:'legacy iOS',created:1});
+ globalThis.fetch=async(url,o)=>{
+  const priv=String(url).includes('/456/');
+  if(o.method!=='POST')return Response.json({guild_id:'333',channel_id:priv?'666':'777'});
+  if(priv){assert.equal(await o.body.get('files[0]').text(),body.logs);return Response.json({id:'555',channel_id:'666'});}
+  posts.push(JSON.parse(o.body));return Response.json({id:'111',channel_id:'222'});
+ };
+ try{
+  const r=new Reports({storage:s},{...env,FORUM_TAG_IDS:'11',ANDROID_FORUM_TAG_IDS:'22'});
+  const android={...body,platform:'android'};
+  assert.equal((await r.fetch(request('/submit',android))).status,200);
+  assert.ok(posts[0].thread_name.startsWith('Android — '));assert.deepEqual(posts[0].applied_tags,['22']);
+  assert.ok(!JSON.stringify(posts).includes(body.logs));
+  assert.equal((await s.get('thread:222')).platform,'android');
+  assert.deepEqual((await(await r.fetch(request('/list',{}))).json()).reports.map(x=>x.id),['999']);
+  assert.deepEqual((await(await r.fetch(request('/list',{platform:'android'}))).json()).reports.map(x=>x.id),['222']);
+  assert.equal((await r.fetch(request('/submit',{...body,threadID:'222'}))).status,409);
+  assert.equal((await r.fetch(request('/submit',{...android,threadID:'999'}))).status,409);
+  assert.equal((await r.fetch(request('/submit',android))).status,200);assert.equal(posts.length,1);
+  assert.equal((await r.fetch(request('/submit',{...android,reference:'87654321-1234-1234-1234-123456789abc',threadID:'222'}))).status,200);
+  assert.equal(posts[1].thread_name,undefined);
+ }finally{globalThis.fetch=old;}
+});
+
+test('legacy iOS notification receipts survive migration without resending',async()=>{
+ const old=globalThis.fetch;globalThis.fetch=async()=>assert.fail('must not resend');
+ try{for(const state of ['sent','unconfirmed','rejected']){
+  const s=await noticeStore();await s.put('build-notice:1.0.3:79:222',{state});
+  const r=new Reports({storage:s},env);
+  assert.equal((await(await r.fetch(request('/build-notice',{...notice,platform:'ios'}))).json()).state,state);
+ }}finally{globalThis.fetch=old;}
+});
+
+test('Android notification has separate dedup key and requires Android report and availability',async()=>{
+ const old=globalThis.fetch;let posts=0;const s=storage();
+ await s.put('thread:222',{id:'222',platform:'android'});
+ await s.put('reference:android:'+body.reference.toUpperCase(),{threadURL:'https://discord.com/channels/333/222/111'});
+ await s.put('build-notice:1.0.3:79:222',{state:'sent'});
+ globalThis.fetch=async(url,o)=>{if(o.method!=='POST')return Response.json({guild_id:'333'});posts++;assert.ok(JSON.parse(o.body).content.includes('Android Build 79 ready'));return Response.json({id:'888',channel_id:'222'});};
+ const android={...notice,platform:'android',stage:'available'};
+ try{
+  assert.equal(buildNotifications({BUILD_NOTIFICATIONS:JSON.stringify([{...android,stage:'testflight'}])}).length,0);
+  assert.equal(buildNotifications({BUILD_NOTIFICATIONS:JSON.stringify([{...android,version:'2.0-beta+3',build:'2147483647'}])}).length,1);
+  const r=new Reports({storage:s},env);
+  await r.fetch(request('/build-notice',android));await r.fetch(request('/build-notice',android));assert.equal(posts,1);
+  assert.equal((await s.get('build-notice:android:1.0.3:79:222')).state,'sent');
+  await s.put('thread:222',{id:'222',platform:'ios'});
+  assert.equal((await(await r.fetch(request('/build-notice',android))).json()).state,'platform_mismatch');assert.equal(posts,1);
+ }finally{globalThis.fetch=old;}
+});
+
+
+test('description topics add tags without changing status or exceeding five tags',()=>{
+ const e={IOS_FORUM_TAG_IDS:'1,2',ANDROID_FORUM_TAG_IDS:'1,3',CARPLAY_FORUM_TAG_ID:'4',NAVIGATION_FORUM_TAG_ID:'5',GALAXY_FORUM_TAG_ID:'6'};
+ assert.deepEqual(reportTags(e,'ios','Bluetooth disconnected'),['1','2']);
+ assert.deepEqual(reportTags(e,'android','CarPlay navigation cannot open the Galaxy tunnel'),['1','3','4','5','6']);
+ assert.deepEqual(reportTags(e,'ios','CAR PLAY map directions'),['1','2','4','5']);
+ assert.deepEqual(reportTags(e,'ios','Galaxy Tunnel login fails'),['1','2','6']);
+ assert.deepEqual(reportTags(e,'ios','fixed, closed, in progress'),['1','2']);
+ assert.deepEqual(reportTags(e,'ios','navigator mapping tunneling'),['1','2']);
+ assert.deepEqual(reportTags({...e,GALAXY_FORUM_TAG_ID:'2'},'ios','Galaxy'),['1','2']);
+ assert.deepEqual(reportTags({...e,CARPLAY_FORUM_TAG_ID:'invalid'},'ios','CarPlay'),['1','2']);
 });
