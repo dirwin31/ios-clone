@@ -59,7 +59,7 @@ export default {
         let difference = 0;
         for (let i = 0; i < expected.length; i++) difference |= actual[i] ^ expected[i];
         if (difference) return json({error:'Unauthorized'}, 401);
-        if (url.pathname.includes('/dashboard/')) return dashboardAPI(request, env, platform, readJSON, json);
+        if (url.pathname.includes('/dashboard/')) return await dashboardAPI(request, env, platform, readJSON, json);
         const body = await readJSON(request, 8192);
         const allowed = ['userID', 'reference', 'version', 'build', 'message', 'available'];
         if (Object.keys(body).some(key => !allowed.includes(key)) || typeof body.available !== 'boolean') return json({error:'Invalid release notice'}, 400);

@@ -38,7 +38,7 @@ export async function dashboardAPI(request,env,platform,readJSON,json){
   const headers={'Accept':'application/vnd.github+json','User-Agent':'StarPilot-support-dashboard','X-GitHub-Api-Version':'2022-11-28'};
   // Optional server credential for GitHub rate limits; never sent to the browser.
   if(env.GITHUB_READ_TOKEN) headers.Authorization='Bearer '+env.GITHUB_READ_TOKEN;
-  const response=await fetch('https://api.github.com/repos/'+source.repo+'/commits?sha='+encodeURIComponent(source.branch)+'&per_page=30',{headers,redirect:'error',signal:AbortSignal.timeout(15000)});
+  let response;try{response=await fetch('https://api.github.com/repos/'+source.repo+'/commits?sha='+encodeURIComponent(source.branch)+'&per_page=30',{headers,redirect:'manual',signal:AbortSignal.timeout(15000)});}catch(error){return json({error:'GitHub connection failed ('+String(error.name)+'). You can still draft manually.'},503);}
   if(!response.ok) return json({error:'GitHub is unavailable or rate limited. You can still write and send an update manually.'},503);
   const commits=await response.json();
   if(!Array.isArray(commits)) return json({error:'Invalid GitHub response'},503);
