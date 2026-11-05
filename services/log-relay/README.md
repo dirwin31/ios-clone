@@ -428,3 +428,27 @@ now carry their one-use invite in the query string, removed immediately after pa
 load. Legacy fragment links are still supported, including same-tab navigation.
 The button names the platform and is unavailable until setup state is loaded.
 Successful setup explicitly confirms the platform password was created.
+
+## Discord tag controls (prepared for bot setup)
+
+The dashboard's **Thread tags** panel reads current Discord tags and lets each
+platform maintainer choose Open, In Progress, or Closed and the Navigation,
+CarPlay, and Galaxy topics. The platform tag is automatic. Unknown custom tags
+are retained; Discord's five-tag limit is enforced. Changes made since the panel
+was loaded require reloading before saving.
+
+Configure the Worker secret `DISCORD_BOT_TOKEN` with a bot installed in the
+support server, with View Channel and Manage Threads access to forum
+`1565235002734809168`. No bot token is sent to the browser. Existing OAuth login
+and webhook secrets do not provide this access.
+
+Once configured, `/v1/reports` reads Discord's active threads on each refresh and
+excludes Closed-tagged, locked, and archived threads. Reopened active threads
+return on the next refresh. Existing report history remains available in the
+dashboard. Archived threads must be unarchived in Discord before editing tags.
+New follow-up submissions also verify the thread is available; confirmed delivery
+retries retain their existing idempotent behavior. Discord outages return a retry
+error, not a misleading empty list. With no bot configured, existing submission
+behavior is preserved and tag controls explain the missing setup.
+
+Test: `node --test worker.test.mjs dashboard.test.mjs notify-support.test.mjs thread-tags.test.mjs`

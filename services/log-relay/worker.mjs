@@ -1,3 +1,4 @@
+import {filterReportThreads,getReportThread,supportTags} from './thread-tags.mjs';
 import {dashboardAuth} from './dashboard-auth.mjs';
 import {dashboardPage, dashboardAPI} from './dashboard.mjs';
 const BASE = 'https://starpilot-log-relay.nathan-g-hubbard.workers.dev';
@@ -53,7 +54,7 @@ export default {
         const owner=env.REPORTS.get(env.REPORTS.idFromName('dashboard:'+authRoute[1]));
         return await owner.fetch('https://reports/auth-'+authRoute[2],{method:'POST',body:JSON.stringify({...body,ip:request.headers.get('CF-Connecting-IP')||'unknown'})});
       }
-      const releaseRoute = /^\/v1\/(android|ios)\/(?:build-notice(?:\/status)?|dashboard\/(?:reports|commits|import|setup-link))$/.exec(url.pathname);
+      const releaseRoute = /^\/v1\/(android|ios)\/(?:build-notice(?:\/status)?|dashboard\/(?:reports|commits|import|setup-link|tags))$/.exec(url.pathname);
       if (request.method === 'POST' && releaseRoute) {
         // Each platform has its own credential; neither grants Discord sign-in or cross-platform release access.
         const platform = releaseRoute[1];
@@ -270,7 +271,8 @@ export class Reports {
       }
       if (new URL(request.url).pathname === '/list') {
         const items = await this.ctx.storage.list({prefix:'thread:'});
-        return json({reports:[...items.values()].filter(item => platformOf(item.platform) === platform).sort((a,b) => b.created - a.created).slice(0,100)});
+        const rows=[...items.values()].filter(item => platformOf(item.platform) === platform).sort((a,b) => b.created - a.created).slice(0,100);
+        try{return json({reports:await filterReportThreads(this.env,rows)});}catch{return json({error:'Unable to refresh Discord threads. Please try again.'},503);}
       }
       if (path !== '/submit') return json({error:'Not found'}, 404);
       const existingThread = body.threadID ? await this.ctx.storage.get('thread:' + body.threadID) : null;
@@ -279,6 +281,10 @@ export class Reports {
       const key = reportKey(platform, body.reference);
       const previous = await this.ctx.storage.get(key);
       if (previous && !previous.retryable) {await this.flushDashboard();return json(previous.result, previous.status);}
+      if(existingThread && this.env.DISCORD_BOT_TOKEN && !previous){
+        let live;try{live=await getReportThread(this.env,body.threadID);}catch{return json({error:'Unable to verify this thread. Please refresh and try again.'},503);}
+        if(live.applied_tags.includes(supportTags.Closed)||live.thread_metadata?.archived||live.thread_metadata?.locked)return json({error:'This report is closed or archived. Refresh the thread list or start a new report.'},409);
+      }
       const fingerprint = [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(JSON.stringify([body.description, body.logs, body.threadID || null]))))].map(b => b.toString(16).padStart(2, '0')).join('');
       if (previous?.fingerprint && previous.fingerprint !== fingerprint) return json({error: 'Retry the original report without changing its contents.'}, 409);
       const now = Date.now();

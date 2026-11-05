@@ -124,3 +124,23 @@ test('dashboard shell has no embedded secrets, no persistent browser key storage
 });
 
 test('GitHub connection errors return JSON rather than escaping Worker handler',async()=>{const {env}=environment(),old=globalThis.fetch;globalThis.fetch=async()=>{throw new TypeError('network unavailable');};try{const r=await worker.fetch(req('ios/dashboard/commits'),env);assert.equal(r.status,503);assert.match((await r.json()).error,/GitHub connection failed/);}finally{globalThis.fetch=old;}});
+
+test('dashboard tag editing verifies ownership, platform, current tags and Discord confirmation',async()=>{
+ const {env,get}=environment();env.DISCORD_BOT_TOKEN='fake-test-token';
+ await get('123').ctx.storage.put('reference:'+ref,{threadURL:'https://discord.com/channels/1/456/789'});
+ await get('123').ctx.storage.put('thread:456',{id:'456',platform:'ios',title:'Report',created:1});
+ const old=globalThis.fetch;let patches=0;let tags=['1565236988913913887','1567744790856990730'];
+ globalThis.fetch=async(url,options)=>{assert.equal(options.headers.Authorization,'Bot fake-test-token');if(options.method==='PATCH'){patches++;tags=JSON.parse(options.body).applied_tags;}return Response.json({id:'456',parent_id:'1565235002734809168',type:11,applied_tags:tags,thread_metadata:{archived:false}});};
+ try{
+  const body={userID:'123',reference:ref};
+  assert.equal((await worker.fetch(req('ios/dashboard/tags',body),env)).status,200);
+  assert.equal((await worker.fetch(req('android/dashboard/tags',body,'a'.repeat(43)),env)).status,404);
+  assert.equal((await worker.fetch(req('ios/dashboard/tags',{...body,userID:'999'}),env)).status,404);
+  const save={...body,save:true,expected:[...tags],status:'Closed',topics:['Galaxy']};
+  const result=await worker.fetch(req('ios/dashboard/tags',save),env);assert.equal(result.status,200);assert.equal((await result.json()).saved,true);assert.equal(patches,1);
+  assert.ok(tags.includes('1565237052524466207'));assert.ok(tags.includes('1567744790856990730'));
+  assert.equal((await worker.fetch(req('ios/dashboard/tags',save),env)).status,409);assert.equal(patches,1);
+  globalThis.fetch=async()=>new Response('',{status:403});
+  assert.equal((await worker.fetch(req('ios/dashboard/tags',body),env)).status,503);
+ }finally{globalThis.fetch=old;}
+});

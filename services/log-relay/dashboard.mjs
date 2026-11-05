@@ -1,3 +1,4 @@
+import {getReportThread,nextReportTags,discordTags,supportTags} from './thread-tags.mjs';
 import {dashboardHTML} from './dashboard-ui.mjs';
 export const dashboardRepos={ios:{repo:'natehuby76/ios-clone',branch:'integrated-latest'},android:{repo:'dirwin31/StarPilotAndroid',branch:'Play-Dev'}};
 export function dashboardPage(){
@@ -7,6 +8,23 @@ export function dashboardPage(){
 export async function dashboardAPI(request,env,platform,readJSON,json){
  const body=await readJSON(request,8192),path=new URL(request.url).pathname;
  const index=env.REPORTS.get(env.REPORTS.idFromName('dashboard:'+platform));
+ if(path.endsWith('/tags')) {
+  if(!/^\d{1,20}$/.test(body.userID||'')||typeof body.reference!=='string')return json({error:'Select a report first.'},400);
+  const response=await env.REPORTS.get(env.REPORTS.idFromName(body.userID)).fetch('https://reports/dashboard-record',{method:'POST',body:JSON.stringify({platform,userID:body.userID,reference:body.reference})});
+  if(!response.ok)return response;
+  const record=await response.json(),id=new URL(record.threadURL).pathname.split('/')[3];
+  try{
+   let thread=await getReportThread(env,id);
+   if(body.save===true){
+    if(!Array.isArray(body.expected)||JSON.stringify([...thread.applied_tags].sort())!==JSON.stringify([...body.expected].sort()))return json({error:'Tags changed in Discord. Reload tags before saving.'},409);
+    if(thread.thread_metadata?.archived)return json({error:'Unarchive this thread in Discord before changing tags.'},409);
+    const tags=nextReportTags(thread.applied_tags,platform,body.status,body.topics);
+    thread=await discordTags(env,'/channels/'+id,{applied_tags:tags});
+    if(JSON.stringify([...(thread.applied_tags||[])].sort())!==JSON.stringify([...tags].sort()))throw Error('Tag update was not confirmed. Reload tags.');
+   }
+   return json({tags:thread.applied_tags,status:['Closed','In Progress','Open'].find(n=>thread.applied_tags.includes(supportTags[n]))||'Open',topics:['Navigation','CarPlay','Galaxy'].filter(n=>thread.applied_tags.includes(supportTags[n])),archived:!!thread.thread_metadata?.archived,saved:body.save===true});
+  }catch(e){return json({error:e.message},503);}
+ }
  if(path.endsWith('/reports')) return index.fetch('https://reports/dashboard-list',{method:'POST',body:JSON.stringify({platform,cursor:body.cursor})});
  if(path.endsWith('/import')) {
   if(body.syncHistory===true && /^\d{1,20}$/.test(body.userID||'')) {
