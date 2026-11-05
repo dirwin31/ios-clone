@@ -324,3 +324,33 @@ through this Worker's sign-in flow, not a release-notification key. Submit
 `platform:android`, a fresh UUID, a clearly labeled test description and synthetic
 diagnostic text to `/v1/logs`. Check Android/Open tags, developer mention, private
 attachment and returned thread URL. No real device diagnostics are needed.
+
+## Simplified iOS workflow
+
+Keep `notify-ios.mjs` and `notify-support.mjs` together (or use the repository).
+Run `node notify-ios.mjs --setup` once to generate a local key in
+`~/.config/starpilot-notify/ios.json`. It refuses to overwrite an existing key.
+Set that key once as the Cloudflare `IOS_RELEASE_KEY` secret. The script then
+loads it automatically; `IOS_RELEASE_KEY` in the environment takes precedence.
+The key file is local plaintext (mode 0600 on macOS/Linux); keep it outside Git
+and use a private Windows user folder. It is not an OS credential-vault entry.
+An optional `--key-file PATH` overrides the path.
+
+In the maintainer workspace, an existing
+`private-handoff/release-keys/ios.json` next to the repository is detected instead.
+The default private registry is `private-handoff/contacts.json` next to the repo;
+use `--registry PATH` on another machine. Neither file is included in Git.
+
+Run `node notify-ios.mjs` without arguments for guided prompts. Enter a report
+reference, app version, build number and short message. The reporter ID is
+resolved from the private registry. Enter SEND to confirm TestFlight availability
+and send, or Enter to check only. No build readiness is inferred automatically.
+
+You can also use `--report UUID` without `--user`, or `--report-file PATH` for a
+text file containing the original Discord report. Its `Report from <@ID>` mention
+and Reference UUID are extracted. Human display names alone are not enough.
+Conflicting or missing identities stop the command; it never guesses or sends
+to every thread. Older flags, including explicit `--user`, remain supported.
+
+Run `node --test worker.test.mjs notify-support.test.mjs` for backend and helper
+checks. No real Discord notification is sent by these tests.

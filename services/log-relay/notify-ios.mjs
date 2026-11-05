@@ -1,19 +1,39 @@
+import {readFile} from 'node:fs/promises';
+import {createInterface} from 'node:readline/promises';
+import {defaultRegistry,defaultKeyFile,setupKey,loadKey,resolveReport,loadRegistry} from './notify-support.mjs';
 // Node.js 20+. Supply IOS_RELEASE_KEY from a local secret store or CI secret.
 // No credential is accepted on the command line or printed in errors.
 const usage = 'node notify-ios.mjs --user DISCORD_ID --report UUID --version VERSION --build NUMBER --message "Relevant change" [--send --available]';
 const args = process.argv.slice(2), options = {};
 try {
-  const values = new Set(['user','report','version','build','message']);
+  const values = new Set(['user','report','report-file','registry','key-file','version','build','message']);
   for (let i = 0; i < args.length; i++) {
     const key = args[i].replace(/^--/, '');
     if (!args[i].startsWith('--') || Object.hasOwn(options,key)) throw Error(usage);
-    if (['send','available'].includes(key)) options[key] = true;
+    if (['send','available','setup'].includes(key)) options[key] = true;
     else if (values.has(key) && args[i+1] && !args[i+1].startsWith('--')) options[key] = args[++i];
     else throw Error(usage);
   }
-  if ([...values].some(key => !options[key])) throw Error(usage);
+  const keyFile=options['key-file'] || defaultKeyFile;
+  if(options.setup) {await setupKey(keyFile);console.log('Key saved to '+keyFile+'\nSet that key once as the Cloudflare IOS_RELEASE_KEY secret. Future runs load it automatically.');process.exit(0);}
+  if(!args.length) {
+    const prompt=createInterface({input:process.stdin,output:process.stdout});
+    try {
+      options.report=await prompt.question('Report reference (looked up automatically): ');
+      options.version=await prompt.question('App version: ');
+      options.build=await prompt.question('TestFlight build number: ');
+      options.message=await prompt.question('Short update for this report: ');
+      console.log('Update: '+options.message+' | Version '+options.version+' | Build '+options.build);
+      options.send=(await prompt.question('Is it available to this tester, and should this notice be sent? Type SEND, or Enter to check only: '))==='SEND';
+      options.available=options.send;
+    }finally{prompt.close();}
+  }
+  for(const field of ['version','build','message']) if(!options[field]) throw Error(usage);
+  const reportText=options['report-file'] ? await readFile(options['report-file'],'utf8') : options.report || '';
+  const identity=resolveReport(reportText,options.user,await loadRegistry(options.registry || defaultRegistry));
+  options.user=identity.userID;options.report=identity.reference;
   if (options.send && !options.available) throw Error('Use --available only after checking the reporter can access this build in TestFlight.');
-  const key = process.env.IOS_RELEASE_KEY;
+  const key = await loadKey(keyFile);
   if (!key || !/^[A-Za-z0-9_-]{43,128}$/.test(key)) throw Error('Set IOS_RELEASE_KEY through your local secret store or CI secrets first.');
   const body = {userID:options.user,reference:options.report,version:options.version,build:options.build,message:options.message,available:!!options.available};
   console.log(options.send ? 'Sending iOS notice for this report.' : 'Checking report and existing delivery status; no message will be sent.');
