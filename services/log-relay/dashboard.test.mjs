@@ -5,6 +5,44 @@ function storage(){const data=new Map();let pending=Promise.resolve();return {ge
 function environment(){const objects=new Map();const env={IOS_RELEASE_KEY:'i'.repeat(43),ANDROID_RELEASE_KEY:'a'.repeat(43),REPORT_MAINTAINER_ID:'999',DISCORD_WEBHOOK_URL:'https://discord.com/api/webhooks/123/fake',DISCORD_PRIVATE_WEBHOOK_URL:'https://discord.com/api/webhooks/456/privatefake'};env.REPORTS={idFromName:n=>n,get:n=>({fetch:(url,options)=>get(n).fetch(new Request(url,options))})};const get=n=>{if(!objects.has(n))objects.set(n,new Reports({storage:storage()},env));return objects.get(n);};return {env,get};}
 const req=(path,body={},key='i'.repeat(43))=>new Request('https://relay/v1/'+path,{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+key},body:JSON.stringify(body)});
 const internal=(object,path,body)=>object.fetch(new Request('https://reports/'+path,{method:'POST',body:JSON.stringify(body)}));
+const authReq=(platform,action,body={})=>new Request('https://relay/v1/'+platform+'/dashboard/auth/'+action,{method:'POST',headers:{'Content-Type':'application/json','CF-Connecting-IP':'192.0.2.1'},body:JSON.stringify(body)});
+const sessionReq=(platform,token)=>new Request('https://relay/v1/'+platform+'/dashboard/reports',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Session '+token},body:'{}'});
+
+test('first-time password setup, sign-in, platform isolation and logout',async()=>{
+ const {env,get}=environment();
+ assert.equal((await (await worker.fetch(authReq('ios','state'),env)).json()).configured,false);
+ assert.equal((await worker.fetch(authReq('ios','setup',{password:'my new password'}),env)).status,403);
+ const link=await (await worker.fetch(req('ios/dashboard/setup-link',{platform:'ios'}),env)).json();
+ const invite=new URLSearchParams(new URL(link.url).hash.slice(1)).get('invite');
+ const response=await worker.fetch(authReq('ios','setup',{password:'my new password',invite}),env);assert.equal(response.status,200);
+ const {token}=await response.json();assert.equal((await worker.fetch(sessionReq('ios',token),env)).status,200);
+ assert.equal((await worker.fetch(sessionReq('android',token),env)).status,401);
+ assert.equal((await (await worker.fetch(authReq('ios','state'),env)).json()).configured,true);
+ assert.equal((await worker.fetch(req('ios/dashboard/setup-link',{platform:'ios'}),env)).status,409);
+ assert.equal((await worker.fetch(authReq('ios','setup',{password:'replacement password',invite}),env)).status,403);
+ assert.equal((await worker.fetch(authReq('ios','login',{password:'wrong password'}),env)).status,401);
+ assert.equal((await worker.fetch(authReq('ios','login',{password:'my new password'}),env)).status,200);
+ const stored=await get('dashboard:ios').ctx.storage.get('auth:password');assert.ok(stored.hash);assert.ok(!JSON.stringify(stored).includes('my new password'));
+ await worker.fetch(authReq('ios','logout',{token}),env);assert.equal((await worker.fetch(sessionReq('ios',token),env)).status,401);
+});
+
+test('setup invites are owner-only, single-use and atomic',async()=>{
+ const {env}=environment();
+ assert.equal((await worker.fetch(req('android/dashboard/setup-link',{platform:'android'},'a'.repeat(43)),env)).status,403);
+ const result=await (await worker.fetch(req('ios/dashboard/setup-link',{platform:'android'}),env)).json();
+ const invite=new URLSearchParams(new URL(result.url).hash.slice(1)).get('invite');
+ const results=await Promise.all(['first password','second password'].map(password=>worker.fetch(authReq('android','setup',{password,invite}),env)));
+ assert.equal(results.filter(r=>r.status===200).length,1);assert.equal(results.filter(r=>r.status!==200).length,1);
+});
+
+test('password attempts are rate limited and expired sessions fail closed',async()=>{
+ const {env,get}=environment();
+ for(let i=0;i<10;i++)assert.equal((await worker.fetch(authReq('ios','login',{password:'wrong password'}),env)).status,401);
+ assert.equal((await worker.fetch(authReq('ios','login',{password:'wrong password'}),env)).status,429);
+ const index=get('dashboard:ios');await index.ctx.storage.put('auth:session:expired',{expires:0});await index.alarm();
+ assert.equal(await index.ctx.storage.get('auth:session:expired'),undefined);
+ assert.equal((await worker.fetch(sessionReq('ios','f'.repeat(64)),env)).status,401);
+});
 test('dashboard metadata requires platform key and never crosses namespaces',async()=>{
  const {env,get}=environment();const record={platform:'ios',userID:'123',reference:ref,title:'Tunnel issue',reporter:'Test person',created:100,threadURL:'https://discord.com/channels/1/2/3'};
  await internal(get('dashboard:ios'),'dashboard-put',{platform:'ios',record});

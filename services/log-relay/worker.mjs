@@ -1,3 +1,4 @@
+import {dashboardAuth} from './dashboard-auth.mjs';
 import {dashboardPage, dashboardAPI} from './dashboard.mjs';
 const BASE = 'https://starpilot-log-relay.nathan-g-hubbard.workers.dev';
 const CALLBACK = BASE + '/auth/discord/callback';
@@ -44,14 +45,26 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
     try {
-      if (request.method === 'GET' && url.pathname === '/') return json({service: 'StarPilot log relay', version: 17});
+      if (request.method === 'GET' && url.pathname === '/') return json({service: 'StarPilot log relay', version: 18});
       if (request.method === 'GET' && url.pathname === '/dashboard') return dashboardPage();
-      const releaseRoute = /^\/v1\/(android|ios)\/(?:build-notice(?:\/status)?|dashboard\/(?:reports|commits|import))$/.exec(url.pathname);
+      const authRoute=/^\/v1\/(ios|android)\/dashboard\/auth\/(state|setup|login|logout)$/.exec(url.pathname);
+      if(request.method==='POST'&&authRoute){
+        const body=await readJSON(request,2048);
+        const owner=env.REPORTS.get(env.REPORTS.idFromName('dashboard:'+authRoute[1]));
+        return await owner.fetch('https://reports/auth-'+authRoute[2],{method:'POST',body:JSON.stringify({...body,ip:request.headers.get('CF-Connecting-IP')||'unknown'})});
+      }
+      const releaseRoute = /^\/v1\/(android|ios)\/(?:build-notice(?:\/status)?|dashboard\/(?:reports|commits|import|setup-link))$/.exec(url.pathname);
       if (request.method === 'POST' && releaseRoute) {
         // Each platform has its own credential; neither grants Discord sign-in or cross-platform release access.
         const platform = releaseRoute[1];
         const releaseKey = platform === 'android' ? env.ANDROID_RELEASE_KEY : env.IOS_RELEASE_KEY;
         if (!validNonce(releaseKey)) return json({error:platformLabel(platform)+' release access is not configured'}, 503);
+        const session=request.headers.get('Authorization')?.startsWith('Session ');
+        if(session){
+          if(url.pathname.endsWith('/setup-link'))return json({error:'Use owner release access for setup links'},403);
+          const verified=await env.REPORTS.get(env.REPORTS.idFromName('dashboard:'+platform)).fetch('https://reports/auth-verify',{method:'POST',body:JSON.stringify({token:request.headers.get('Authorization').slice(8)})});
+          if(!verified.ok)return verified;
+        }else{
         const supplied = request.headers.get('Authorization')?.replace(/^Bearer /, '');
         if (!validNonce(supplied) || !request.headers.get('Authorization')?.startsWith('Bearer ')) return json({error:'Unauthorized'}, 401);
         const digest = async value => new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value)));
@@ -59,6 +72,14 @@ export default {
         let difference = 0;
         for (let i = 0; i < expected.length; i++) difference |= actual[i] ^ expected[i];
         if (difference) return json({error:'Unauthorized'}, 401);
+        }
+        if(url.pathname.endsWith('/setup-link')){
+          if(platform!=='ios')return json({error:'Owner access required'},403);
+          const body=await readJSON(request,2048);if(!['ios','android'].includes(body.platform))return json({error:'Invalid platform'},400);
+          const response=await env.REPORTS.get(env.REPORTS.idFromName('dashboard:'+body.platform)).fetch('https://reports/auth-invite',{method:'POST',body:'{}'});
+          if(!response.ok)return response;const {invite}=await response.json();
+          return json({url:BASE+'/dashboard#platform='+body.platform+'&invite='+invite});
+        }
         if (url.pathname.includes('/dashboard/')) return await dashboardAPI(request, env, platform, readJSON, json);
         const body = await readJSON(request, 8192);
         const allowed = ['userID', 'reference', 'version', 'build', 'message', 'available'];
@@ -209,6 +230,7 @@ export class Reports {
     {
       const body = await request.json();
       const path = new URL(request.url).pathname;
+      if(path.startsWith('/auth-'))return dashboardAuth(this.ctx.storage,path,body);
       if (path === '/build-notice' || path === '/build-notice-status') return this.buildNotice(body, path === '/build-notice-status');
       const platform = platformOf(body.platform);
       if (!platform) return json({error:'Invalid platform'}, 400);
@@ -427,9 +449,10 @@ export class Reports {
   }
   async alarm() {
     await this.flushDashboard();
+    for(const prefix of ['auth:session:','auth:attempt:']){const entries=await this.ctx.storage.list({prefix});for(const [key,entry] of entries)if(entry.expires<=Date.now())await this.ctx.storage.delete(key);}
     const records = await this.ctx.storage.list({prefix: 'report:'});
     for (const [key, value] of records) if (Date.now() - value.at > 7 * 86400000) await this.ctx.storage.delete(key);
     if ((await this.ctx.storage.list({prefix:'dashboard-pending:',limit:1})).size) await this.ctx.storage.setAlarm(Date.now()+300000);
-    else if ((await this.ctx.storage.list({prefix: 'report:', limit: 1})).size) await this.ctx.storage.setAlarm(Date.now() + 86400000);
+    else if ((await this.ctx.storage.list({prefix: 'auth:session:', limit: 1})).size || (await this.ctx.storage.list({prefix: 'auth:attempt:', limit: 1})).size || (await this.ctx.storage.list({prefix: 'report:', limit: 1})).size) await this.ctx.storage.setAlarm(Date.now() + 86400000);
   }
 }

@@ -401,3 +401,22 @@ Run `node --test worker.test.mjs notify-support.test.mjs dashboard.test.mjs`.
 `node build-dashboard.mjs` produces an ignored `dist/worker.mjs` single-module
 artifact for the dashboard editor. Normal Wrangler deployments use worker.mjs
 and bundle its imports. Preserve every existing secret, var, binding and Cron.
+
+## Dashboard passwords (Worker version 18)
+
+The dashboard now shows a password field and a Set password button before setup,
+and Sign in afterward. Each platform has a separate password. The owner creates
+one-time setup links with POST /v1/ios/dashboard/setup-link and JSON
+{"platform":"ios"} or {"platform":"android"}, authenticated by IOS_RELEASE_KEY.
+Give each maintainer their platform link; they choose their own password in the UI.
+Links expire after seven days and cannot replace an existing password. Generating
+a replacement setup link invalidates the previous unused link.
+
+Passwords are salted PBKDF2-SHA256 hashes (100,000 iterations) in the platform
+Durable Object, never plaintext. Login issues an eight-hour opaque session kept
+in tab memory. Lock dashboard revokes it. Failed setup/login requests are limited
+to ten per IP per ten minutes. Existing release keys remain usable by scripts.
+No public first-visitor claim is allowed: initial setup requires the platform invite.
+
+The older release-key login instructions above describe version 17; normal browser
+users now use their chosen password. API-key instructions still apply to CLI usage.
