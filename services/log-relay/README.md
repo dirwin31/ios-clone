@@ -354,3 +354,50 @@ to every thread. Older flags, including explicit `--user`, remain supported.
 
 Run `node --test worker.test.mjs notify-support.test.mjs` for backend and helper
 checks. No real Discord notification is sent by these tests.
+
+## Online release desk (Worker version 17)
+
+Open `/dashboard` on the Worker. The shell is public but contains no report data;
+all report and GitHub API requests require the selected platform's release key.
+The key is held only in page memory, never URLs, localStorage or sessionStorage.
+Lock/reload clears it. This is key-based developer access, not Discord OAuth SSO.
+Each key now authorizes listing its platform's report metadata as well as sending
+release notices. Share it only with that platform's authorized release operator.
+
+New confirmed reports and follow-ups automatically enqueue a metadata-only index
+update. The per-reporter Durable Object commits the outbox together with the
+confirmed report, then flushes to a separate per-platform index object in the
+existing REPORTS namespace. Failures do not turn successful delivery into failure:
+the alarm retries pending entries. No diagnostics, passwords, or OAuth tokens are
+indexed. Stored fields are reporter name/ID, title, reference, date and public
+thread URL. Metadata persists like the existing report-reference mappings.
+
+The desk lists 100 reports at a time, supports load-more and searches loaded
+reports by name/title/reference/thread link. Older reports can be imported by
+pasting an original report; the server checks the actual per-user mapping and
+platform rather than trusting a supplied destination. An authenticated one-time
+backfill can POST `{userID,syncHistory:true,reporter,cursor}` to the same import
+endpoint to recover that known reporter's stored references in pages of 50.
+The optional reporter label only names legacy records without a stored name;
+it never changes their ownership or destination.
+
+POST `/v1/ios/dashboard/reports`, `/commits`, or `/import` (and Android equivalents)
+uses the same bearer authentication as build notices. The GitHub sources are
+fixed server-side to `natehuby76/ios-clone` / `integrated-latest` and
+`dirwin31/StarPilotAndroid` / `Play-Dev`. Only commit SHA, subject, date and canonical
+GitHub link are returned. Public GitHub reads require no extra connection; optional
+GITHUB_READ_TOKEN can increase rate limits. The browser cannot select arbitrary
+repositories. GitHub failure leaves manual drafting available.
+
+Selecting a commit can insert its subject as a starter draft, not an AI assertion
+that it fixes the report. The operator edits it for relevance. The desk checks
+version/build inputs and existing delivery status, previews the message, and
+requires explicit availability confirmation and a final Send click. Existing
+notification deduplication and Android/iOS recipient routing are unchanged.
+Apple/Google Play build availability is not connected; commits are not treated
+as proof a release is downloadable. No build is started by the dashboard.
+
+Run `node --test worker.test.mjs notify-support.test.mjs dashboard.test.mjs`.
+`node build-dashboard.mjs` produces an ignored `dist/worker.mjs` single-module
+artifact for the dashboard editor. Normal Wrangler deployments use worker.mjs
+and bundle its imports. Preserve every existing secret, var, binding and Cron.

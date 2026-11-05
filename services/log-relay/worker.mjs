@@ -1,3 +1,4 @@
+import {dashboardPage, dashboardAPI} from './dashboard.mjs';
 const BASE = 'https://starpilot-log-relay.nathan-g-hubbard.workers.dev';
 const CALLBACK = BASE + '/auth/discord/callback';
 const APP_CALLBACK = 'starpilot-discord://callback';
@@ -43,8 +44,9 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
     try {
-      if (request.method === 'GET' && url.pathname === '/') return json({service: 'StarPilot log relay', version: 16});
-      const releaseRoute = /^\/v1\/(android|ios)\/build-notice(?:\/status)?$/.exec(url.pathname);
+      if (request.method === 'GET' && url.pathname === '/') return json({service: 'StarPilot log relay', version: 17});
+      if (request.method === 'GET' && url.pathname === '/dashboard') return dashboardPage();
+      const releaseRoute = /^\/v1\/(android|ios)\/(?:build-notice(?:\/status)?|dashboard\/(?:reports|commits|import))$/.exec(url.pathname);
       if (request.method === 'POST' && releaseRoute) {
         // Each platform has its own credential; neither grants Discord sign-in or cross-platform release access.
         const platform = releaseRoute[1];
@@ -57,6 +59,7 @@ export default {
         let difference = 0;
         for (let i = 0; i < expected.length; i++) difference |= actual[i] ^ expected[i];
         if (difference) return json({error:'Unauthorized'}, 401);
+        if (url.pathname.includes('/dashboard/')) return dashboardAPI(request, env, platform, readJSON, json);
         const body = await readJSON(request, 8192);
         const allowed = ['userID', 'reference', 'version', 'build', 'message', 'available'];
         if (Object.keys(body).some(key => !allowed.includes(key)) || typeof body.available !== 'boolean') return json({error:'Invalid release notice'}, 400);
@@ -209,6 +212,40 @@ export class Reports {
       if (path === '/build-notice' || path === '/build-notice-status') return this.buildNotice(body, path === '/build-notice-status');
       const platform = platformOf(body.platform);
       if (!platform) return json({error:'Invalid platform'}, 400);
+      if (path === '/dashboard-put') {
+        const r=body.record;
+        if (!r || r.platform!==platform || !/^\d{1,20}$/.test(r.userID||'') || !/^[A-F0-9-]{36}$/.test(r.reference||'')) return json({error:'Invalid index record'},400);
+        const lookup='lookup:'+r.userID+':'+r.reference;
+        await this.ctx.storage.transaction(async store=>{
+          const old=await store.get(lookup);
+          const created=Number.isFinite(r.created)?r.created:Date.now();
+          const key=old || 'index:'+String(9999999999999-created).padStart(13,'0')+':'+r.userID+':'+r.reference;
+          await store.put(key,r);await store.put(lookup,key);
+        });
+        return json({indexed:true});
+      }
+      if (path === '/dashboard-list') {
+        const cursor=body.cursor;
+        if(cursor && (typeof cursor!=='string'||cursor.length>120||!cursor.startsWith('index:'))) return json({error:'Invalid cursor'},400);
+        const rows=await this.ctx.storage.list({prefix:'index:',limit:101,...(cursor?{startAfter:cursor}:{})});
+        const pairs=[...rows];return json({reports:pairs.slice(0,100).map(([,r])=>r).filter(r=>r.platform===platform),cursor:pairs.length>100?pairs[99][0]:null});
+      }
+      if (path === '/dashboard-record') {
+        if(!/^\d{1,20}$/.test(body.userID||'')||typeof body.reference!=='string'||!/^[a-f0-9-]{36}$/i.test(body.reference)) return json({error:'Invalid report'},400);
+        const ref=body.reference.toUpperCase();
+        let mapping=await this.ctx.storage.get(referenceKey(platform,ref));
+        if(!mapping) {const receipt=await this.ctx.storage.get(reportKey(platform,ref))||await this.ctx.storage.get(reportKey(platform,ref.toLowerCase()));if(receipt?.result?.sent) mapping=receipt.result;}
+        const match=/^https:\/\/discord\.com\/channels\/(\d+)\/(\d+)\/\d+$/.exec(mapping?.threadURL||'');
+        const thread=match && await this.ctx.storage.get('thread:'+match[2]);
+        if(!thread || platformOf(thread.platform)!==platform) return json({error:'Report not found for this platform'},404);
+        return json({platform,userID:body.userID,reference:ref,title:thread.title,reporter:thread.reporter||'Discord user '+body.userID,created:thread.created,threadURL:mapping.threadURL});
+      }
+      if(path === '/dashboard-history') {
+        const prefix=platform==='android'?'reference:android:':'reference:';
+        if(body.cursor && (typeof body.cursor!=='string'||body.cursor.length>100||!body.cursor.startsWith(prefix))) return json({error:'Invalid cursor'},400);
+        const rows=[...await this.ctx.storage.list({prefix,limit:51,...(body.cursor?{startAfter:body.cursor}:{})})];
+        return json({references:rows.slice(0,50).map(([key])=>key.slice(prefix.length)).filter(ref=>/^[A-F0-9-]{36}$/.test(ref)),cursor:rows.length>50?rows[49][0]:null});
+      }
       if (new URL(request.url).pathname === '/list') {
         const items = await this.ctx.storage.list({prefix:'thread:'});
         return json({reports:[...items.values()].filter(item => platformOf(item.platform) === platform).sort((a,b) => b.created - a.created).slice(0,100)});
@@ -219,7 +256,7 @@ export class Reports {
       if (existingThread && platformOf(existingThread.platform) !== platform) return json({error:'Report belongs to another platform'}, 409);
       const key = reportKey(platform, body.reference);
       const previous = await this.ctx.storage.get(key);
-      if (previous && !previous.retryable) return json(previous.result, previous.status);
+      if (previous && !previous.retryable) {await this.flushDashboard();return json(previous.result, previous.status);}
       const fingerprint = [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(JSON.stringify([body.description, body.logs, body.threadID || null]))))].map(b => b.toString(16).padStart(2, '0')).join('');
       if (previous?.fingerprint && previous.fingerprint !== fingerprint) return json({error: 'Retry the original report without changing its contents.'}, 409);
       const now = Date.now();
@@ -299,10 +336,12 @@ export class Reports {
         if (!/^\d+$/.test(message.id || '') || !/^\d+$/.test(message.channel_id || '') || (existingThread && message.channel_id !== body.threadID)) return json(uncertain.result, 409);
         const response = {sent: true, reference: body.reference, threadURL: `https://discord.com/channels/${hook.guild_id}/${message.channel_id}/${message.id}`};
         await this.ctx.storage.transaction(async storage => {
-          if (!existingThread) await storage.put('thread:' + message.channel_id, {id:message.channel_id, title, platform, created:now});
+          if (!existingThread) await storage.put('thread:' + message.channel_id, {id:message.channel_id, title, platform, created:now,reporter:name});
           await storage.put(key, {status: 200, result: response, at: now});
           await storage.put(referenceKey(platform, body.reference), {threadURL:response.threadURL});
+          await storage.put('dashboard-pending:'+platform+':'+body.reference.toUpperCase(),{platform,userID:body.user.id,reference:body.reference.toUpperCase(),title,reporter:name,created:now,threadURL:response.threadURL});
         });
+        await this.flushDashboard();
         return json(response);
       } catch { return json(uncertain.result, 409); }
     }
@@ -373,9 +412,24 @@ export class Reports {
       return json({state:'sent'});
     } catch { return json({state:'unconfirmed'}); }
   }
+  async flushDashboard() {
+    if(!this.env.REPORTS) return;
+    try {
+      const records=await this.ctx.storage.list({prefix:'dashboard-pending:',limit:25});
+      for(const [key,record] of records) {
+        const id=this.env.REPORTS.idFromName('dashboard:'+record.platform);
+        const response=await this.env.REPORTS.get(id).fetch('https://reports/dashboard-put',{method:'POST',body:JSON.stringify({platform:record.platform,record})});
+        if(!response.ok) break;
+        await this.ctx.storage.delete(key);
+      }
+    } catch { console.warn('dashboard_index_retry_pending'); }
+    // Failed indexing never changes a confirmed report into an uncertain delivery.
+  }
   async alarm() {
+    await this.flushDashboard();
     const records = await this.ctx.storage.list({prefix: 'report:'});
     for (const [key, value] of records) if (Date.now() - value.at > 7 * 86400000) await this.ctx.storage.delete(key);
-    if ((await this.ctx.storage.list({prefix: 'report:', limit: 1})).size) await this.ctx.storage.setAlarm(Date.now() + 86400000);
+    if ((await this.ctx.storage.list({prefix:'dashboard-pending:',limit:1})).size) await this.ctx.storage.setAlarm(Date.now()+300000);
+    else if ((await this.ctx.storage.list({prefix: 'report:', limit: 1})).size) await this.ctx.storage.setAlarm(Date.now() + 86400000);
   }
 }
