@@ -45,7 +45,8 @@ personalization embedded in the iOS app. Every entry selects one reporter's save
 report reference, which resolves to that account's existing public thread. The
 same build may select several reports, or none. Never enumerate open reports to
 choose recipients. The authenticated Cloudflare administration interface is the
-only way to register selections; there is no public send endpoint.
+way to register scheduled selections. Version 14 also provides the separately
+authenticated Android release endpoint described below.
 
 Write each entry's `message` specifically for the selected report. Include only
 changes that address that reported issue, and relevant diagnostic improvements.
@@ -167,7 +168,8 @@ ASCII letters/digits/dots/underscores/pluses/hyphens, starting alphanumeric);
 build is the positive decimal versionCode as a string (up to ten digits).
 Android requires stage=available. The operator verifies that this recipient can
 actually download the intended release before changing ready to true. There is
-no automatic Google Play/GitHub release detection and no client-facing send API.
+no automatic Google Play/GitHub release detection. Release credentials must never
+be included in a distributed app.
 The existing five-minute scheduler and delivery rules apply.
 
 Notifications must resolve to a report on the same platform. New dedup keys
@@ -208,3 +210,55 @@ Mentions identify topics, not which subsystem caused the fault; for example,
 “Bluetooth works but Tunnel fails” adds Galaxy. Missing/invalid topic tag bindings
 are ignored. Duplicate IDs are removed and Discord’s five-tag limit is respected.
 Open and platform tags take precedence. In Progress and CLOSED remain manual.
+
+## Android developer release command (Worker version 14)
+
+This feature is disabled unless the Cloudflare **secret** `ANDROID_RELEASE_KEY`
+is configured. Use a cryptographically random 32-byte value encoded as base64url
+without padding (43 characters). Configure and share it through a secure channel,
+not Git, chat, a URL, or the Android app. Replacing/removing this secret revokes
+the previous key. Keep existing secrets, bindings and BUILD_NOTIFICATIONS intact.
+The key grants notification access to existing Android reports only. It grants
+no Cloudflare administration, diagnostic downloads, report listing or iOS notices.
+It can target any Android report whose reporter ID and UUID the holder knows;
+it is not restricted to a single reporter.
+
+Give the developer `notify-android.mjs` and Node.js 20 or newer. Load the key into
+`ANDROID_RELEASE_KEY` from their local secret manager or protected CI environment.
+The script does not accept the key in arguments. No dependencies are needed.
+
+First run a read-only check (replace the example identifiers):
+
+```sh
+node notify-android.mjs --user 123456789 --report 12345678-1234-1234-1234-123456789abc --version 1.2.0 --build 123 --message "Updated Bluetooth reconnect handling."
+```
+
+Then run the identical command with `--send --available` only after confirming
+the reporter can download that build. Both the reporter's Discord ID and report
+UUID are necessary because storage is partitioned by reporter. These appear in
+the original Discord report; do not substitute the developer's own ID.
+
+The command calls `POST /v1/android/build-notice/status` by default, or
+`POST /v1/android/build-notice` to send. Both require `Authorization: Bearer KEY`
+and `Content-Type: application/json`, with a maximum 8 KiB JSON body:
+
+```json
+{"userID":"123456789","reference":"12345678-1234-1234-1234-123456789abc","version":"1.2.0","build":"123","message":"Updated Bluetooth reconnect handling.","available":true}
+```
+
+The endpoint fixes platform to Android and stage to available. Unknown fields,
+including platform, threadID, stage and webhook URLs, are rejected. The stored
+report determines the destination; iOS records cannot be used. A successful HTTP
+response is not necessarily delivery: inspect `state`. Only `sent` confirms it.
+`pending` on the status endpoint means no delivery receipt exists for that valid
+report/build. Status checks never send. Missing reports return 404.
+
+This sends immediately rather than adding a Cron entry. It shares deduplication
+with scheduled Android notices. A repeat for the same platform/version/build/thread
+does not post again. An uncertain delivery stays blocked; do not change identifiers
+to evade it. A rate-limited result may be retried with identical arguments after
+waiting. There is no automatic client retry. Keep each message relevant to that
+report and follow the same notification-writing rules above.
+
+Before giving access to the developer, test with an explicitly designated Android
+test report. Local tests mock Discord; they do not send real notifications.

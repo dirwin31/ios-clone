@@ -30,6 +30,47 @@ function storage(){
  };return store;
 }
 const body={reference:'12345678-1234-1234-1234-123456789abc',description:'Bluetooth failed @everyone',logs:'synthetic diagnostics',user:{id:'789',username:'tester'}};
+
+test('Android release API fails closed and constrains all forwarded notices',async()=>{
+ const key='a'.repeat(43), calls=[];
+ const releaseEnv={...env,ANDROID_RELEASE_KEY:key,REPORTS:{idFromName:id=>id,get:id=>({fetch:async(url,options)=>{calls.push({id,url,body:JSON.parse(options.body)});return Response.json({state:'pending'});}})}};
+ const payload={userID:'789',reference:body.reference,version:'1.2-beta',build:'123',message:'Updated Bluetooth recovery.',available:true};
+ const send=(data=payload,token='Bearer '+key,path='/v1/android/build-notice',e=releaseEnv)=>worker.fetch(request(path,data,token),e);
+ assert.equal((await send(payload,undefined,undefined,{...releaseEnv,ANDROID_RELEASE_KEY:undefined})).status,503);
+ assert.equal((await send(payload,'Bearer '+'b'.repeat(43))).status,401);
+ assert.equal((await send(payload,'')).status,401);
+ for (const extra of [{platform:'ios'},{threadID:'123'},{stage:'archived'},{webhook:'https://example.com'}]) assert.equal((await send({...payload,...extra})).status,400);
+ assert.equal((await send({...payload,available:false})).status,400);
+ assert.equal((await send({...payload,userID:'bad'})).status,400);
+ assert.equal(calls.length,0);
+ assert.equal((await send({...payload,available:false},'Bearer '+key,'/v1/android/build-notice/status')).status,200);
+ assert.ok(calls[0].url.endsWith('/build-notice-status'));
+ await send();
+ assert.equal(calls[1].id,'789');assert.equal(calls[1].body.platform,'android');assert.equal(calls[1].body.stage,'available');assert.equal(calls[1].body.ready,true);
+ assert.ok(!JSON.stringify(calls).includes(key));
+});
+
+test('Android release endpoint sends once, status is read-only, and iOS references are rejected',async()=>{
+ const store=storage(), key='a'.repeat(43), old=globalThis.fetch;let posts=0;
+ const object=new Reports({storage:store},env);
+ const e={...env,ANDROID_RELEASE_KEY:key,REPORTS:{idFromName:id=>id,get:()=>({fetch:(url,options)=>object.fetch(new Request(url,options))})}};
+ const payload={userID:'789',reference:body.reference,version:'1.2',build:'123',message:'Updated recovery.',available:true};
+ const send=path=>worker.fetch(request(path,payload,'Bearer '+key),e);
+ const url='https://discord.com/channels/333/222/111';
+ await store.put('reference:'+body.reference.toUpperCase(),{threadURL:url});
+ await store.put('thread:222',{platform:'ios'});
+ assert.equal((await send('/v1/android/build-notice')).status,404);
+ await store.put('reference:android:'+body.reference.toUpperCase(),{threadURL:url});
+ assert.equal((await send('/v1/android/build-notice')).status,409);
+ await store.put('thread:222',{platform:'android'});
+ globalThis.fetch=async(url,options)=>{if(options.method==='POST'){posts++;return Response.json({id:'999',channel_id:'222'});}return Response.json({guild_id:'333'});};
+ try {
+  assert.equal((await (await send('/v1/android/build-notice/status')).json()).state,'pending');assert.equal(posts,0);
+  const results=await Promise.all([send('/v1/android/build-notice'),send('/v1/android/build-notice')]);
+  await Promise.all(results.map(r=>r.json()));assert.equal(posts,1);
+  assert.equal((await (await send('/v1/android/build-notice')).json()).state,'sent');assert.equal(posts,1);
+ }finally{globalThis.fetch=old;}
+});
 test('confirmed report retry returns same thread without another post',async()=>{
  const old=globalThis.fetch;let posts=0;
  globalThis.fetch=async(url,options)=>{

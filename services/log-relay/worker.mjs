@@ -42,7 +42,28 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
     try {
-      if (request.method === 'GET' && url.pathname === '/') return json({service: 'StarPilot log relay', version: 13});
+      if (request.method === 'GET' && url.pathname === '/') return json({service: 'StarPilot log relay', version: 14});
+      if (request.method === 'POST' && ['/v1/android/build-notice', '/v1/android/build-notice/status'].includes(url.pathname)) {
+        // A separate release credential never grants Discord sign-in or iOS release access.
+        if (!validNonce(env.ANDROID_RELEASE_KEY)) return json({error:'Android release access is not configured'}, 503);
+        const supplied = request.headers.get('Authorization')?.replace(/^Bearer /, '');
+        if (!validNonce(supplied) || !request.headers.get('Authorization')?.startsWith('Bearer ')) return json({error:'Unauthorized'}, 401);
+        const digest = async value => new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value)));
+        const [actual, expected] = await Promise.all([digest(supplied), digest(env.ANDROID_RELEASE_KEY)]);
+        let difference = 0;
+        for (let i = 0; i < expected.length; i++) difference |= actual[i] ^ expected[i];
+        if (difference) return json({error:'Unauthorized'}, 401);
+        const body = await readJSON(request, 8192);
+        const allowed = ['userID', 'reference', 'version', 'build', 'message', 'available'];
+        if (Object.keys(body).some(key => !allowed.includes(key)) || typeof body.available !== 'boolean') return json({error:'Invalid Android notice'}, 400);
+        const notice = {userID:body.userID, reference:body.reference, version:body.version, build:body.build,
+          message:body.message, platform:'android', stage:'available', ready:body.available};
+        if (!buildNotifications({BUILD_NOTIFICATIONS:JSON.stringify([notice])}).length) return json({error:'Invalid Android notice'}, 400);
+        const statusOnly = url.pathname.endsWith('/status');
+        if (!statusOnly && !notice.ready) return json({error:'Confirm this release is available to the reporter'}, 400);
+        const id = env.REPORTS.idFromName(notice.userID);
+        return env.REPORTS.get(id).fetch('https://reports/' + (statusOnly ? 'build-notice-status' : 'build-notice'), {method:'POST', body:JSON.stringify(notice)});
+      }
       // Read-only operational status: no reporter IDs, report references, or thread links.
       if (request.method === 'GET' && url.pathname === '/release-status') {
         const releases = [];
@@ -122,7 +143,7 @@ export default {
   }
 };
 
-// Only Cloudflare administrators can change this binding. There is no public send endpoint.
+// Only Cloudflare administrators can change this binding. Android also has a scoped authenticated endpoint.
 // Mark ready after verifying the selected milestone: archive success or recipient TestFlight availability.
 export function buildNotifications(env) {
   try {
