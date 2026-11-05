@@ -2,7 +2,7 @@ import {dashboardHTML} from './dashboard-ui.mjs';
 export const dashboardRepos={ios:{repo:'natehuby76/ios-clone',branch:'integrated-latest'},android:{repo:'dirwin31/StarPilotAndroid',branch:'Play-Dev'}};
 export function dashboardPage(){
  const nonce=crypto.randomUUID().replaceAll('-','');
- return new Response(dashboardHTML.replaceAll('{{nonce}}',nonce),{headers:{'Content-Type':'text/html;charset=utf-8','Cache-Control':'no-store','Referrer-Policy':'no-referrer','X-Content-Type-Options':'nosniff','Content-Security-Policy':"default-src 'none'; script-src 'nonce-"+nonce+"'; style-src 'nonce-"+nonce+"'; connect-src 'self'; img-src 'self' data:; base-uri 'none'; frame-ancestors 'none'; form-action 'none'"}});
+ return new Response(dashboardHTML.replaceAll('{{nonce}}',nonce),{headers:{'Content-Type':'text/html;charset=utf-8','Cache-Control':'no-store','Referrer-Policy':'no-referrer','X-Content-Type-Options':'nosniff','Content-Security-Policy':"default-src 'none'; script-src 'nonce-"+nonce+"'; style-src 'nonce-"+nonce+"'; connect-src 'self' https://api.github.com; img-src 'self' data:; base-uri 'none'; frame-ancestors 'none'; form-action 'none'"}});
 }
 export async function dashboardAPI(request,env,platform,readJSON,json){
  const body=await readJSON(request,8192),path=new URL(request.url).pathname;
@@ -39,7 +39,7 @@ export async function dashboardAPI(request,env,platform,readJSON,json){
   // Optional server credential for GitHub rate limits; never sent to the browser.
   if(env.GITHUB_READ_TOKEN) headers.Authorization='Bearer '+env.GITHUB_READ_TOKEN;
   let response;try{response=await fetch('https://api.github.com/repos/'+source.repo+'/commits?sha='+encodeURIComponent(source.branch)+'&per_page=30',{headers,redirect:'manual',signal:AbortSignal.timeout(15000)});}catch(error){return json({error:'GitHub connection failed ('+String(error.name)+'). You can still draft manually.'},503);}
-  if(!response.ok) return json({error:'GitHub is unavailable or rate limited. You can still write and send an update manually.'},503);
+  if(!response.ok) return json({error:'GitHub is unavailable (HTTP '+response.status+'). You can still write and send an update manually.'},503);
   const commits=await response.json();
   if(!Array.isArray(commits)) return json({error:'Invalid GitHub response'},503);
   return json({source,commits:commits.filter(c=>/^[a-f0-9]{40}$/.test(c.sha||'')).map(c=>({sha:c.sha,title:String(c.commit?.message||'').split('\n')[0].slice(0,300),date:c.commit?.committer?.date,url:'https://github.com/'+source.repo+'/commit/'+c.sha}))});

@@ -358,7 +358,7 @@ checks. No real Discord notification is sent by these tests.
 ## Online release desk (Worker version 17)
 
 Open `/dashboard` on the Worker. The shell is public but contains no report data;
-all report and GitHub API requests require the selected platform's release key.
+all report requests and Worker GitHub API requests require the selected platform's release key.
 The key is held only in page memory, never URLs, localStorage or sessionStorage.
 Lock/reload clears it. This is key-based developer access, not Discord OAuth SSO.
 Each key now authorizes listing its platform's report metadata as well as sending
@@ -387,7 +387,7 @@ fixed server-side to `natehuby76/ios-clone` / `integrated-latest` and
 `dirwin31/StarPilotAndroid` / `Play-Dev`. Only commit SHA, subject, date and canonical
 GitHub link are returned. Public GitHub reads require no extra connection; optional
 GITHUB_READ_TOKEN can increase rate limits. The browser cannot select arbitrary
-repositories. GitHub failure leaves manual drafting available.
+repositories. If the Worker is rate limited, the browser falls back to the same public GitHub commit endpoint without sending release credentials or report data. GitHub failure leaves manual drafting available.
 
 Selecting a commit can insert its subject as a starter draft, not an AI assertion
 that it fixes the report. The operator edits it for relevance. The desk checks
