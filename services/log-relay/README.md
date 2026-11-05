@@ -262,3 +262,50 @@ report and follow the same notification-writing rules above.
 
 Before giving access to the developer, test with an explicitly designated Android
 test report. Local tests mock Discord; they do not send real notifications.
+
+## iOS release command and Mac/Windows setup (Worker version 15)
+
+Both `notify-ios.mjs` and `notify-android.mjs` run on macOS, Windows and Linux
+with Node.js 20 or newer. They have no external dependencies. The script's
+platform is the app being announced, not the computer running the command.
+
+Configure a separate Cloudflare secret `IOS_RELEASE_KEY` for the iOS operator.
+Use a different random key from `ANDROID_RELEASE_KEY`; never reuse either key.
+The iOS route is `/v1/ios/build-notice` (or `/status`), with the same JSON fields
+and safeguards as Android. It fixes stage to `testflight`. `available:true`
+means the recipient can access this build in their TestFlight group, not merely
+that Xcode Cloud archived successfully. Existing administrator-managed archive
+notifications remain supported through BUILD_NOTIFICATIONS.
+
+Load the key into the process environment from a password manager/CI secret, or
+use a hidden prompt. Do not paste a literal key into a command saved in history.
+For iOS on Windows PowerShell:
+
+```powershell
+$releaseSecret = Read-Host 'iOS release key' -AsSecureString
+$env:IOS_RELEASE_KEY = [System.Net.NetworkCredential]::new('', $releaseSecret).Password
+```
+
+For iOS in macOS's default zsh Terminal:
+
+```zsh
+read -rs 'IOS_RELEASE_KEY?iOS release key: '; echo
+export IOS_RELEASE_KEY
+```
+
+For Android use `ANDROID_RELEASE_KEY` in place of `IOS_RELEASE_KEY` in those
+commands. These values last for that terminal session. After use, clear them with
+`Remove-Item Env:IOS_RELEASE_KEY` (PowerShell) or `unset IOS_RELEASE_KEY` (zsh),
+using the Android variable name when appropriate.
+
+From the folder containing the script, the same command works on either OS:
+
+```sh
+node notify-ios.mjs --user 123456789 --report 12345678-1234-1234-1234-123456789abc --version 1.0.5 --build 123 --message "Updated tunnel sign-in."
+```
+
+This only checks status. Add `--send --available` to send after verifying
+TestFlight access. Use `notify-android.mjs` for Android, with its separate key.
+Both require the original reporter's Discord user ID and report UUID. Both use
+the existing stored destination and shared duplicate protection, including old
+iOS receipts. Neither starts a build or changes tester groups.

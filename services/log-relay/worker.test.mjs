@@ -31,6 +31,22 @@ function storage(){
 }
 const body={reference:'12345678-1234-1234-1234-123456789abc',description:'Bluetooth failed @everyone',logs:'synthetic diagnostics',user:{id:'789',username:'tester'}};
 
+test('iOS release key is isolated from Android and requires TestFlight availability',async()=>{
+ const calls=[], ios='i'.repeat(43), android='a'.repeat(43);
+ const e={...env,IOS_RELEASE_KEY:ios,ANDROID_RELEASE_KEY:android,REPORTS:{idFromName:id=>id,get:()=>({fetch:async(url,options)=>{calls.push({url,body:JSON.parse(options.body)});return Response.json({state:'pending'});}})}};
+ const payload={userID:'789',reference:body.reference,version:'1.0.5',build:'123',message:'Updated tunnel sign-in.',available:true};
+ const send=(path,key,data=payload,environment=e)=>worker.fetch(request(path,data,'Bearer '+key),environment);
+ assert.equal((await send('/v1/ios/build-notice',android)).status,401);
+ assert.equal((await send('/v1/android/build-notice',ios)).status,401);
+ assert.equal((await send('/v1/ios/build-notice',ios,payload,{...e,IOS_RELEASE_KEY:undefined})).status,503);
+ for(const extra of [{platform:'android'},{stage:'archived'},{threadID:'222'},{available:false},{version:'beta'}]) assert.equal((await send('/v1/ios/build-notice',ios,{...payload,...extra})).status,400);
+ assert.equal(calls.length,0);
+ await send('/v1/ios/build-notice/status',ios,{...payload,available:false});
+ assert.ok(calls[0].url.endsWith('/build-notice-status'));
+ await send('/v1/ios/build-notice',ios);
+ assert.equal(calls[1].body.platform,'ios');assert.equal(calls[1].body.stage,'testflight');assert.equal(calls[1].body.ready,true);
+});
+
 test('Android release API fails closed and constrains all forwarded notices',async()=>{
  const key='a'.repeat(43), calls=[];
  const releaseEnv={...env,ANDROID_RELEASE_KEY:key,REPORTS:{idFromName:id=>id,get:id=>({fetch:async(url,options)=>{calls.push({id,url,body:JSON.parse(options.body)});return Response.json({state:'pending'});}})}};

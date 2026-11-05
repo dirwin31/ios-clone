@@ -42,23 +42,26 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
     try {
-      if (request.method === 'GET' && url.pathname === '/') return json({service: 'StarPilot log relay', version: 14});
-      if (request.method === 'POST' && ['/v1/android/build-notice', '/v1/android/build-notice/status'].includes(url.pathname)) {
-        // A separate release credential never grants Discord sign-in or iOS release access.
-        if (!validNonce(env.ANDROID_RELEASE_KEY)) return json({error:'Android release access is not configured'}, 503);
+      if (request.method === 'GET' && url.pathname === '/') return json({service: 'StarPilot log relay', version: 15});
+      const releaseRoute = /^\/v1\/(android|ios)\/build-notice(?:\/status)?$/.exec(url.pathname);
+      if (request.method === 'POST' && releaseRoute) {
+        // Each platform has its own credential; neither grants Discord sign-in or cross-platform release access.
+        const platform = releaseRoute[1];
+        const releaseKey = platform === 'android' ? env.ANDROID_RELEASE_KEY : env.IOS_RELEASE_KEY;
+        if (!validNonce(releaseKey)) return json({error:platformLabel(platform)+' release access is not configured'}, 503);
         const supplied = request.headers.get('Authorization')?.replace(/^Bearer /, '');
         if (!validNonce(supplied) || !request.headers.get('Authorization')?.startsWith('Bearer ')) return json({error:'Unauthorized'}, 401);
         const digest = async value => new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value)));
-        const [actual, expected] = await Promise.all([digest(supplied), digest(env.ANDROID_RELEASE_KEY)]);
+        const [actual, expected] = await Promise.all([digest(supplied), digest(releaseKey)]);
         let difference = 0;
         for (let i = 0; i < expected.length; i++) difference |= actual[i] ^ expected[i];
         if (difference) return json({error:'Unauthorized'}, 401);
         const body = await readJSON(request, 8192);
         const allowed = ['userID', 'reference', 'version', 'build', 'message', 'available'];
-        if (Object.keys(body).some(key => !allowed.includes(key)) || typeof body.available !== 'boolean') return json({error:'Invalid Android notice'}, 400);
+        if (Object.keys(body).some(key => !allowed.includes(key)) || typeof body.available !== 'boolean') return json({error:'Invalid release notice'}, 400);
         const notice = {userID:body.userID, reference:body.reference, version:body.version, build:body.build,
-          message:body.message, platform:'android', stage:'available', ready:body.available};
-        if (!buildNotifications({BUILD_NOTIFICATIONS:JSON.stringify([notice])}).length) return json({error:'Invalid Android notice'}, 400);
+          message:body.message, platform, stage:platform === 'android' ? 'available' : 'testflight', ready:body.available};
+        if (!buildNotifications({BUILD_NOTIFICATIONS:JSON.stringify([notice])}).length) return json({error:'Invalid release notice'}, 400);
         const statusOnly = url.pathname.endsWith('/status');
         if (!statusOnly && !notice.ready) return json({error:'Confirm this release is available to the reporter'}, 400);
         const id = env.REPORTS.idFromName(notice.userID);
