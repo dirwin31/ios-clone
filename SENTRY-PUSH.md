@@ -1,13 +1,13 @@
 # Sentry phone alerts
 
-This app uses Apple Push Notification service directly. No Firebase dependency is required for iOS. It uses the existing Galaxy phone-subscription API and reports the new per-comma relay enrollment status. Hosted v2 delivery requires the companion StarPilot and Worker PRs; old private v1 pilots remain compatible. Nate can use his existing Apple developer membership.
+This app registers its Apple push token with comma. The relay converts it to a Firebase token and Firebase delivers the alert through Apple, so the app needs no Firebase SDK. It uses the existing Galaxy phone-subscription API and reports the new per-comma relay enrollment status. Hosted v2 delivery requires the companion StarPilot and Worker PRs; old private v1 pilots remain compatible. Nate can use his existing Apple developer membership.
 
 ## Maintainer setup
 
 1. Enable Push Notifications for `link.galaxy.bluetooth.natehuby76` in your Apple developer account and regenerate provisioning profiles.
-2. Give the relay operator an APNs signing key (`.p8`), its Key ID and your Team ID over a private channel. Use a key scoped to this app and the needed APNs environments. Never include the key in the app, comma, Git, or a PR.
+2. Upload an APNs auth key (`.p8`, Key ID and Team ID) to the `starpilot-sentry` Firebase project under Project settings → Cloud Messaging → Apple app configuration, for the Apple app `link.galaxy.bluetooth.natehuby76`. Never include the key in the app, comma, Git, or a PR.
 3. Build with the app's existing bundle ID. Debug has `APS_ENVIRONMENT=development`, Release has `APS_ENVIRONMENT=production`. The same setting supplies the entitlement and `SentryAPNsEnvironment` in Info.plist. Use Release for TestFlight/App Store. Verify the final signed entitlement and Info.plist agree when customizing archive/export settings.
-4. The relay host stores the key, Key ID and Team ID as Worker secrets ([HOSTING.md](https://github.com/dirwin31/StarPilotAndroid/blob/sentry-cloudflare/push-relay/HOSTING.md) step 5). The Worker's `IOS_APP_IDS` already includes this bundle ID; keep it there.
+4. The relay's `IOS_APP_IDS` already includes this bundle ID; keep it there.
 
 ## User setup
 
@@ -25,15 +25,13 @@ The app registers through the existing authenticated transport:
 {"action":"appSubscribe","token":"apns.production.<hex-device-token>","appId":"link.galaxy.bluetooth.natehuby76","label":"iPhone"}
 ```
 
-Development builds use `apns.sandbox.<hex-device-token>`. Comma treats this as an opaque subscription token and registers its destination under the comma credential and forwards the six-field event body to `<base-url>/v2/sentry`. Legacy private pilots use `/v1/sentry`. The phone never stores the comma credential. The Worker selects the corresponding APNs server and sends a visible alert with `type=sentry` and the event ID. Only a confirmed APNs `Unregistered` response returns 410; wrong credentials/environment/topic return 502, preserving the subscription.
+Development builds use `apns.sandbox.<hex-device-token>`. Comma treats this as an opaque subscription token and registers its destination under the comma credential and forwards the six-field event body to `<base-url>/v2/sentry`. Legacy private pilots use `/v1/sentry`. The phone never stores the comma credential. The Worker converts the Apple token with Firebase (sandbox for development tokens) and sends a visible alert with `type=sentry` and the event ID. Only Firebase reporting the token as unregistered or invalid returns 410; configuration failures return 502 and keep the subscription.
 
 ## Validation
 
 Run `python3 tests/check_sentry_push.py` from this directory for registration, token rotation, retry, disable/reconnect and test-request regressions. The harness compiles the production registration model with a fake comma transport and application lifecycle.
 
 Build in Xcode and test on physical iPhones with development and TestFlight signatures. Verify background/locked-screen receipt, tapping while disconnected, notification permission denial, relay outage, token rotation and disable/re-enable. No Apple credentials or live push delivery are included in the automated tests.
-
-Hosting: https://github.com/dirwin31/StarPilotAndroid/blob/sentry-cloudflare/push-relay/HOSTING.md
 
 Provider setup and launch checklist: https://github.com/dirwin31/StarPilotAndroid/blob/sentry-cloudflare/push-relay/SETUP.md
 
