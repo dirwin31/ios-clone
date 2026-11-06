@@ -19,6 +19,12 @@ final class Service { var delegate: AnyObject?; func stop() {} }
     var retriedServices = Set<String>()
     var starts = 0
     var status = ""
+    var elapsed: TimeInterval = 0
+    var startedAt: Date? = Date()
+    var outcome = "Not attempted"
+    var diagnosticSummary: String { outcome }
+    var events: [String] = []
+    lazy var onEvent: ((String) -> Void)? = { [weak self] in self?.events.append($0) }
     var devices: [String] = []
     var browser: Service?
     var services: [String: Service] = [:]
@@ -35,6 +41,7 @@ tests = '''
         d.setActive(false)
         d.setActive(false)
         precondition(!d.searching)
+        precondition(d.outcome == "app inactive" && d.events.contains { $0.contains("app inactive") })
         d.networkChanged()
         precondition(d.starts == 1, "Do not browse while permission UI has suspended the app")
         d.setActive(true)
@@ -52,6 +59,7 @@ tests = '''
         let failed = DiscoveryProbe()
         failed.start()
         failed.searchFailed()
+        precondition(failed.outcome == "browser failure")
         failed.setActive(false)
         failed.setActive(true)
         precondition(failed.searching && failed.starts == 2,
@@ -66,4 +74,4 @@ tests = '''
     }
 }
 '''
-Path(sys.argv[1]).write_text(stubs + '\n'.join(method(s) for s in ['    func setActive(', '    func stop()', '    func networkChanged()', '    private func pauseAfterSearchFailure()']) + tests)
+Path(sys.argv[1]).write_text(stubs + '\n'.join(method(s) for s in ['    func setActive(', '    func stop(reason:', '    func networkChanged()', '    private func pauseAfterSearchFailure()']) + tests)

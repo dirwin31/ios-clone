@@ -2,6 +2,7 @@ import SwiftUI
 import Network
 import MapKit
 import CoreBluetooth
+import StoreKit
 
 @main
 struct GalaxyBluetoothApp: App {
@@ -44,6 +45,38 @@ final class AppModel: ObservableObject {
     let diagnostics = CompanionDiagnostics()
     let galaxyPage = GalaxyPageDiagnostics()
     let connectionLog = ConnectionEventLog()
+    @Published private(set) var buildDistribution = "Unknown (StoreKit check pending)"
+    private(set) var networkPathDiagnostics = "Not reported yet"
+
+    private func identifyBuildDistribution() async {
+        #if targetEnvironment(simulator)
+        buildDistribution = "Development (simulator)"
+        #elseif DEBUG
+        buildDistribution = "Development (Debug configuration)"
+        #else
+        do {
+            // Read the app transaction only; never force a receipt refresh or sign-in.
+            switch try await AppTransaction.shared {
+            case .verified(let transaction):
+                if transaction.environment == .production {
+                    buildDistribution = "App Store (verified production app transaction)"
+                } else if transaction.environment == .sandbox {
+                    buildDistribution = "TestFlight / sandbox (verified sandbox app transaction)"
+                } else if transaction.environment == .xcode {
+                    buildDistribution = "Development (StoreKit Xcode environment)"
+                } else {
+                    buildDistribution = "Unknown (unrecognized StoreKit environment)"
+                }
+            case .unverified:
+                buildDistribution = "Unknown (app transaction could not be verified)"
+            }
+        } catch {
+            let failure = error as NSError
+            buildDistribution = "Unknown (StoreKit error domain=\(failure.domain); code=\(failure.code))"
+        }
+        #endif
+        connectionLog.record("Build distribution: " + buildDistribution)
+    }
     let discovery = LANDiscovery()
     @Published var selectingDiscoveredComma = false
     private var lastRoute = "Reconnecting…"
@@ -419,10 +452,11 @@ final class AppModel: ObservableObject {
             Task { @MainActor in
                 guard let self else { return }
                 let route = path.usesInterfaceType(.wifi) ? "Wi-Fi" : path.usesInterfaceType(.cellular) ? "cellular" : "other"
-                let reason = "iOS network path updated: \(path.status == .satisfied ? "available" : "unavailable"), \(route), expensive=\(path.isExpensive), constrained=\(path.isConstrained)"
+                let reason = "iOS network path updated: \(path.status == .satisfied ? "available" : "unavailable"), \(route), expensive=\(path.isExpensive), constrained=\(path.isConstrained); IPv4=\(path.supportsIPv4); IPv6=\(path.supportsIPv6); DNS=\(path.supportsDNS); unsatisfied reason=\(String(describing: path.unsatisfiedReason))"
                 let interfaces = path.availableInterfaces
                     .filter { path.usesInterfaceType($0.type) }
                     .map { "\($0.name):\($0.index)" }.sorted().joined(separator: ",")
+                self.networkPathDiagnostics = reason
                 let fingerprint = "\(path.status)|\(route)|\(interfaces)|ipv4=\(path.supportsIPv4)|\(LANDiscovery.networkSignature())"
                 guard fingerprint != self.lastNetworkPath else { return }
                 self.lastNetworkPath = fingerprint
@@ -441,6 +475,7 @@ final class AppModel: ObservableObject {
                 self.discoverAutomaticLAN()
             }
         }
+        Task { [weak self] in await self?.identifyBuildDistribution() }
         pathMonitor.start(queue: .main)
         updateMonitoring()
     }
@@ -1249,10 +1284,12 @@ final class ConnectionEventLog: ObservableObject {
         let info = Bundle.main.infoDictionary ?? [:]
         return """
         StarPilot BT connection diagnostics
-        Connection diagnostics revision: 2 (sign-in stages, candidate verification, session lifecycle)
+        Connection diagnostics revision: 3 (build distribution, discovery stages and network path)
         \(ISO8601DateFormatter().string(from: Date()))
         App: \(info["CFBundleShortVersionString"] ?? "?") (\(info["CFBundleVersion"] ?? "?"))
+        Build distribution: \(model.buildDistribution)
         iOS: \(UIDevice.current.systemVersion)
+        Network path: \(model.networkPathDiagnostics)
         Mode: \(model.mode.title)
         Selected route: \(model.transport.label)
         Tunnel verified: \(model.tunnel.connected)
@@ -1275,6 +1312,7 @@ final class ConnectionEventLog: ObservableObject {
         Bluetooth permission: \(CBManager.authorization)
         Discovery: searching=\(model.discovery.searching); results=\(model.discovery.devices.count)
         Discovery status: \(model.discovery.status)
+        Discovery detail: \(model.discovery.diagnosticSummary)
         Local Network permission: iOS does not expose a direct status; see discovery errors and LAN verification above.
         LAN pairing setup saved: \(model.hasLANPairingSetup)
         Pairing active: \(model.pairingInProgress); setup busy: \(model.connectionSetupBusy)

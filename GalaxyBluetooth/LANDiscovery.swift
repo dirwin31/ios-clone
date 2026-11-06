@@ -15,6 +15,17 @@ final class LANDiscovery: NSObject, ObservableObject, @preconcurrency NetService
     @Published private(set) var status = "Find comma on the same Wi-Fi or hotspot, without Bluetooth."
     var onEvent: ((String) -> Void)?
     var onDevicesChanged: (() -> Void)?
+    private var attempt = 0
+    private var startedAt: Date?
+    private var elapsed: TimeInterval = 0
+    private var found = 0, resolved = 0, resolutionFailures = 0, rejected = 0
+    private var browseStarted = false
+    private var outcome = "Not attempted"
+    private var lastError = "none"
+    var diagnosticSummary: String {
+        let duration = searching ? Date().timeIntervalSince(startedAt ?? Date()) : elapsed
+        return "attempt=\(attempt); service=\(Self.serviceType); domain=local.; browse started=\(browseStarted); services found=\(found); resolved=\(resolved); resolution failures=\(resolutionFailures); rejected=\(rejected); results=\(devices.count); elapsed=\(String(format: "%.1f", duration))s; active=\(appActive); resume pending=\(resumeWhenActive); outcome=\(outcome); last error=\(lastError)"
+    }
     private var browser: NetServiceBrowser?
     private var services: [String: NetService] = [:]
     private var retriedServices = Set<String>()
@@ -26,7 +37,7 @@ final class LANDiscovery: NSObject, ObservableObject, @preconcurrency NetService
         appActive = active
         if !active {
             let resume = searching || resumeWhenActive
-            stop()
+            stop(reason: "app inactive")
             resumeWhenActive = resume
         } else if resumeWhenActive {
             resumeWhenActive = false
@@ -35,11 +46,15 @@ final class LANDiscovery: NSObject, ObservableObject, @preconcurrency NetService
     }
 
     func start(retryEmpty: Bool = true) {
-        stop()
+        stop(reason: "new search")
+        attempt += 1
+        startedAt = Date(); elapsed = 0
+        found = 0; resolved = 0; resolutionFailures = 0; rejected = 0
+        browseStarted = false; outcome = "Searching"; lastError = "none"
         devices = []
         searching = true
         status = "Looking for comma on your local network…"
-        onEvent?("Local Wi-Fi discovery started")
+        onEvent?("Local Wi-Fi discovery started; attempt=\(attempt); service=\(Self.serviceType); retry empty=\(retryEmpty); interfaces=\(Self.privateInterfaceDiagnostics())")
         let browser = NetServiceBrowser()
         self.browser = browser
         browser.delegate = self
@@ -48,11 +63,11 @@ final class LANDiscovery: NSObject, ObservableObject, @preconcurrency NetService
             try? await Task.sleep(nanoseconds: 12_000_000_000)
             guard !Task.isCancelled, let self else { return }
             if self.devices.isEmpty && retryEmpty && self.appActive {
-                self.onEvent?("Local Wi-Fi discovery found no addresses; retrying once")
+                self.onEvent?("Local Wi-Fi discovery found no addresses; retrying once; \(self.diagnosticSummary)")
                 self.start(retryEmpty: false)
                 return
             }
-            self.stop()
+            self.stop(reason: "search deadline")
             self.status = self.devices.isEmpty
                 ? "No comma found. Use the same Wi-Fi, allow Local Network access, and update comma for discovery. You can still enter its IP."
                 : "Select your comma below."
@@ -60,7 +75,12 @@ final class LANDiscovery: NSObject, ObservableObject, @preconcurrency NetService
         }
     }
 
-    func stop() {
+    func stop(reason: String = "requested") {
+        if searching {
+            elapsed = Date().timeIntervalSince(startedAt ?? Date())
+            outcome = reason
+            onEvent?("Local Wi-Fi discovery stopped; " + diagnosticSummary)
+        }
         resumeWhenActive = false
         deadline?.cancel(); deadline = nil
         browser?.delegate = nil; browser?.stop(); browser = nil
@@ -73,7 +93,7 @@ final class LANDiscovery: NSObject, ObservableObject, @preconcurrency NetService
 
     func networkChanged() {
         let resume = searching || resumeWhenActive
-        stop()
+        stop(reason: "network changed")
         devices = []
         status = "Network changed. Find comma on the current network."
         if resume {
@@ -84,13 +104,19 @@ final class LANDiscovery: NSObject, ObservableObject, @preconcurrency NetService
 
     private func pauseAfterSearchFailure() {
         let resume = searching || resumeWhenActive
-        stop()
+        stop(reason: "browser failure")
         resumeWhenActive = resume
     }
 
+    func netServiceBrowserWillSearch(_ browser: NetServiceBrowser) {
+        guard browser === self.browser else { return }
+        browseStarted = true
+        onEvent?("Local Wi-Fi discovery browser started; attempt=\(attempt)")
+    }
     private func key(_ service: NetService) -> String { service.name + "/" + service.type + "/" + service.domain }
     func netServiceBrowser(_ browser: NetServiceBrowser, didFind service: NetService, moreComing: Bool) {
         guard searching, browser === self.browser, services.count < 16, services[key(service)] == nil else { return }
+        found += 1
         onEvent?("Local Wi-Fi discovery service found; resolving address; count=\(services.count + 1)")
         services[key(service)] = service
         service.delegate = self
@@ -98,6 +124,7 @@ final class LANDiscovery: NSObject, ObservableObject, @preconcurrency NetService
     }
     func netServiceBrowser(_ browser: NetServiceBrowser, didRemove service: NetService, moreComing: Bool) {
         guard browser === self.browser else { return }
+        onEvent?("Local Wi-Fi discovery service removed; more coming=\(moreComing)")
         let id = key(service)
         services.removeValue(forKey: id)?.stop()
         devices.removeAll { $0.id == id }
@@ -105,26 +132,31 @@ final class LANDiscovery: NSObject, ObservableObject, @preconcurrency NetService
     }
     func netServiceBrowser(_ browser: NetServiceBrowser, didNotSearch errorDict: [String: NSNumber]) {
         guard browser === self.browser else { return }
+        lastError = "browse domain=\(errorDict[NetService.errorDomain]?.intValue ?? 0); code=\(errorDict[NetService.errorCode]?.intValue ?? 0)"
         let denied = errorDict[NetService.errorCode]?.intValue == -72008
         pauseAfterSearchFailure()
         status = denied ? "Allow Local Network access for this app in iPhone Settings, then search again."
             : "Local Wi-Fi discovery couldn’t start. Check Local Network permission or enter comma’s IP."
-        onEvent?("Local Wi-Fi discovery failed: code \(errorDict[NetService.errorCode]?.intValue ?? 0)")
+        onEvent?("Local Wi-Fi discovery failed: \(lastError)")
     }
     func netService(_ sender: NetService, didNotResolve errorDict: [String: NSNumber]) {
         let id = key(sender)
         guard searching, services[id] === sender else { return }
-        onEvent?("Local Wi-Fi service address lookup failed: code \(errorDict[NetService.errorCode]?.intValue ?? 0)")
+        resolutionFailures += 1
+        lastError = "resolve domain=\(errorDict[NetService.errorDomain]?.intValue ?? 0); code=\(errorDict[NetService.errorCode]?.intValue ?? 0)"
+        onEvent?("Local Wi-Fi service address lookup failed: \(lastError)")
         guard retriedServices.insert(id).inserted else { return }
         onEvent?("Retrying Local Wi-Fi service address lookup")
         sender.resolve(withTimeout: 5)
     }
     func netServiceDidResolveAddress(_ sender: NetService) {
         guard searching, services[key(sender)] === sender else { return }
-        guard sender.port == 8082 else { onEvent?("Local Wi-Fi discovery rejected service: unexpected port \(sender.port)"); return }
+        resolved += 1
+        onEvent?("Local Wi-Fi service resolved; port=\(sender.port); address candidates=\(sender.addresses?.count ?? 0); TXT present=\(sender.txtRecordData() != nil)")
+        guard sender.port == 8082 else { rejected += 1; onEvent?("Local Wi-Fi discovery rejected service: unexpected port \(sender.port)"); return }
         let txt = sender.txtRecordData().map(NetService.dictionary(fromTXTRecord:)) ?? [:]
-        guard txt["protocol"] == Data("galaxy-lan-1".utf8) else { onEvent?("Local Wi-Fi discovery rejected service: missing or unsupported protocol"); return }
-        guard let address = (sender.addresses ?? []).compactMap(Self.privateIPv4).first else { onEvent?("Local Wi-Fi discovery rejected service: no supported private IPv4 address; candidates=\(sender.addresses?.count ?? 0)"); return }
+        guard txt["protocol"] == Data("galaxy-lan-1".utf8) else { rejected += 1; onEvent?("Local Wi-Fi discovery rejected service: missing or unsupported protocol"); return }
+        guard let address = (sender.addresses ?? []).compactMap(Self.privateIPv4).first else { rejected += 1; onEvent?("Local Wi-Fi discovery rejected service: no supported private IPv4 address; candidates=\(sender.addresses?.count ?? 0)"); return }
         let suffix = "-" + address.replacingOccurrences(of: ".", with: "-")
         let name = sender.name.hasSuffix(suffix) ? String(sender.name.dropLast(suffix.count)) : sender.name
         let device = DiscoveredComma(id: key(sender), name: String(name.prefix(80)), address: address)

@@ -78,9 +78,12 @@ enum SubmissionDiagnostics {
                         maximumBytes: Int = DiagnosticReportBudget.maximumBytes) -> String {
         let freshLogs = logs()
         guard !freshLogs.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return "" }
+        let distribution = freshLogs.components(separatedBy: "\n").first { $0.hasPrefix("Build distribution: ") }
+            ?? "Build distribution: Unknown (not available in this capture)"
         let header = """
         StarPilot report submission
         Installed app at Send: \(version) (\(build))
+        \(distribution)
         Captured at Send (UTC): \(ISO8601DateFormatter().string(from: now))
         Capture policy: fresh snapshot at first Send; retries preserve this snapshot.
         Event history may include earlier events from this app session.

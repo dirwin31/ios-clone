@@ -3,6 +3,12 @@ import subprocess, tempfile
 source = Path('GalaxyBluetooth/DiscordReports.swift').read_text(encoding='utf-8')
 helper = source[source.index('enum DiagnosticReportBudget'):source.index('private struct PendingDiscordReport')]
 probe = 'import Foundation\n' + helper + r'''
+let provenance = "Build distribution: TestFlight / sandbox (verified sandbox app transaction)"
+let withDistribution = SubmissionDiagnostics.capture(logs: { provenance + "\n" + String(repeating: "x", count: 200000) }, maximumBytes: 100000)
+precondition(withDistribution.hasPrefix("StarPilot report submission"))
+precondition(withDistribution.contains(provenance), "Build source must survive oversized snapshot trimming")
+let unknownDistribution = SubmissionDiagnostics.capture(logs: { "no source available" })
+precondition(unknownDistribution.contains("Build distribution: Unknown"))
 let small = "normal diagnostics"
 precondition(DiagnosticReportBudget.fit(small) == small)
 var captureCount = 0
