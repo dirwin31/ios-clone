@@ -7,7 +7,7 @@ This app uses Apple Push Notification service directly. No Firebase dependency i
 1. Enable Push Notifications for `link.galaxy.bluetooth.natehuby76` in your Apple developer account and regenerate provisioning profiles.
 2. Give the relay operator an APNs signing key (`.p8`), its Key ID and your Team ID over a private channel. Use a key scoped to this app and the needed APNs environments. Never include the key in the app, comma, Git, or a PR.
 3. Build with the app's existing bundle ID. Debug has `APS_ENVIRONMENT=development`, Release has `APS_ENVIRONMENT=production`. The same setting supplies the entitlement and `SentryAPNsEnvironment` in Info.plist. Use Release for TestFlight/App Store. Verify the final signed entitlement and Info.plist agree when customizing archive/export settings.
-4. Deploy the accompanying Cloudflare Worker package. Its iOS allowlist must include this bundle ID. Android uses that Worker's separate Firebase configuration; it does not affect iOS.
+4. The relay host stores the key, Key ID and Team ID as Worker secrets ([HOSTING.md](https://github.com/dirwin31/StarPilotAndroid/blob/sentry-cloudflare/push-relay/HOSTING.md) step 5). The Worker's `IOS_APP_IDS` already includes this bundle ID; keep it there.
 
 ## User setup
 
@@ -33,7 +33,9 @@ Run `python3 tests/check_sentry_push.py` from this directory for registration, t
 
 Build in Xcode and test on physical iPhones with development and TestFlight signatures. Verify background/locked-screen receipt, tapping while disconnected, notification permission denial, relay outage, token rotation and disable/re-enable. No Apple credentials or live push delivery are included in the automated tests.
 
-Deployment and provider setup: https://github.com/dirwin31/StarPilotAndroid/blob/sentry-cloudflare/push-relay/SETUP.md
+Hosting: https://github.com/dirwin31/StarPilotAndroid/blob/sentry-cloudflare/push-relay/HOSTING.md
+
+Provider setup and launch checklist: https://github.com/dirwin31/StarPilotAndroid/blob/sentry-cloudflare/push-relay/SETUP.md
 
 StarPilot enrollment: https://github.com/dirwin31/openpilot/pull/18
 
