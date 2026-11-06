@@ -6,6 +6,7 @@ import StoreKit
 
 @main
 struct GalaxyBluetoothApp: App {
+    @UIApplicationDelegateAdaptor(SentryAppDelegate.self) private var appDelegate
     @StateObject private var model = AppModel.shared
     @AppStorage("galaxy.app.language") private var language = "en"
     var body: some Scene { WindowGroup { GalaxyRootView(model: model).environment(\.locale, Locale(identifier: language)) } }
@@ -409,6 +410,7 @@ final class AppModel: ObservableObject {
         let transport = PreferredTransport(lan: lan, bluetooth: bluetooth, tunnel: tunnel, invalidateTunnel: { tunnel.invalidate($0) }, invalidateLAN: { lan.invalidate(reason: $0) })
         let assets = GalaxyAssetStore()
         self.bluetooth = bluetooth; self.lan = lan; self.tunnel = tunnel; self.transport = transport; self.assets = assets
+        SentryPush.shared.transport = transport
         lan.bind(to: UserDefaults.standard.string(forKey: "galaxy.comma.identity"))
         if let credential = TunnelKeyStore.load() { try? tunnel.configure(credential) }
         tunnel.expectedDeviceID = lan.expectedDeviceID
@@ -831,6 +833,7 @@ final class AppModel: ObservableObject {
                     if offerAudioPairing { offerAudioPairing = false; startAudioPairing() }
                     if !showAudioPairing {
                         openIfReady()
+                        Task { await SentryPush.shared.synchronize() }
                         if Date().timeIntervalSince(lastGalaxyMatch) > 60 && !openingGalaxy {
                             Task { await self.checkGalaxyUpdates() }
                         }
