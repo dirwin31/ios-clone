@@ -7,7 +7,6 @@ This app registers its Apple push token with comma. The relay converts it to a F
 1. Enable Push Notifications for `link.galaxy.bluetooth.natehuby76` in your Apple developer account and regenerate provisioning profiles.
 2. Upload an APNs auth key (`.p8`, Key ID and Team ID) to the `starpilot-sentry` Firebase project under Project settings → Cloud Messaging → Apple app configuration, for the Apple app `link.galaxy.bluetooth.natehuby76`. Never include the key in the app, comma, Git, or a PR.
 3. Build with the app's existing bundle ID. Debug has `APS_ENVIRONMENT=development`, Release has `APS_ENVIRONMENT=production`. The same setting supplies the entitlement and `SentryAPNsEnvironment` in Info.plist. Use Release for TestFlight/App Store. Verify the final signed entitlement and Info.plist agree when customizing archive/export settings.
-4. The relay's `IOS_APP_IDS` already includes this bundle ID; keep it there.
 
 ## User setup
 
@@ -37,4 +36,4 @@ Provider setup and launch checklist: https://github.com/dirwin31/StarPilotAndroi
 
 StarPilot enrollment: https://github.com/dirwin31/openpilot/pull/18
 
-Automatic enrollment requires the operator to deploy the Worker and the StarPilot maintainer to set DEFAULT_RELAY_URL once before release. Until then the app reports that hosting is not configured. Existing enabled phones are not silently opted into a new relay; the user must enable alerts.
+The relay is live and StarPilot points at it, so enabling alerts works as soon as the iOS app is registered in Firebase.
