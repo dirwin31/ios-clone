@@ -30,7 +30,12 @@ final class PrivateLANHTTP {
     private init(_ request: URLRequest, limit: Int, host: String) {
         self.request = request; self.limit = limit; head = request.httpMethod == "HEAD"
         parser = LANHTTPParser(limit: limit, headOnly: request.httpMethod == "HEAD")
-        connection = NWConnection(host: NWEndpoint.Host(host), port: 8082, using: .tcp)
+        // A private comma address must never follow the phone's cellular default
+        // route when its Wi-Fi network has no internet. Keep Ethernet/VPN routes
+        // eligible rather than requiring Wi-Fi specifically.
+        let parameters = NWParameters.tcp
+        parameters.prohibitedInterfaceTypes = [.cellular]
+        connection = NWConnection(host: NWEndpoint.Host(host), port: 8082, using: parameters)
     }
     static func load(_ request: URLRequest, limit: Int) async throws -> (Data, HTTPURLResponse) {
         guard let url = request.url, url.scheme == "http", url.port == 8082, let host = url.host,

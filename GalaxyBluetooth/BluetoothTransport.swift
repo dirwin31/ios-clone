@@ -504,6 +504,11 @@ final class BluetoothTransport: NSObject, ObservableObject, GalaxyRequestTranspo
 
     func centralManager(_ central: CBCentralManager, didFailToConnect peripheral: CBPeripheral, error: Error?) {
         guard peripheral == self.peripheral else { return }
+        if let error = error as NSError?, error.domain == CBErrorDomain,
+           error.code == CBError.Code.peerRemovedPairingInformation.rawValue {
+            failConnection("Bluetooth operation failed: comma removed its Bluetooth pairing information (CBErrorDomain 14). In iPhone Settings > Bluetooth, forget the comma entry if listed, then reconnect in StarPilot. Your saved app key has not been removed.")
+            return
+        }
         failConnection("Bluetooth operation failed: connect callback; \(error.map { LANTransport.failureCode($0) } ?? "no OS error supplied")")
     }
 
