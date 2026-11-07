@@ -38,6 +38,11 @@ probe = "import Foundation\nimport Combine\n" + source[start:end] + "}\n" + r'''
         }
         precondition(log.failureEvents.count == 3, "Sign-in and browser failures must survive routine polling")
         log.clear()
+        log.record("Local Wi-Fi discovery found no addresses; retrying once")
+        log.record("Local Wi-Fi discovery finished: 0 result(s)")
+        for index in 0..<13000 { log.record("successful poll \(index)") }
+        precondition(log.failureEvents.count == 2, "Empty discovery evidence must survive routine polling")
+        log.clear()
         let beforeStates = publications
         for _ in 0..<10000 {
             log.recordState("bluetooth", "Bluetooth waiting")

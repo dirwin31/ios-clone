@@ -315,6 +315,11 @@ final class AppModel: ObservableObject {
     private var addressCheckSession = ""
     private var localAddressNetwork = ""
     private var initialDiscoveryStarted = false
+    var connectionControllerDiagnostics: String {
+        "Connection controller: requested=\(wantsConnection); phone active=\(phoneActive); CarPlay active=\(carPlayActive); monitor running=\(monitorTask != nil); setup busy=\(connectionSetupBusy); selecting device=\(selectingDiscoveredComma)\n"
+        + "Connection tasks: first setup=\(firstConnection != nil); automatic LAN=\(automaticLAN != nil); LAN probe=\(lanProbeTask != nil); Tunnel probe=\(tunnelProbeTask != nil); pairing=\(pairingTask != nil)\n"
+        + "Address discovery: initial search started=\(initialDiscoveryStarted); Bluetooth lookup enabled=\(findAddressAutomatically); tried LAN candidates=\(triedLANAddresses.count); saved address present=\(!address.isEmpty)"
+    }
     private var firstConnection: Task<Void, Never>?
     private var openAfterFirstConnection = false
     private var automaticLAN: Task<Void, Never>?
@@ -733,7 +738,10 @@ final class AppModel: ObservableObject {
                 networkDetails = "Comma has no usable local Wi-Fi address. Bluetooth still controls local settings; comma can use its SIM for online downloads."
             }
             // Galaxy's online:true means the server responds, not that comma can reach the internet.
-        } catch { /* Discovery is optional; it must not disrupt working BLE. */ }
+        } catch {
+            // Discovery is optional; record evidence without disrupting working BLE.
+            connectionLog.recordState("bluetooth-address-error", "Bluetooth address/identity lookup failed: \(LANTransport.failureCode(error)); cancelled=\(Task.isCancelled)")
+        }
     }
     private func discoverAutomaticLAN() {
         guard phoneActive, wantsConnection, mode != .bluetooth, !connectionSetupBusy,
@@ -1221,7 +1229,7 @@ final class ConnectionEventLog: ObservableObject {
         return (0..<failureCount).map { failureStorage[(start + $0) % failureStorage.count] }
     }
     private static let failurePattern = try! NSRegularExpression(pattern:
-        #"(?i:failed|rejected|blocked|terminated|timeout|timed out|disconnected|replay blocked|exhausted|HTTP [45][0-9]{2})"#)
+        #"(?i:failed|rejected|blocked|terminated|timeout|timed out|disconnected|replay blocked|exhausted|no addresses|0 result\(s\)|HTTP [45][0-9]{2})"#)
     private var nextEvent = 0
     private var retained = 0
     private var sequence = 0
@@ -1287,11 +1295,15 @@ final class ConnectionEventLog: ObservableObject {
         let info = Bundle.main.infoDictionary ?? [:]
         return """
         StarPilot BT connection diagnostics
-        Connection diagnostics revision: 3 (build distribution, discovery stages and network path)
+        Connection diagnostics revision: 4 (controller state, discovery evidence and optional lookup failures)
         \(ISO8601DateFormatter().string(from: Date()))
         App: \(info["CFBundleShortVersionString"] ?? "?") (\(info["CFBundleVersion"] ?? "?"))
         Build distribution: \(model.buildDistribution)
         iOS: \(UIDevice.current.systemVersion)
+        OS build: \(ProcessInfo.processInfo.operatingSystemVersionString)
+        Phone class: \(UIDevice.current.model); low power mode=\(ProcessInfo.processInfo.isLowPowerModeEnabled); thermal state=\(ProcessInfo.processInfo.thermalState.rawValue)
+        Local timezone: \(TimeZone.current.identifier); UTC offset seconds=\(TimeZone.current.secondsFromGMT())
+        \(model.connectionControllerDiagnostics)
         Network path: \(model.networkPathDiagnostics)
         Mode: \(model.mode.title)
         Selected route: \(model.transport.label)

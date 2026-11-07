@@ -40,6 +40,10 @@ for message in routineMessages {
     precondition(!DiagnosticReportBudget.isFailure(message), "Routine message misclassified: \(message)")
 }
 let failureMessages = [
+    "Local Wi-Fi discovery finished: 0 result(s)",
+    "Local Wi-Fi discovery found no addresses; retrying once",
+    "Local Wi-Fi discovery rejected service: missing or unsupported protocol",
+    "Request exhausted available routes",
     "Request failed; cancelled=false; consecutive failures=0",
     "Request completed: HTTP 403; cancelled=false",
     "GET /api/device/state → 502",

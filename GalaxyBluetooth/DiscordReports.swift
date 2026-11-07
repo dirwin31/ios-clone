@@ -19,7 +19,7 @@ enum DiagnosticReportBudget {
         #"\b(?:fail(?:ed|ures?)?|errors?|disconnect(?:ed|s|ions?)?|cancel(?:led|ed|lations?)?|unavailable|unconfirmed|timeouts?)\s*=\s*(?:false|no|none|nil|null|0(?:\.0+)?)(?=$|[\s,;)\]}])"#,
         options: .caseInsensitive)
     private static let failureEvent = try! NSRegularExpression(pattern:
-        #"fail|error|disconnect|cancel|unavailable|unconfirmed|did not verify|timeout|timed out|(?:HTTP |→ )[45][0-9]{2}"#,
+        #"fail|error|disconnect|cancel|unavailable|unconfirmed|did not verify|timeout|timed out|rejected|blocked|exhausted|no addresses|0 result\(s\)|(?:HTTP |→ )[45][0-9]{2}"#,
         options: .caseInsensitive)
 
     static func isFailure(_ event: String) -> Bool {

@@ -115,7 +115,12 @@ final class LANDiscovery: NSObject, ObservableObject, @preconcurrency NetService
     }
     private func key(_ service: NetService) -> String { service.name + "/" + service.type + "/" + service.domain }
     func netServiceBrowser(_ browser: NetServiceBrowser, didFind service: NetService, moreComing: Bool) {
-        guard searching, browser === self.browser, services.count < 16, services[key(service)] == nil else { return }
+        guard searching, browser === self.browser else { return }
+        guard services[key(service)] == nil else { return }
+        guard services.count < 16 else {
+            onEvent?("Local Wi-Fi discovery rejected service: candidate limit reached (16)")
+            return
+        }
         found += 1
         onEvent?("Local Wi-Fi discovery service found; resolving address; count=\(services.count + 1)")
         services[key(service)] = service
@@ -155,6 +160,7 @@ final class LANDiscovery: NSObject, ObservableObject, @preconcurrency NetService
         onEvent?("Local Wi-Fi service resolved; port=\(sender.port); address candidates=\(sender.addresses?.count ?? 0); TXT present=\(sender.txtRecordData() != nil)")
         guard sender.port == 8082 else { rejected += 1; onEvent?("Local Wi-Fi discovery rejected service: unexpected port \(sender.port)"); return }
         let txt = sender.txtRecordData().map(NetService.dictionary(fromTXTRecord:)) ?? [:]
+        onEvent?("Local Wi-Fi discovery validation: protocol supported=\(txt["protocol"] == Data("galaxy-lan-1".utf8)); usable private IPv4 candidates=\((sender.addresses ?? []).compactMap(Self.privateIPv4).count)")
         guard txt["protocol"] == Data("galaxy-lan-1".utf8) else { rejected += 1; onEvent?("Local Wi-Fi discovery rejected service: missing or unsupported protocol"); return }
         guard let address = (sender.addresses ?? []).compactMap(Self.privateIPv4).first else { rejected += 1; onEvent?("Local Wi-Fi discovery rejected service: no supported private IPv4 address; candidates=\(sender.addresses?.count ?? 0)"); return }
         let suffix = "-" + address.replacingOccurrences(of: ".", with: "-")
