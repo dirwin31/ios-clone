@@ -337,6 +337,62 @@ private struct GalaxyPage: UIViewRepresentable {
             if (this.__galaxyLocal) this.setRequestHeader('X-Galaxy-Local', key);
             return originalSend.call(this, body);
           };
+          // Sentry <img> requests cannot use the fetch/XHR header hooks above.
+          // Keep the loopback API protected; fetch only same-origin Sentry images
+          // with the app key, then give WebKit a short-lived blob URL.
+          // BEGIN AUTHENTICATED SENTRY IMAGES
+          const sentryImages = new Map();
+          const releaseSentryImage = (img) => {
+            const state = sentryImages.get(img);
+            if (!state) return;
+            state.controller.abort();
+            if (state.blobURL) URL.revokeObjectURL(state.blobURL);
+            sentryImages.delete(img);
+          };
+          const loadSentryImage = (img) => {
+            const source = img.getAttribute('src');
+            const previous = sentryImages.get(img);
+            if (previous && (source === previous.source || source === previous.blobURL)) return;
+            releaseSentryImage(img);
+            let url;
+            try { url = new URL(source || '', location.href); } catch (_) { return; }
+            if (!source || url.origin !== location.origin || !url.pathname.startsWith('/api/sentry/image/')) return;
+            const state = {source, controller: new AbortController(), blobURL: null};
+            sentryImages.set(img, state);
+            originalFetch(url.href, {
+              headers: {'X-Galaxy-Local': key}, signal: state.controller.signal,
+              redirect: 'error', cache: 'no-store'
+            }).then(async response => {
+              if (!response.ok) throw new Error('Sentry image HTTP ' + response.status);
+              const blob = await response.blob();
+              if (!blob.type.toLowerCase().startsWith('image/') || !blob.size) throw new Error('Invalid Sentry image');
+              if (sentryImages.get(img) !== state || !img.isConnected || img.getAttribute('src') !== source) return;
+              state.blobURL = URL.createObjectURL(blob);
+              img.setAttribute('src', state.blobURL);
+            }).catch(error => {
+              if (error.name !== 'AbortError' && sentryImages.get(img) === state) emit('resource', url.pathname);
+            });
+          };
+          const watchSentryImages = () => {
+            const scan = root => {
+              if (root.matches?.('img')) loadSentryImage(root);
+              root.querySelectorAll?.('img').forEach(loadSentryImage);
+            };
+            new MutationObserver(records => {
+              for (const record of records) {
+                if (record.type === 'attributes') loadSentryImage(record.target);
+                else record.addedNodes.forEach(scan);
+              }
+              for (const img of sentryImages.keys()) if (!img.isConnected) releaseSentryImage(img);
+            }).observe(document.documentElement, {subtree: true, childList: true, attributes: true, attributeFilter: ['src']});
+            scan(document);
+          };
+          if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', watchSentryImages, {once: true});
+          else watchSentryImages();
+          window.addEventListener('pagehide', () => {
+            for (const img of sentryImages.keys()) releaseSentryImage(img);
+          });
+          // END AUTHENTICATED SENTRY IMAGES
         })();
         """
         config.userContentController.addUserScript(WKUserScript(source: script, injectionTime: .atDocumentStart, forMainFrameOnly: false))
