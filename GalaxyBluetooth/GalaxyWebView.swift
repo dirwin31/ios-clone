@@ -67,6 +67,8 @@ final class GalaxyPageDiagnostics: ObservableObject {
         App: \(info["CFBundleShortVersionString"] ?? "?") (\(info["CFBundleVersion"] ?? "?"))
         iOS: \(UIDevice.current.systemVersion)
         Connection: \(connection)
+        Sentry diagnostics revision: 1 (event list, image transfer and rendering)
+        Sentry phone alerts: enabled=\(SentryPush.shared.enabled); registered=\(SentryPush.shared.registered); status=\(SentryPush.shared.status)
         Galaxy content rendered: \(mounted)
         Page age: \(Int(Date().timeIntervalSince(started))) seconds
         \(server.diagnosticSummary)
@@ -307,12 +309,28 @@ private struct GalaxyPage: UIViewRepresentable {
           const key = '\(requestKey)';
           const local = (u) => new URL(u, location.href).origin === location.origin;
           const originalFetch = window.fetch.bind(window);
+          // Fixed stage labels and numeric measurements only; never response bodies or tokens.
+          const sentryLog = (stage, values = {}) => {
+            try { window.webkit.messageHandlers.galaxyDiagnostics.postMessage({kind: 'sentry', stage, ...values}); } catch (_) {}
+          };
           window.fetch = (input, init = {}) => {
             const req = new Request(input, init);
             if (!local(req.url)) return originalFetch(req);
             const headers = new Headers(req.headers);
             headers.set('X-Galaxy-Local', key);
+            const sentryEvents = new URL(req.url).pathname === '/api/sentry/events';
+            const sentryStarted = Date.now();
+            if (sentryEvents) sentryLog('events-start');
             return originalFetch(new Request(req, { headers })).then(async response => {
+              if (sentryEvents) {
+                sentryLog('events-http', {http: response.status, ms: Date.now() - sentryStarted});
+                response.clone().json().then(data => {
+                  if (!Array.isArray(data.events)) { sentryLog('events-invalid'); return; }
+                  sentryLog('events-result', {count: data.events.length,
+                    images: data.events.reduce((n, event) => n + (Array.isArray(event.images) ? event.images.length : 0), 0),
+                    bytes: data.storageBytes, incomplete: data.scanIncomplete === true || data.storageIncomplete === true});
+                }).catch(() => sentryLog('events-invalid'));
+              }
               if (response.status === 501) {
                 const message = await response.clone().json().catch(() => null);
                 let notice = document.getElementById('native-wifi-notice');
@@ -325,6 +343,9 @@ private struct GalaxyPage: UIViewRepresentable {
                 notice.textContent = typeof message?.error === 'string' ? message.error : 'Connect to comma over Wi-Fi for this feature.';
               }
               return response;
+            }).catch(error => {
+              if (sentryEvents) sentryLog(error.name === 'AbortError' ? 'events-cancelled' : 'events-network-failed', {ms: Date.now() - sentryStarted});
+              throw error;
             });
           };
           const originalOpen = XMLHttpRequest.prototype.open;
@@ -345,10 +366,14 @@ private struct GalaxyPage: UIViewRepresentable {
           const releaseSentryImage = (img) => {
             const state = sentryImages.get(img);
             if (!state) return;
+            img.removeEventListener('load', state.loaded);
+            img.removeEventListener('error', state.failed);
+            sentryLog('image-released', {attempt: state.attempt});
             state.controller.abort();
             if (state.blobURL) URL.revokeObjectURL(state.blobURL);
             sentryImages.delete(img);
           };
+          let sentryImageAttempt = 0;
           const loadSentryImage = (img) => {
             const source = img.getAttribute('src');
             const previous = sentryImages.get(img);
@@ -357,23 +382,36 @@ private struct GalaxyPage: UIViewRepresentable {
             let url;
             try { url = new URL(source || '', location.href); } catch (_) { return; }
             if (!source || url.origin !== location.origin || !url.pathname.startsWith('/api/sentry/image/')) return;
-            const state = {source, controller: new AbortController(), blobURL: null};
+            const state = {source, controller: new AbortController(), blobURL: null, attempt: ++sentryImageAttempt, started: Date.now()};
+            state.loaded = () => {
+              if (img.getAttribute('src') === state.blobURL) sentryLog('image-rendered', {attempt: state.attempt, width: img.naturalWidth, height: img.naturalHeight, ms: Date.now() - state.started});
+            };
+            state.failed = () => {
+              if (img.getAttribute('src') === state.blobURL) sentryLog('image-decode-failed', {attempt: state.attempt});
+            };
+            img.addEventListener('load', state.loaded);
+            img.addEventListener('error', state.failed);
             sentryImages.set(img, state);
+            sentryLog('image-start', {attempt: state.attempt});
             originalFetch(url.href, {
               headers: {'X-Galaxy-Local': key}, signal: state.controller.signal,
               redirect: 'error', cache: 'no-store'
             }).then(async response => {
+              sentryLog('image-http', {attempt: state.attempt, http: response.status, ms: Date.now() - state.started});
               if (!response.ok) throw new Error('Sentry image HTTP ' + response.status);
               const blob = await response.blob();
+              sentryLog(blob.type.toLowerCase().startsWith('image/') && blob.size ? 'image-bytes' : 'image-invalid', {attempt: state.attempt, bytes: blob.size});
               if (!blob.type.toLowerCase().startsWith('image/') || !blob.size) throw new Error('Invalid Sentry image');
               if (sentryImages.get(img) !== state || !img.isConnected || img.getAttribute('src') !== source) return;
               state.blobURL = URL.createObjectURL(blob);
               img.setAttribute('src', state.blobURL);
             }).catch(error => {
+              sentryLog(error.name === 'AbortError' ? 'image-cancelled' : 'image-failed', {attempt: state.attempt, ms: Date.now() - state.started});
               if (error.name !== 'AbortError' && sentryImages.get(img) === state) emit('resource', url.pathname);
             });
           };
           const watchSentryImages = () => {
+            sentryLog('image-observer-ready');
             const scan = root => {
               if (root.matches?.('img')) loadSentryImage(root);
               root.querySelectorAll?.('img').forEach(loadSentryImage);
@@ -489,6 +527,15 @@ private struct GalaxyPage: UIViewRepresentable {
             case "rendered": if message.frameInfo.isMainFrame { diagnostics.rendered(); if let webView = message.webView { syncPush(webView) } }
             case "blank": if message.frameInfo.isMainFrame { diagnostics.begin() }
             case "resource": diagnostics.record("Resource failed: \(path)")
+            case "sentry":
+                let stages: Set<String> = ["events-start", "events-http", "events-result", "events-invalid", "events-cancelled", "events-network-failed", "image-observer-ready", "image-start", "image-http", "image-bytes", "image-invalid", "image-rendered", "image-decode-failed", "image-failed", "image-cancelled", "image-released"]
+                guard let stage = body["stage"] as? String, stages.contains(stage) else { break }
+                let metrics = ["attempt", "http", "ms", "count", "images", "bytes", "width", "height"].compactMap { key -> String? in
+                    guard let value = body[key] as? NSNumber, value.doubleValue.isFinite,
+                          value.doubleValue >= 0, value.doubleValue <= 1_000_000_000_000 else { return nil }
+                    return "\(key)=\(value.int64Value)"
+                }
+                diagnostics.record("Sentry \(stage): \(metrics.joined(separator: "; ")); incomplete=\(body["incomplete"] as? Bool ?? false)")
             case "script": diagnostics.record("JavaScript error: \(path), line \(body["code"] as? Int ?? 0)")
             case "promise": diagnostics.record("Unhandled JavaScript promise rejection")
             case "search":
