@@ -61,9 +61,13 @@ D15C00000000000000000901 = {isa = PBXBuildFile; fileRef = D15C000000000000000009
 		3CE86370D27F0FA029E0DC0C /* SavedPlacesStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7ED5F91C4E02363F3D2207A; };
 		1882F023E5B58799A2679C59 /* StarPilotTheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 385C41072CAA8F49B7CFFE70; };
 		D15C00000000000000000031 /* SentryPush.swift in Sources */ = {isa = PBXBuildFile; fileRef = D15C00000000000000000032 /* SentryPush.swift */; };
+		5A4E00000000000000000001 /* SharedDestination.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A4E00000000000000000002 /* SharedDestination.swift */; };
+		5A4E00000000000000000003 /* ShareInbox.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A4E00000000000000000004 /* ShareInbox.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		5A4E00000000000000000002 /* SharedDestination.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedDestination.swift; sourceTree = "<group>"; };
+		5A4E00000000000000000004 /* ShareInbox.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareInbox.swift; sourceTree = "<group>"; };
         A19E00000000000000000004 /* InfoPlist.xcstrings */ = {isa = PBXFileReference; lastKnownFileType = text.json.xcstrings; path = InfoPlist.xcstrings; sourceTree = "<group>"; };
         A19E00000000000000000002 /* Localizable.xcstrings */ = {isa = PBXFileReference; lastKnownFileType = text.json.xcstrings; path = Localizable.xcstrings; sourceTree = "<group>"; };
 D15C00000000000000000902 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiscordReports.swift; sourceTree = "<group>"; };
@@ -157,6 +161,8 @@ D15C00000000000000000902 = {isa = PBXFileReference; lastKnownFileType = sourceco
 				C1A100000000000000000002 /* ClaimPairing.swift */,
 				3356A9DC86451A9D92F074F8 /* GalaxyBluetoothApp.swift */,
 D15C00000000000000000902 /* DiscordReports.swift */,
+				5A4E00000000000000000002 /* SharedDestination.swift */,
+				5A4E00000000000000000004 /* ShareInbox.swift */,
 				C0AA00000000000000000002 /* ConnectionSettingsView.swift */,
                 A19E00000000000000000002 /* Localizable.xcstrings */,
                 A19E00000000000000000004 /* InfoPlist.xcstrings */,
@@ -286,6 +292,8 @@ D15C00000000000000000902 /* DiscordReports.swift */,
 				A6D597850E6DD0CDFB754EF8 /* CarPlaySceneDelegate.swift in Sources */,
 				36EBF9BB2BE027F139572ADA /* GalaxyBluetoothApp.swift in Sources */,
 D15C00000000000000000901 /* DiscordReports.swift in Sources */,
+				5A4E00000000000000000001 /* SharedDestination.swift in Sources */,
+				5A4E00000000000000000003 /* ShareInbox.swift in Sources */,
 				C0AA00000000000000000001 /* ConnectionSettingsView.swift in Sources */,
 				8BA587954B4079F504AAD35E /* GalaxyRequestTransport.swift in Sources */,
 				DE64BADD40C934E610D4D505 /* GalaxyWebView.swift in Sources */,

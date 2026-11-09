@@ -450,6 +450,7 @@ private struct GalaxyPage: UIViewRepresentable {
         context.coordinator.isVisible = isActive
         context.coordinator.syncVisibility(uiView)
         context.coordinator.syncPush(uiView)
+        context.coordinator.syncShare(uiView)
         if followGalaxyLanguage && !context.coordinator.wasFollowingLanguage {
             uiView.evaluateJavaScript("try { let code = localStorage.getItem('galaxy-language'); if (code) window.webkit.messageHandlers.galaxyDiagnostics.postMessage({kind:'language',code}); } catch (_) {}", completionHandler: nil)
         }
@@ -475,6 +476,16 @@ private struct GalaxyPage: UIViewRepresentable {
                 webView.evaluateJavaScript("location.hash = '/cameras/events'") { _, error in
                     if error == nil { SentryPush.shared.openEvents = false }
                 }
+            }
+        }
+        func syncShare(_ webView: WKWebView) {
+            guard diagnostics.mounted, !webView.isLoading, let script = ShareInbox.shared.script() else { return }
+            ShareInbox.shared.sending = true
+            webView.evaluateJavaScript(script) { _, error in
+                ShareInbox.shared.sending = false
+                guard error == nil else { return }
+                ShareInbox.shared.galaxyText = nil
+                AppModel.shared.tab = .galaxy
             }
         }
         let origin: URL

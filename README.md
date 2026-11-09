@@ -10,7 +10,7 @@ Keep signing, app identity, official artwork and the privacy manifest here. Open
 
 Navigation uses the existing companion destination API; this repository does not change vehicle controls or models. CarPlay requires both the Driving Task and Navigation capabilities in the signing profile. Alpha access is controlled in the app; signed capabilities cannot be toggled at runtime.
 
-See [Quick start](QUICK-START.md) and [Tester guide](TESTER-GUIDE.md).
+See [Quick start](QUICK-START.md), [Tester guide](TESTER-GUIDE.md) and [Send a place from Google Maps](SHARE-DESTINATION.md).
 
 ## Galaxy screens
 
