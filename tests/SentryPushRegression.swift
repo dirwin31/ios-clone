@@ -90,6 +90,18 @@ enum BridgeError: Error { case message(String) }
         precondition(transport.requests.suffix(2).map { $0["action"] as! String } == ["appSubscribe", "relayEnroll"])
         precondition(transport.requests.last?["confirmed"] as? Bool == true)
         precondition(!defaults.bool(forKey: "galaxy.sentry.enrollRequested"))
+        for state in ["actionRequired", "revoking", "enrolling", "enrolled", "rotating", "confirming"] {
+            transport.enrollment = state
+            defaults.set(true, forKey: "galaxy.sentry.enrollRequested")
+            time = time.addingTimeInterval(61)
+            let before = transport.requests.count
+            await sandbox.synchronize()
+            precondition(transport.requests.count == before + 1, "Do not restart relay enrollment from \(state)")
+            precondition(sandbox.registered)
+            precondition(!defaults.bool(forKey: "galaxy.sentry.enrollRequested"))
+            if state == "actionRequired" { precondition(sandbox.status.contains("authorization needs attention")) }
+            if state == "revoking" { precondition(sandbox.status.contains("revocation pending")) }
+        }
         print("Sentry registration, rotation, retry, unsubscribe and test regressions passed")
     }
 }

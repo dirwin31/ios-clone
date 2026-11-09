@@ -119,8 +119,13 @@ final class SentryPush: ObservableObject {
             guard device == identity, token == currentToken else { lastAttempt = .distantPast; return }
             if defaults.bool(forKey: "galaxy.sentry.enrollRequested") {
                 if let relay = result["relayEnrollment"] as? [String: Any] {
-                    if relay["automaticConfigured"] as? Bool == true || ["enrolling", "enrolled", "rotating", "confirming"].contains(relay["state"] as? String ?? "") {
+                    let state = relay["state"] as? String ?? ""
+                    // Only start a new enrollment from a state the comma allows.
+                    // Recovery/revocation needs an explicit action in Galaxy.
+                    if ["unenrolled", "revoked"].contains(state), relay["automaticConfigured"] as? Bool == true {
                         result = try await request(["action": "relayEnroll", "confirmed": true], over: transport)
+                        defaults.set(false, forKey: "galaxy.sentry.enrollRequested")
+                    } else if ["enrolling", "enrolled", "rotating", "confirming", "revoking", "actionRequired"].contains(state) {
                         defaults.set(false, forKey: "galaxy.sentry.enrollRequested")
                     }
                 } else { defaults.set(false, forKey: "galaxy.sentry.enrollRequested") }
