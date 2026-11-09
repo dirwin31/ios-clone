@@ -9,7 +9,7 @@ struct GalaxyBluetoothApp: App {
     @UIApplicationDelegateAdaptor(SentryAppDelegate.self) private var appDelegate
     @StateObject private var model = AppModel.shared
     @AppStorage("galaxy.app.language") private var language = "en"
-    var body: some Scene { WindowGroup { GalaxyRootView(model: model).environment(\.locale, Locale(identifier: language)).onOpenURL { ShareInbox.shared.receive($0, model: model) } } }
+    var body: some Scene { WindowGroup { GalaxyRootView(model: model).environment(\.locale, Locale(identifier: language)).onOpenURL { ShareInbox.shared.receive($0, model: model) }.modifier(ShareNotice()) } }
 }
 
 enum CompanionTab: String, CaseIterable, Identifiable {

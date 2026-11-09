@@ -37,6 +37,33 @@ import Foundation
         var asked = false
         _ = await SharedDestination.resolve("Starbucks") { _ in asked = true; return nil }
         precondition(!asked)
+        func json(_ value: [String: Any]) -> Data { try! JSONSerialization.data(withJSONObject: value) }
+        let there: [String: Any] = ["latitude": 36.1126, "longitude": -115.1767]
+        var statuses = [json(["revision": "r1", "enabled": false, "hasKey": true])]
+        var replies = [json(["revision": "r2", "enabled": true, "hasKey": true]), json(["revision": "r3", "enabled": true, "hasKey": true, "destination": there])]
+        var sent: [[String: Any]] = []
+        try! await DestinationSender.start(name: "Bellagio", latitude: 36.1126, longitude: -115.1767,
+                                           status: { (200, statuses.removeFirst()) }, action: { sent.append($0); return (200, replies.removeFirst()) })
+        precondition(sent.map { $0["action"] as? String } == ["configure", "select"] && sent[1]["revision"] as? String == "r2")
+
+        statuses = [json(["revision": "r1", "enabled": true, "hasKey": true]), json(["revision": "r2", "enabled": true, "hasKey": true, "destination": there])]
+        sent = []
+        try! await DestinationSender.start(name: "Bellagio", latitude: 36.1126, longitude: -115.1767,
+                                           status: { (200, statuses.removeFirst()) }, action: { sent.append($0); return (409, Data()) })
+        precondition(sent.count == 1)
+
+        do {
+            try await DestinationSender.start(name: "Bellagio", latitude: 1, longitude: 2,
+                                              status: { (200, json(["revision": "r1", "enabled": true, "hasKey": false])) }, action: { _ in preconditionFailure() })
+            preconditionFailure("no token")
+        } catch let failure as DestinationSender.Failure { precondition(failure == .refused("Add a Mapbox token in Galaxy navigation first")) }
+        catch { preconditionFailure("\(error)") }
+        do {
+            try await DestinationSender.start(name: "Bellagio", latitude: 1, longitude: 2,
+                                              status: { (403, json(["error": "Remote Galaxy request denied"])) }, action: { _ in preconditionFailure() })
+            preconditionFailure("denied")
+        } catch let failure as DestinationSender.Failure { precondition(failure == .unreachable("Remote Galaxy request denied")) }
+        catch { preconditionFailure("\(error)") }
         print("Shared destination regression passed")
     }
 }
