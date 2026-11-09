@@ -70,6 +70,8 @@ swiftc -module-cache-path "$test_dir/module-cache" -swift-version 5 -parse-as-li
 # Places shared from Google or Apple Maps open their coordinates; short links only follow Google redirects.
 swiftc -module-cache-path "$test_dir/module-cache" -swift-version 5 -parse-as-library GalaxyBluetooth/SharedDestination.swift tests/SharedDestinationRegression.swift -o "$test_dir/shared-destination-tests"
 "$test_dir/shared-destination-tests"
+swiftc -module-cache-path "$test_dir/module-cache" -swift-version 5 -parse-as-library GalaxyBluetooth/SharedDestination.swift GalaxyBluetooth/ShareRelay.swift tests/ShareRelayRegression.swift -o "$test_dir/share-relay-tests"
+"$test_dir/share-relay-tests"
 
 swiftc -module-cache-path "$test_dir/module-cache" -swift-version 5 -parse-as-library GalaxyBluetooth/Wire.swift GalaxyBluetooth/HTTP.swift GalaxyBluetooth/GalaxyRequestTransport.swift GalaxyBluetooth/NetworkTransport.swift GalaxyBluetooth/PrivateLANHTTP.swift tests/TunnelRegression.swift -o "$test_dir/tunnel-tests"
 "$test_dir/tunnel-tests"

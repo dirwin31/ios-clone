@@ -8,7 +8,7 @@ enum SharedDestination: Equatable {
     static let scheme = "starpilot"
     static let maxText = 8192
 
-    /// The shared text from starpilot://share?text=…, as sent by the "Send to StarPilot" shortcut.
+    /// The shared text from starpilot://share?text=….
     static func text(from url: URL) -> String? {
         guard url.scheme?.lowercased() == scheme, url.host?.lowercased() == "share",
               let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems,
@@ -140,6 +140,62 @@ enum DestinationSender {
             if state.enabled && state.at(latitude, longitude) { return }
         }
         throw Failure.unreachable("Navigation kept changing on comma")
+    }
+
+    enum Outcome: Equatable {
+        case started(String)
+        /// comma could not pick one place; the text goes to Galaxy's navigation search.
+        case needsSearch(String)
+        case refused(String)
+        case unreachable(String)
+    }
+
+    static func capped(_ text: String) -> String {
+        String(String.UnicodeScalarView(text.trimmingCharacters(in: .whitespacesAndNewlines).unicodeScalars.prefix(SharedDestination.maxText)))
+    }
+
+    /// comma reads the shared text itself (coordinates, else its geocoder). Older commas without `share` get the place parsed here.
+    static func share(text: String, status: () async throws -> (Int, Data), action: ([String: Any]) async throws -> (Int, Data)) async -> Outcome {
+        let text = capped(text)
+        do {
+            var state = try checked(try await status())
+            for _ in 0..<2 {
+                let reply = try await action(["action": "share", "revision": state.revision, "text": text])
+                let json = (try? JSONSerialization.jsonObject(with: reply.1)) as? [String: Any]
+                switch reply.0 {
+                case 200:
+                    guard let shared = json?["shared"] as? [String: Any], let name = shared["name"] as? String else {
+                        return .unreachable("comma did not confirm the destination")
+                    }
+                    return .started(name.isEmpty ? "Shared destination" : name)
+                case 409:
+                    state = try checked(try await status())
+                case 400 where json?["query"] != nil:
+                    return .needsSearch(text)
+                case 400 where json?["error"] as? String == "Invalid navigation action":
+                    return await legacy(text: text, status: status, action: action)
+                case 400:
+                    return .refused(json?["error"] as? String ?? "Galaxy refused the destination")
+                case 401:
+                    return .unreachable("Sign in to Galaxy again")
+                default:
+                    return .unreachable(json?["error"] as? String ?? "Galaxy returned HTTP \(reply.0)")
+                }
+            }
+            return .unreachable("Navigation kept changing on comma")
+        } catch Failure.refused(let message) { return .refused(message) }
+        catch Failure.unreachable(let message) { return .unreachable(message) }
+        catch { return .unreachable(error.localizedDescription) }
+    }
+
+    private static func legacy(text: String, status: () async throws -> (Int, Data), action: ([String: Any]) async throws -> (Int, Data)) async -> Outcome {
+        guard case let .place(name, latitude, longitude) = SharedDestination.parse(text) else { return .needsSearch(text) }
+        do {
+            try await start(name: name, latitude: latitude, longitude: longitude, status: status, action: action)
+            return .started(name)
+        } catch Failure.refused(let message) { return .refused(message) }
+        catch Failure.unreachable(let message) { return .unreachable(message) }
+        catch { return .unreachable(error.localizedDescription) }
     }
 
     private static func checked(_ reply: (Int, Data)) throws -> State {

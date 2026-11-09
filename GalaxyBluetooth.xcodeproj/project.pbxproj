@@ -19,6 +19,28 @@ CAFE00000000000000000049 = {isa = XCBuildConfiguration; buildSettings = {CODE_SI
 CAFE0000000000000000004A = {isa = PBXContainerItemProxy; containerPortal = 244210E48437B6556980A702; proxyType = 1; remoteGlobalIDString = 34A04005BCAF206EEC990BD9; remoteInfo = GalaxyBluetooth; };
 CAFE0000000000000000004B = {isa = PBXTargetDependency; target = 34A04005BCAF206EEC990BD9; targetProxy = CAFE0000000000000000004A; };
 
+5A4E00000000000000000005 /* ShareRelay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareRelay.swift; sourceTree = "<group>"; };
+5A4E00000000000000000006 /* ShareRelay.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A4E00000000000000000005; };
+5A4E00000000000000000007 /* ShareRelay.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A4E00000000000000000005; };
+5A4E00000000000000000010 /* SharedDestination.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A4E00000000000000000002; };
+5A4E00000000000000000011 /* ShareViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareViewController.swift; sourceTree = "<group>"; };
+5A4E00000000000000000012 /* ShareViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A4E00000000000000000011; };
+5A4E00000000000000000013 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+5A4E00000000000000000014 /* StarPilotShare.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = StarPilotShare.entitlements; sourceTree = "<group>"; };
+5A4E00000000000000000015 /* StarPilotShare.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = StarPilotShare.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+5A4E00000000000000000016 /* StarPilotShare.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 5A4E00000000000000000015; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+5A4E00000000000000000017 /* StarPilotShare */ = {isa = PBXGroup; children = (5A4E00000000000000000011, 5A4E00000000000000000013, 5A4E00000000000000000014); path = StarPilotShare; sourceTree = "<group>"; };
+5A4E00000000000000000018 /* Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (5A4E00000000000000000012, 5A4E00000000000000000010, 5A4E00000000000000000007); runOnlyForDeploymentPostprocessing = 0; };
+5A4E00000000000000000019 /* Frameworks */ = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+5A4E0000000000000000001A /* Resources */ = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+5A4E0000000000000000001B /* StarPilotShare */ = {isa = PBXNativeTarget; buildConfigurationList = 5A4E0000000000000000001C; buildPhases = (5A4E00000000000000000018, 5A4E00000000000000000019, 5A4E0000000000000000001A); buildRules = (); dependencies = (); name = StarPilotShare; productName = StarPilotShare; productReference = 5A4E00000000000000000015; productType = "com.apple.product-type.app-extension"; };
+5A4E0000000000000000001C /* Build configuration list for PBXNativeTarget "StarPilotShare" */ = {isa = XCConfigurationList; buildConfigurations = (5A4E0000000000000000001D, 5A4E0000000000000000001E); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+5A4E0000000000000000001D /* Debug */ = {isa = XCBuildConfiguration; buildSettings = {CODE_SIGN_ENTITLEMENTS = StarPilotShare/StarPilotShare.entitlements; CODE_SIGN_STYLE = Automatic; DEVELOPMENT_TEAM = 5P9DLC338G; APPLICATION_EXTENSION_API_ONLY = YES; SKIP_INSTALL = YES; GENERATE_INFOPLIST_FILE = NO; INFOPLIST_FILE = StarPilotShare/Info.plist; IPHONEOS_DEPLOYMENT_TARGET = 17.0; LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/Frameworks", "@executable_path/../../Frameworks"); PRODUCT_BUNDLE_IDENTIFIER = link.galaxy.bluetooth.natehuby76.share; PRODUCT_NAME = "$(TARGET_NAME)"; SUPPORTED_PLATFORMS = "iphoneos iphonesimulator"; SWIFT_VERSION = 5.0; TARGETED_DEVICE_FAMILY = 1; SWIFT_OPTIMIZATION_LEVEL = "-Onone"; }; name = Debug; };
+5A4E0000000000000000001E /* Release */ = {isa = XCBuildConfiguration; buildSettings = {CODE_SIGN_ENTITLEMENTS = StarPilotShare/StarPilotShare.entitlements; CODE_SIGN_STYLE = Automatic; DEVELOPMENT_TEAM = 5P9DLC338G; APPLICATION_EXTENSION_API_ONLY = YES; SKIP_INSTALL = YES; GENERATE_INFOPLIST_FILE = NO; INFOPLIST_FILE = StarPilotShare/Info.plist; IPHONEOS_DEPLOYMENT_TARGET = 17.0; LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/Frameworks", "@executable_path/../../Frameworks"); PRODUCT_BUNDLE_IDENTIFIER = link.galaxy.bluetooth.natehuby76.share; PRODUCT_NAME = "$(TARGET_NAME)"; SUPPORTED_PLATFORMS = "iphoneos iphonesimulator"; SWIFT_VERSION = 5.0; TARGETED_DEVICE_FAMILY = 1; SWIFT_OPTIMIZATION_LEVEL = "-O"; }; name = Release; };
+5A4E0000000000000000001F /* Embed Foundation Extensions */ = {isa = PBXCopyFilesBuildPhase; buildActionMask = 2147483647; dstPath = ""; dstSubfolderSpec = 13; files = (5A4E00000000000000000016); name = "Embed Foundation Extensions"; runOnlyForDeploymentPostprocessing = 0; };
+5A4E00000000000000000020 = {isa = PBXContainerItemProxy; containerPortal = 244210E48437B6556980A702; proxyType = 1; remoteGlobalIDString = 5A4E0000000000000000001B; remoteInfo = StarPilotShare; };
+5A4E00000000000000000021 = {isa = PBXTargetDependency; target = 5A4E0000000000000000001B; targetProxy = 5A4E00000000000000000020; };
+
 /* Begin PBXBuildFile section */
         A19E00000000000000000003 /* InfoPlist.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = A19E00000000000000000004 /* InfoPlist.xcstrings */; };
         A19E00000000000000000001 /* Localizable.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = A19E00000000000000000002 /* Localizable.xcstrings */; };
@@ -128,6 +150,7 @@ D15C00000000000000000902 = {isa = PBXFileReference; lastKnownFileType = sourceco
 			isa = PBXGroup;
 			children = (
 				A172CEDCAE47474B615C54D5 /* GalaxyBluetooth.app */,
+				5A4E00000000000000000015 /* StarPilotShare.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -163,6 +186,7 @@ D15C00000000000000000902 = {isa = PBXFileReference; lastKnownFileType = sourceco
 D15C00000000000000000902 /* DiscordReports.swift */,
 				5A4E00000000000000000002 /* SharedDestination.swift */,
 				5A4E00000000000000000004 /* ShareInbox.swift */,
+				5A4E00000000000000000005 /* ShareRelay.swift */,
 				C0AA00000000000000000002 /* ConnectionSettingsView.swift */,
                 A19E00000000000000000002 /* Localizable.xcstrings */,
                 A19E00000000000000000004 /* InfoPlist.xcstrings */,
@@ -188,6 +212,7 @@ D15C00000000000000000902 /* DiscordReports.swift */,
 			children = (
 				CAFE00000000000000000040,
                 9E61AFF607A3704A97803240 /* GalaxyBluetooth */,
+				5A4E00000000000000000017 /* StarPilotShare */,
 				0A3E27B8CA818264D75C8D81 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -202,10 +227,12 @@ D15C00000000000000000902 /* DiscordReports.swift */,
 				878A52FC5FF6A57D50B7B870 /* Sources */,
 				E2AA269EB967A8853A258BFA /* Frameworks */,
 				41D311A605520FC7B8B9A980 /* Resources */,
+				5A4E0000000000000000001F /* Embed Foundation Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				5A4E00000000000000000021,
 			);
 			name = GalaxyBluetooth;
 			productName = GalaxyBluetooth;
@@ -239,6 +266,7 @@ D15C00000000000000000902 /* DiscordReports.swift */,
 			targets = (
                 CAFE00000000000000000046,
 				34A04005BCAF206EEC990BD9 /* GalaxyBluetooth */,
+				5A4E0000000000000000001B /* StarPilotShare */,
 			);
 		};
 /* End PBXProject section */
@@ -294,6 +322,7 @@ D15C00000000000000000902 /* DiscordReports.swift */,
 D15C00000000000000000901 /* DiscordReports.swift in Sources */,
 				5A4E00000000000000000001 /* SharedDestination.swift in Sources */,
 				5A4E00000000000000000003 /* ShareInbox.swift in Sources */,
+				5A4E00000000000000000006 /* ShareRelay.swift in Sources */,
 				C0AA00000000000000000001 /* ConnectionSettingsView.swift in Sources */,
 				8BA587954B4079F504AAD35E /* GalaxyRequestTransport.swift in Sources */,
 				DE64BADD40C934E610D4D505 /* GalaxyWebView.swift in Sources */,

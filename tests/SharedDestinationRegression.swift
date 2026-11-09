@@ -64,6 +64,55 @@ import Foundation
             preconditionFailure("denied")
         } catch let failure as DestinationSender.Failure { precondition(failure == .unreachable("Remote Galaxy request denied")) }
         catch { preconditionFailure("\(error)") }
+
+        let ready = json(["revision": "r1", "enabled": true, "hasKey": true])
+        let named = "Bellagio\nhttps://www.google.com/maps/place/Bellagio,+3600+S+Las+Vegas+Blvd/data=!4m2!3m1!1s0x1:0x2"
+        sent = []
+        var outcome = await DestinationSender.share(text: "  " + named + "\n", status: { (200, ready) }, action: {
+            sent.append($0); return (200, json(["revision": "r2", "shared": ["name": "Bellagio", "latitude": 36.1126, "longitude": -115.1767]]))
+        })
+        precondition(outcome == .started("Bellagio"))
+        precondition(sent.count == 1 && sent[0]["action"] as? String == "share" && sent[0]["revision"] as? String == "r1" && sent[0]["text"] as? String == named)
+
+        var reads = 0
+        sent = []
+        outcome = await DestinationSender.share(text: named, status: { reads += 1; return (200, json(["revision": "r\(reads)"])) }, action: {
+            sent.append($0)
+            return sent.count == 1 ? (409, json(["error": "Navigation changed"])) : (200, json(["shared": ["name": "Bellagio", "latitude": 1.0, "longitude": 2.0]]))
+        })
+        precondition(outcome == .started("Bellagio") && reads == 2 && sent.map { $0["revision"] as? String } == ["r1", "r2"])
+        outcome = await DestinationSender.share(text: named, status: { (200, ready) }, action: { _ in (409, Data()) })
+        precondition(outcome == .unreachable("Navigation kept changing on comma"))
+
+        outcome = await DestinationSender.share(text: "Starbucks", status: { (200, ready) }, action: { _ in (400, json(["error": "Choose a place", "query": "Starbucks"])) })
+        precondition(outcome == .needsSearch("Starbucks"))
+        outcome = await DestinationSender.share(text: named, status: { (200, ready) }, action: { _ in (400, json(["error": "Add a Mapbox token in Galaxy navigation first"])) })
+        precondition(outcome == .refused("Add a Mapbox token in Galaxy navigation first"))
+        outcome = await DestinationSender.share(text: named, status: { (200, ready) }, action: { _ in (401, json(["error": "Sign in"])) })
+        precondition(outcome == .unreachable("Sign in to Galaxy again"))
+        outcome = await DestinationSender.share(text: named, status: { (401, Data()) }, action: { _ in preconditionFailure() })
+        precondition(outcome == .unreachable("Sign in to Galaxy again"))
+        outcome = await DestinationSender.share(text: named, status: { throw URLError(.timedOut) }, action: { _ in preconditionFailure() })
+        if case .unreachable = outcome {} else { preconditionFailure("network failure") }
+        outcome = await DestinationSender.share(text: named, status: { (200, ready) }, action: { _ in (200, json(["revision": "r2"])) })
+        precondition(outcome == .unreachable("comma did not confirm the destination"))
+
+        // Older commas reject `share`; coordinates are parsed here, else Galaxy searches.
+        let old = json(["error": "Invalid navigation action"])
+        statuses = [ready, ready]
+        sent = []
+        outcome = await DestinationSender.share(text: "https://maps.google.com/?q=36.1126,-115.1767", status: { (200, statuses.removeFirst()) }, action: {
+            sent.append($0); return $0["action"] as? String == "share" ? (400, old) : (200, json(["revision": "r2", "enabled": true, "hasKey": true, "destination": there]))
+        })
+        precondition(outcome == .started("Shared destination") && sent.map { $0["action"] as? String } == ["share", "select"])
+        outcome = await DestinationSender.share(text: named, status: { (200, ready) }, action: { precondition($0["action"] as? String == "share"); return (400, old) })
+        precondition(outcome == .needsSearch(named))
+        outcome = await DestinationSender.share(text: "geo:1,2", status: { (200, json(["revision": "r1", "enabled": true, "hasKey": false])) }, action: { _ in (400, old) })
+        precondition(outcome == .refused("Add a Mapbox token in Galaxy navigation first"))
+
+        let long = String(repeating: "é", count: SharedDestination.maxText + 10)
+        _ = await DestinationSender.share(text: long, status: { (200, ready) }, action: { sent.append($0); return (400, json(["query": ""])) })
+        precondition((sent.last?["text"] as? String)?.unicodeScalars.count == SharedDestination.maxText)
         print("Shared destination regression passed")
     }
 }
