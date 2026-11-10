@@ -301,7 +301,7 @@ final class LANTransport: ObservableObject, GalaxyRequestTransport {
             request.httpMethod = method
             request.httpBody = body.isEmpty ? nil : body
             request.timeoutInterval = LocalRequest.isPackageUpload(method: method, target: path) ? LocalRequest.packageUploadTimeout
-                : (method == "POST" && path == LANPairing.windowPath ? 35 : 8)
+                : (method == "POST" && path == LANPairing.windowPath ? 35 : method == "POST" && path == "/api/navigation/action" ? 25 : 8)
             for (name, value) in headers where ["accept", "range", "content-type"].contains(name.lowercased()) {
                 request.setValue(value, forHTTPHeaderField: name)
             }
@@ -680,7 +680,9 @@ final class TunnelTransport: ObservableObject, GalaxyRequestTransport {
         let original = generation
         var request = URLRequest(url: url)
         request.httpMethod = method; request.httpBody = body.isEmpty ? nil : body
-        request.timeoutInterval = LocalRequest.isPackageUpload(method: method, target: path) ? LocalRequest.packageUploadTimeout : 8
+        // comma may follow short links and geocode before answering a shared place.
+        request.timeoutInterval = LocalRequest.isPackageUpload(method: method, target: path) ? LocalRequest.packageUploadTimeout
+            : method == "POST" && path == "/api/navigation/action" ? 25 : 8
         request.setValue("galaxy_session=" + credential.cookie, forHTTPHeaderField: "Cookie")
         for (name, value) in headers where ["accept", "range", "content-type"].contains(name.lowercased()) { request.setValue(value, forHTTPHeaderField: name) }
         if !["GET", "HEAD"].contains(method) {

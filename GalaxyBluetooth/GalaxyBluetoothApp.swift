@@ -9,7 +9,7 @@ struct GalaxyBluetoothApp: App {
     @UIApplicationDelegateAdaptor(SentryAppDelegate.self) private var appDelegate
     @StateObject private var model = AppModel.shared
     @AppStorage("galaxy.app.language") private var language = "en"
-    var body: some Scene { WindowGroup { GalaxyRootView(model: model).environment(\.locale, Locale(identifier: language)) } }
+    var body: some Scene { WindowGroup { GalaxyRootView(model: model).environment(\.locale, Locale(identifier: language)).onOpenURL { ShareInbox.shared.receive($0, model: model) }.modifier(ShareNotice()) } }
 }
 
 enum CompanionTab: String, CaseIterable, Identifiable {
@@ -200,7 +200,7 @@ final class AppModel: ObservableObject {
     }
     func forgetTunnel() {
         tunnelProbeTask?.cancel()
-        tunnel.forget(); TunnelKeyStore.remove()
+        tunnel.forget(); TunnelKeyStore.remove(); ShareInbox.shared.mirrorTunnel()
     }
     private func confirmedTunnelURL() async throws -> URL {
         let identity = lan.expectedDeviceID
@@ -258,6 +258,7 @@ final class AppModel: ObservableObject {
             throw BridgeError.message("This tunnel belongs to a different comma.")
         }
         try TunnelKeyStore.save(credential)
+        ShareInbox.shared.mirrorTunnel()
         connectionLog.record("Tunnel setup: verified credential saved to Keychain")
         tunnelProbeTask?.cancel()
         try tunnel.configure(credential)
@@ -283,6 +284,7 @@ final class AppModel: ObservableObject {
             let previousIdentity = self.tunnel.expectedDeviceID
             if await self.tunnel.probe(), let credential = self.tunnel.credential {
                 try? TunnelKeyStore.save(credential)
+                ShareInbox.shared.mirrorTunnel()
                 if self.lan.expectedDeviceID == previousIdentity {
                     self.lan.bind(to: credential.deviceID)
                     UserDefaults.standard.set(credential.deviceID, forKey: "galaxy.comma.identity")
@@ -485,6 +487,7 @@ final class AppModel: ObservableObject {
         Task { [weak self] in await self?.identifyBuildDistribution() }
         pathMonitor.start(queue: .main)
         updateMonitoring()
+        ShareInbox.shared.attach(self)
     }
     deinit { pathMonitor.cancel() }
     private func logConnection(_ reason: String) {
@@ -1037,7 +1040,7 @@ struct GalaxyRootView: View {
             model.setPhoneActive(scenePhase == .active)
             model.navigationServices.setEnabled(model.navigationEnabled)
             model.navigationServices.setPhoneActive(scenePhase == .active)
-            if scenePhase == .active { model.recoverGalaxy(reload: false); await model.checkGalaxyUpdates() }
+            if scenePhase == .active { ShareInbox.shared.activated(model: model); model.recoverGalaxy(reload: false); await model.checkGalaxyUpdates() }
         }
     }
     private func presentReport() {
