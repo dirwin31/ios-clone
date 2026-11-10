@@ -37,6 +37,20 @@ import Foundation
         var asked = false
         _ = await SharedDestination.resolve("Starbucks") { _ in asked = true; return nil }
         precondition(!asked)
+        let waze = "https://www.waze.com/ul?ll=43.65%2C-79.38&navigate=yes"
+        precondition(place(waze)?.1 == 43.65 && place(waze)?.2 == -79.38)
+        precondition(place("waze://?ll=43.65,-79.38")?.1 == 43.65)
+        precondition(SharedDestination.parse("https://waze.com/ul?q=10%20Main%20Street") == .search("10 Main Street"))
+        precondition(SharedDestination.wazeURL(in: "https://waze.com.evil.example/ul?ll=1,2") == nil)
+        precondition(SharedDestination.wazeDestination(URL(string: "https://waze.com/ul?favorite=home")!) == nil)
+        precondition(SharedDestination.wazeDestination(URL(string: "https://waze.com/ul?ll=91,2")!) == nil)
+        let wazeShort = "https://waze.com/ul/opaque"
+        let wazeResolved = await SharedDestination.resolve(wazeShort) { _ in waze }
+        precondition(wazeResolved == waze)
+        let wazeBlocked = await SharedDestination.resolve(wazeShort) { _ in "https://evil.example/ul?ll=1,2" }
+        precondition(wazeBlocked == wazeShort)
+        let wazeDowngrade = await SharedDestination.resolve(wazeShort) { _ in "http://waze.com/ul?ll=1,2" }
+        precondition(wazeDowngrade == wazeShort)
         func json(_ value: [String: Any]) -> Data { try! JSONSerialization.data(withJSONObject: value) }
         let there: [String: Any] = ["latitude": 36.1126, "longitude": -115.1767]
         var statuses = [json(["revision": "r1", "enabled": false, "hasKey": true])]
@@ -66,6 +80,15 @@ import Foundation
         catch { preconditionFailure("\(error)") }
 
         let ready = json(["revision": "r1", "enabled": true, "hasKey": true])
+        var wazeActions: [[String: Any]] = []
+        let wazeOutcome = await DestinationSender.share(text: waze, status: { (200, ready) }, action: { payload in
+            wazeActions.append(payload)
+            return (200, json(["enabled": true, "hasKey": true, "destination": ["latitude": 43.65, "longitude": -79.38]]))
+        })
+        precondition(wazeOutcome == .started("Shared destination"))
+        precondition(wazeActions.count == 1 && wazeActions[0]["action"] as? String == "select")
+        let opaque = await DestinationSender.share(text: wazeShort, status: { preconditionFailure("Do not send an opaque Waze link") }, action: { _ in preconditionFailure() })
+        if case .refused = opaque {} else { preconditionFailure() }
         let named = "Bellagio\nhttps://www.google.com/maps/place/Bellagio,+3600+S+Las+Vegas+Blvd/data=!4m2!3m1!1s0x1:0x2"
         sent = []
         var outcome = await DestinationSender.share(text: "  " + named + "\n", status: { (200, ready) }, action: {

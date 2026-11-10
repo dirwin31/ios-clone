@@ -9,7 +9,13 @@ enum ShareGroup {
     static let maxAge: TimeInterval = 12 * 3600
 
     struct Tunnel: Codable, Equatable { let url: String; let cookie: String }
-    struct Pending: Codable, Equatable { let id: String; let text: String; let date: Date }
+    struct Pending: Codable, Equatable {
+        let id: String; let text: String; let date: Date; let identity: String?
+        func belongs(to device: String?) -> Bool {
+            guard let identity, !identity.isEmpty else { return false }
+            return identity == device
+        }
+    }
     struct Settings: Equatable { var address: String?, identity: String?, mode: String? }
 
     private static var defaults: UserDefaults? { UserDefaults(suiteName: id) }
@@ -46,14 +52,18 @@ enum ShareGroup {
     }
 
     /// One waiting share; a newer one replaces it.
-    static func queue(_ text: String, now: Date = Date()) {
-        guard let data = try? JSONEncoder().encode(Pending(id: UUID().uuidString, text: text, date: now)) else { return }
+    @discardableResult
+    static func queue(_ text: String, identity: String?, requestID: String, now: Date = Date()) -> Bool {
+        guard isCurrent(requestID), let identity, !identity.isEmpty, identity == settings.identity,
+              let data = try? JSONEncoder().encode(Pending(id: requestID, text: text, date: now, identity: identity)) else { return false }
         defaults?.set(data, forKey: keys.pending)
         CFNotificationCenterPostNotification(CFNotificationCenterGetDarwinNotifyCenter(), CFNotificationName(pendingNotification as CFString), nil, nil, true)
+        return true
     }
     static func pending(now: Date = Date()) -> Pending? {
         guard let data = defaults?.data(forKey: keys.pending), let value = try? JSONDecoder().decode(Pending.self, from: data) else { return nil }
-        guard now.timeIntervalSince(value.date) < maxAge, value.date <= now.addingTimeInterval(60) else { clear(value.id); return nil }
+        guard now.timeIntervalSince(value.date) < maxAge, value.date <= now.addingTimeInterval(60),
+              value.identity?.isEmpty == false else { clear(value.id); return nil }
         return value
     }
     /// Only the share that was delivered is cleared, never one queued meanwhile.
@@ -69,6 +79,18 @@ enum ShareGroup {
         defaults?.removeObject(forKey: keys.search)
         return text
     }
+
+    /// A new explicit share supersedes a previously saved destination/search,
+    /// even when the new share succeeds immediately in the extension.
+    @discardableResult
+    static func replacePreviousShare() -> String {
+        let requestID = UUID().uuidString
+        defaults?.set(requestID, forKey: "share.latest")
+        if let previous = pending() { clear(previous.id) }
+        defaults?.removeObject(forKey: keys.search)
+        return requestID
+    }
+    static func isCurrent(_ requestID: String) -> Bool { defaults?.string(forKey: "share.latest") == requestID }
 }
 
 /// A slim comma client for the share extension: the saved home-network address, then the tunnel. Bluetooth stays with the app.
@@ -85,26 +107,31 @@ struct ShareClient {
         init(base: URL, origin: String, local: Bool, cookie: String) { self.base = base; self.origin = origin; self.local = local; self.cookie = cookie }
     }
 
-    func send(text: String, settings: ShareGroup.Settings, tunnel: ShareGroup.Tunnel?) async -> DestinationSender.Outcome {
+    func send(text: String, settings: ShareGroup.Settings, tunnel: ShareGroup.Tunnel?, requestID: String? = nil) async -> DestinationSender.Outcome {
         var result = DestinationSender.Outcome.unreachable("comma is not reachable")
         let mode = settings.mode ?? "automatic"
         if mode != "bluetooth", let address = settings.address, let base = Self.lanEndpoint(address) {
             do {
                 let route = Route(base: base, origin: base.absoluteString, local: true, cookie: try await session(base))
-                if try await verified(route, identity: settings.identity) { result = await share(text, over: route) }
+                if try await verified(route, identity: settings.identity) { result = await share(text, over: route, requestID: requestID) }
                 else { result = .unreachable("A different comma answered at the saved address") }
             } catch { result = .unreachable(error.localizedDescription) }
             if case .unreachable = result {} else { return result }
         }
         if mode == "automatic", let tunnel, let base = Self.tunnelEndpoint(tunnel.url), !Task.isCancelled {
-            return await share(text, over: Route(base: base, origin: "https://galaxy.firestar.link", local: false, cookie: "galaxy_session=" + tunnel.cookie))
+            if let identity = settings.identity, identity.hasPrefix("galaxy:") {
+                let tunnelIdentity = "galaxy:" + SHA256.hash(data: Data(base.absoluteString.utf8)).map { String(format: "%02x", $0) }.joined()
+                guard identity == tunnelIdentity else { return .refused("The saved tunnel belongs to a different comma. Open StarPilot to reconnect.") }
+            }
+            return await share(text, over: Route(base: base, origin: "https://galaxy.firestar.link", local: false, cookie: "galaxy_session=" + tunnel.cookie), requestID: requestID)
         }
         return result
     }
 
-    private func share(_ text: String, over route: Route) async -> DestinationSender.Outcome {
+    private func share(_ text: String, over route: Route, requestID: String?) async -> DestinationSender.Outcome {
         await DestinationSender.share(text: text, status: { try await call(route, "/api/navigation/status") }, action: {
-            try await call(route, "/api/navigation/action", body: try JSONSerialization.data(withJSONObject: $0))
+            if let requestID, !ShareGroup.isCurrent(requestID) { throw DestinationSender.Failure.refused("A newer shared destination replaced this one.") }
+            return try await call(route, "/api/navigation/action", body: try JSONSerialization.data(withJSONObject: $0))
         })
     }
 

@@ -22,10 +22,11 @@ final class ShareViewController: UIViewController {
     private func run() async {
         let text = await Self.sharedText(extensionContext?.inputItems as? [NSExtensionItem] ?? [])
         guard !text.isEmpty else { state.phase = .failed("Nothing to send. Share a place from Maps."); return }
-        let resolved = await SharedDestination.resolve(text) { await RedirectProbe().location(of: $0) }
+        let requestID = ShareGroup.replacePreviousShare()
         let settings = ShareGroup.settings, tunnel = ShareGroup.tunnel
+        let resolved = await SharedDestination.resolve(text) { await RedirectProbe().location(of: $0) }
         let outcome = await withTaskGroup(of: DestinationSender.Outcome.self) { group in
-            group.addTask { await ShareClient().send(text: resolved, settings: settings, tunnel: tunnel) }
+            group.addTask { await ShareClient().send(text: resolved, settings: settings, tunnel: tunnel, requestID: requestID) }
             group.addTask { try? await Task.sleep(nanoseconds: 40_000_000_000); return .unreachable("timed out") }
             let first = await group.next() ?? .unreachable("timed out")
             group.cancelAll()
@@ -41,8 +42,8 @@ final class ShareViewController: UIViewController {
             ShareGroup.stashSearch(text)
             state.phase = .failed("comma couldn’t find one place for this. Open StarPilot BT to choose it.")
         case .unreachable:
-            ShareGroup.queue(DestinationSender.capped(resolved))
-            state.phase = .saved
+            state.phase = ShareGroup.queue(DestinationSender.capped(resolved), identity: settings.identity, requestID: requestID)
+                ? .saved : .failed("Open StarPilot and connect to your comma, then share this place again.")
         }
     }
 
@@ -67,7 +68,8 @@ final class ShareViewController: UIViewController {
             }
         }
         if link == nil, texts.isEmpty { link = cards.first }
-        let parts = (link.map { [$0] } ?? []) + texts.filter { text in link.map { !text.contains($0) } ?? true }
+        let embeddedLink = link.map { url in texts.contains { $0.contains(url) } } ?? false
+        let parts = (embeddedLink ? [] : link.map { [$0] } ?? []) + texts
         return DestinationSender.capped(parts.joined(separator: "\n"))
     }
 }

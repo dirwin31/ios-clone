@@ -20,15 +20,18 @@ final class ShareInbox: ObservableObject {
     func receive(_ url: URL, model: AppModel) {
         guard let text = SharedDestination.text(from: url) else { return }
         model.connectionLog.record("Shared destination received")
+        let identity = UserDefaults.standard.string(forKey: "galaxy.comma.identity")
+        let requestID = ShareGroup.replacePreviousShare()
         Task {
-            ShareGroup.pending().map { ShareGroup.clear($0.id) }
-            switch await CommaDestination.send(text: text, model: model) {
+            switch await CommaDestination.send(text: text, model: model, requestID: requestID, identity: identity) {
             case .started(let name):
                 notice = "Route to \(name) started on comma."
                 if model.navigationEnabled { model.tab = .navigation }
             case .refused(let reason): notice = reason
             case .needsSearch(let resolved): show(resolved, model: model)
-            case .unreachable: ShareGroup.queue(DestinationSender.capped(text)); notice = Self.saved
+            case .unreachable:
+                notice = ShareGroup.queue(DestinationSender.capped(text), identity: identity, requestID: requestID)
+                    ? Self.saved : "Connect to your comma, then share this place again."
             }
         }
     }
@@ -69,6 +72,7 @@ final class ShareInbox: ObservableObject {
 
     func deliverPending() {
         guard let model, !delivering, let pending = ShareGroup.pending() else { return }
+        guard ShareGroup.isCurrent(pending.id), pending.belongs(to: UserDefaults.standard.string(forKey: "galaxy.comma.identity")) else { return }
         delivering = true
         let background = UIApplication.shared.beginBackgroundTask(withName: "Shared destination")
         Task {
@@ -77,7 +81,8 @@ final class ShareInbox: ObservableObject {
                 if background != .invalid { UIApplication.shared.endBackgroundTask(background) }
             }
             model.connectionLog.record("Saved shared destination: sending to comma")
-            let outcome = await CommaDestination.send(text: pending.text, model: model)
+            let outcome = await CommaDestination.send(text: pending.text, model: model, requestID: pending.id, identity: pending.identity)
+            guard ShareGroup.isCurrent(pending.id) else { return }
             if case .unreachable = outcome { return }
             ShareGroup.clear(pending.id)
             let active = UIApplication.shared.applicationState == .active
@@ -115,16 +120,23 @@ final class ShareInbox: ObservableObject {
 /// Sends shared text to comma over whatever reaches it: the app's current connection, the saved home network, then the tunnel.
 @MainActor
 enum CommaDestination {
-    static func send(text: String, model: AppModel) async -> DestinationSender.Outcome {
+    static func send(text: String, model: AppModel, requestID: String, identity: String?) async -> DestinationSender.Outcome {
         // Short links are opened on the phone; comma may have no route to Google.
         let resolved = await SharedDestination.resolve(DestinationSender.capped(text)) { await RedirectProbe().location(of: $0) }
         var result = DestinationSender.Outcome.unreachable("comma is not reachable")
         for route in [current, lan, tunnel] {
             guard let transport = await route(model) else { continue }
+            guard identity == UserDefaults.standard.string(forKey: "galaxy.comma.identity") else {
+                return .refused("Selected comma changed. Share the destination again.")
+            }
             result = await DestinationSender.share(text: resolved, status: {
                 let reply = try await transport.request(path: "/api/navigation/status", method: "GET", headers: [:], body: Data())
                 return (reply.status, reply.bodyData)
             }, action: { payload in
+                guard ShareGroup.isCurrent(requestID) else { throw DestinationSender.Failure.refused("A newer shared destination replaced this one.") }
+                guard identity == UserDefaults.standard.string(forKey: "galaxy.comma.identity") else {
+                    throw DestinationSender.Failure.refused("Selected comma changed. Share the destination again.")
+                }
                 let reply = try await transport.request(path: "/api/navigation/action", method: "POST", headers: ["content-type": "application/json"],
                                                         body: try JSONSerialization.data(withJSONObject: payload))
                 return (reply.status, reply.bodyData)
@@ -159,16 +171,17 @@ enum CommaDestination {
 /// Siri and Shortcuts action: comma starts the route to a shared place; when comma is out of reach the place is saved for later.
 struct SendToStarPilotIntent: AppIntent, ForegroundContinuableIntent {
     static let title: LocalizedStringResource = "Send to StarPilot"
-    static let description = IntentDescription("Sets comma's destination to a place shared from Google or Apple Maps and starts the route.")
+    static let description = IntentDescription("Sets comma's destination to a place shared from Google Maps, Apple Maps or Waze and starts the route.")
     static let openAppWhenRun = false
-    @Parameter(title: "Place", description: "A shared Google or Apple Maps place or link") var text: String
+    @Parameter(title: "Place", description: "A shared Google Maps, Apple Maps or Waze place or link") var text: String
 
     @MainActor
     func perform() async throws -> some IntentResult & ProvidesDialog {
         let model = AppModel.shared
         let shared = DestinationSender.capped(text)
-        ShareGroup.pending().map { ShareGroup.clear($0.id) }
-        switch await CommaDestination.send(text: shared, model: model) {
+        let identity = UserDefaults.standard.string(forKey: "galaxy.comma.identity")
+        let requestID = ShareGroup.replacePreviousShare()
+        switch await CommaDestination.send(text: shared, model: model, requestID: requestID, identity: identity) {
         case .started(let name): return .result(dialog: "Route to \(name) started on comma.")
         case .refused(let reason): return .result(dialog: "\(reason)")
         case .needsSearch(let resolved):
@@ -176,8 +189,8 @@ struct SendToStarPilotIntent: AppIntent, ForegroundContinuableIntent {
                 ShareInbox.shared.show(resolved, model: model)
             }
         case .unreachable:
-            ShareGroup.queue(shared)
-            return .result(dialog: "\(ShareInbox.saved)")
+            let saved = ShareGroup.queue(shared, identity: identity, requestID: requestID)
+            return .result(dialog: "\(saved ? ShareInbox.saved : "Connect to your comma, then share this place again.")")
         }
     }
 }

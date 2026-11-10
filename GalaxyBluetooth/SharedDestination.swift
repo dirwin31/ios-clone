@@ -1,6 +1,6 @@
 import Foundation
 
-/// A place shared from Google or Apple Maps: its coordinates when the shared text carries them, else words to search for.
+/// A place shared from Google Maps, Apple Maps or Waze.
 enum SharedDestination: Equatable {
     case place(name: String, latitude: Double, longitude: Double)
     case search(String)
@@ -18,7 +18,35 @@ enum SharedDestination: Equatable {
     }
 
     static func shortLink(in text: String) -> URL? {
-        first(#"https://(?:maps\.app\.goo\.gl|goo\.gl/maps)/[A-Za-z0-9_-]{1,64}"#, in: text).flatMap { URL(string: $0[0]) }
+        if let link = first(#"https://(?:maps\.app\.goo\.gl|goo\.gl/maps)/[A-Za-z0-9_-]{1,64}"#, in: text) {
+            return URL(string: link[0])
+        }
+        return wazeURL(in: text).flatMap { $0.scheme == "https" ? $0 : nil }
+    }
+
+    static func isWazeHost(_ host: String) -> Bool { ["waze.com", "www.waze.com", "waze.page.link"].contains(host) }
+
+    static func wazeURL(in text: String) -> URL? {
+        guard let raw = first(#"(?:https://|waze://)[^\s<>\"]+"#, in: text)?[0],
+              let url = URL(string: raw), url.user == nil, url.password == nil, url.port == nil,
+              url.scheme == "waze" || isWazeHost(url.host?.lowercased() ?? "") else { return nil }
+        return url
+    }
+
+    /// Never interpret Waze home/work favorites or opaque share tokens as an address.
+    static func wazeDestination(_ url: URL) -> SharedDestination? {
+        let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
+        let query = items.first { $0.name == "q" }?.value?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let ll = items.first(where: { $0.name == "ll" })?.value {
+            let parts = ll.split(separator: ",", omittingEmptySubsequences: false)
+            if parts.count == 2, let lat = Double(parts[0]), let lon = Double(parts[1]),
+               lat.isFinite, lon.isFinite, abs(lat) <= 90, abs(lon) <= 180 {
+                return .place(name: query?.isEmpty == false ? String(query!.prefix(120)) : "Shared destination", latitude: lat, longitude: lon)
+            }
+            return nil
+        }
+        if let query, !query.isEmpty { return .search(String(query.prefix(200))) }
+        return nil
     }
 
     static func isGoogleMapsHost(_ host: String) -> Bool {
@@ -28,10 +56,13 @@ enum SharedDestination: Equatable {
     /// Follows a Google Maps short link to the full link, which carries the coordinates. `next` gives a redirect's Location.
     static func resolve(_ text: String, next: (URL) async -> String?) async -> String {
         guard let short = shortLink(in: text) else { return text }
+        let waze = isWazeHost(short.host?.lowercased() ?? "")
         var current = short
         for _ in 0..<5 {
+            if waze, wazeDestination(current) != nil { break }
             guard let location = await next(current), let following = URL(string: location, relativeTo: current)?.absoluteURL,
-                  following.scheme == "https", let host = following.host?.lowercased(), isGoogleMapsHost(host),
+                  following.scheme == "https", following.user == nil, following.password == nil, following.port == nil,
+                  let host = following.host?.lowercased(), waze ? isWazeHost(host) : isGoogleMapsHost(host),
                   following.absoluteString.count <= maxText else { break }
             current = following
         }
@@ -40,6 +71,7 @@ enum SharedDestination: Equatable {
 
     /// Destination coordinates take precedence over a map's viewport (@lat,lng).
     static func parse(_ input: String) -> SharedDestination {
+        if let waze = wazeURL(in: input) { return wazeDestination(waze) ?? .search("") }
         var text = String(input.prefix(maxText)).trimmingCharacters(in: .whitespacesAndNewlines)
         text = (text.replacingOccurrences(of: "+", with: " ").removingPercentEncoding ?? text)
         let number = #"(-?\d+(?:\.\d+)?)"#
@@ -157,6 +189,18 @@ enum DestinationSender {
     /// comma reads the shared text itself (coordinates, else its geocoder). Older commas without `share` get the place parsed here.
     static func share(text: String, status: () async throws -> (Int, Data), action: ([String: Any]) async throws -> (Int, Data)) async -> Outcome {
         let text = capped(text)
+        if let waze = SharedDestination.wazeURL(in: text) {
+            guard let destination = SharedDestination.wazeDestination(waze) else {
+                return .refused("This Waze link does not include a destination we can read. Share the place's address or a link with coordinates instead.")
+            }
+            switch destination {
+            case .place:
+                // The existing coordinate endpoint also works on older comma software.
+                return await legacy(text: text, status: status, action: action)
+            case .search(let query):
+                return await share(text: query, status: status, action: action)
+            }
+        }
         do {
             var state = try checked(try await status())
             for _ in 0..<2 {

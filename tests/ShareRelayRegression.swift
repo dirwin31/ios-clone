@@ -7,6 +7,11 @@ import CryptoKit
         (body, HTTPURLResponse(url: request.url!, statusCode: code, httpVersion: "HTTP/1.1", headerFields: headers)!)
     }
     static func main() async {
+        let pending = ShareGroup.Pending(id: "share-one", text: "Place", date: Date(), identity: "comma-one")
+        precondition(pending.belongs(to: "comma-one"))
+        precondition(!pending.belongs(to: "comma-two") && !pending.belongs(to: nil))
+        let oldPending = ShareGroup.Pending(id: "old", text: "Place", date: Date(), identity: nil)
+        precondition(!oldPending.belongs(to: "comma-one"), "Legacy unbound destinations must not be delivered")
         precondition(ShareClient.lanEndpoint("192.168.10.85")?.absoluteString == "http://192.168.10.85:8082")
         precondition(ShareClient.lanEndpoint("http://10.0.0.2:8082/")?.absoluteString == "http://10.0.0.2:8082")
         precondition(ShareClient.lanEndpoint("8.8.8.8") == nil && ShareClient.lanEndpoint("192.168.1.010") == nil && ShareClient.lanEndpoint("127.0.0.1") == nil)
@@ -68,6 +73,10 @@ import CryptoKit
         var touched = false
         let none = ShareClient(load: { request, _ in touched = true; return reply(request, 500, Data()) })
         if case .unreachable = await none.send(text: "x", settings: .init(address: "10.0.0.2", identity: nil, mode: "bluetooth"), tunnel: .init(url: link, cookie: "t")) {} else { preconditionFailure() }
+        precondition(!touched)
+        let wrongTunnel = await none.send(text: "x", settings: .init(identity: "galaxy:wrong-device", mode: "automatic"),
+                                         tunnel: .init(url: link, cookie: "t"))
+        if case .refused = wrongTunnel {} else { preconditionFailure("Reject a tunnel for another comma") }
         precondition(!touched)
 
         // A tunnel redirect means its login expired.
