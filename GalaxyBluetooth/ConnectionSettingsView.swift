@@ -16,6 +16,7 @@ struct ConnectionSettingsView: View {
     @AppStorage(ShareGroup.sentryPreviewCameraKey, store: UserDefaults(suiteName: ShareGroup.id))
     private var sentryPreviewCamera = ShareGroup.SentryPreviewCamera.wide
     @ObservedObject private var tunnel: TunnelTransport
+    @ObservedObject var notifications: NotificationSharing
     let returningFromGalaxy: Bool
     let select: (CompanionTab) -> Void
     let submitReport: () -> Void
@@ -55,6 +56,7 @@ struct ConnectionSettingsView: View {
     @State private var showHotspotJoin = false
     @State private var showLocalQR = false
     @State private var localQRError = ""
+    @State private var showNotifications = false
 
     private var accent: Color { colorScheme == .dark ? Color(red: 0.68, green: 0.48, blue: 0.96) : Color(red: 0.45, green: 0.26, blue: 0.73) }
     private var background: Color { colorScheme == .dark ? Color(red: 0.035, green: 0.035, blue: 0.078) : Color(red: 0.93, green: 0.90, blue: 0.98) }
@@ -98,6 +100,7 @@ struct ConnectionSettingsView: View {
         bluetooth = model.bluetooth; lan = model.lan; assets = model.assets; server = model.server
         tunnel = model.tunnel
         discovery = model.discovery; location = model.phoneLocation; audio = model.audioPairing
+        notifications = model.notificationSharing
     }
 
     var body: some View {
@@ -168,6 +171,9 @@ struct ConnectionSettingsView: View {
             }
             .sheet(isPresented: $showTunnel) { TunnelSetupView(model: model) }
             .sheet(isPresented: $showLocalQR) { localQRScanner }
+            .sheet(isPresented: $showNotifications, onDismiss: { notifications.dismiss() }) {
+                NotificationSharingSheet(sharing: notifications, bluetoothConnected: bluetooth.connected) { showNotifications = false }
+            }
             .tint(accent)
             .alert("Join comma’s hotspot", isPresented: $showHotspotJoin) {
                 Button("OK", role: .cancel) {}
@@ -633,6 +639,10 @@ struct ConnectionSettingsView: View {
                     row("hifispeaker", title: "Music pairing", subtitle: pairing ? "Waiting for app pairing" : audio.summary) {
                         Button("Set up") { model.startAudioPairing() }.disabled(!connected || pairing).font(.caption).frame(minHeight: 44)
                     }
+                }
+                separator
+                row("bell.badge", title: "Phone notifications", subtitle: pairing ? "Waiting for app pairing" : notifications.summary(bluetoothConnected: bluetooth.connected)) {
+                    Button("Set up") { showNotifications = true }.disabled(pairing).font(.caption).frame(minHeight: 44)
                 }
                 separator
                 toggleRow("location", title: "Share phone location", subtitle: location.status.isEmpty ? "Optional" : location.status,
