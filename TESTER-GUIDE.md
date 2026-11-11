@@ -32,6 +32,18 @@ an update does not replace an open page. it takes effect when Galaxy next opens.
 
 download the screens over comma's Wi-Fi first, then reopen with phone Wi-Fi and cellular off and Bluetooth on. Galaxy should still load its saved screens. swift changes require a new app build.
 
+## phone notifications
+
+needs comma software with phone notifications (Galaxy shows StarPort → Phone notifications), the car parked or off, and the app connected over Bluetooth. Wi-Fi or Tunnel will not work for setup. starting setup while driving should say to park the car.
+
+1. in Settings, tap **Set up** on **Phone notifications**, then **Set up** in the sheet.
+2. when iOS asks, tap **Pair**, then allow **Share System Notifications**. note the exact wording iOS showed and whether it asked at all (it may skip the pairing request if music is already paired).
+3. confirm the sheet says notifications are shared. send yourself a message and check it appears on the car screen for a few seconds, then disappears. repeat with the app closed.
+4. in Galaxy → StarPort → Phone notifications, turn off an app and confirm its notifications stop.
+5. tap **Cancel** on the iOS pairing request once and confirm the app explains it and lets you try again. try again while comma's own pairing window is open and confirm it says comma is busy.
+
+to revoke, open iPhone **Settings → Bluetooth**, tap ⓘ next to comma and switch off **Share System Notifications**. forgetting comma there removes the pairing too, including music.
+
 ## feedback
 
 enable Developer Mode in Settings and use **Dev / Logs → Copy all reports** after a failure. include the connection mode, device versions, what you tried and any error you received. keep pairing codes and passwords out of screenshots.
