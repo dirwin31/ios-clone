@@ -1,4 +1,5 @@
 import Foundation
+import UserNotifications
 
 enum NotificationBondError: Error, Equatable {
     case unavailable, declined, timedOut, disconnected, staleBond, busy, failed
@@ -21,8 +22,12 @@ final class NotificationSharing: ObservableObject {
     static let updateMessage = "Update StarPilot on your comma to use phone notifications."
     static let bluetoothMessage = "Connect to comma over Bluetooth to set this up."
 
+    static let testTitle = "StarPilot test notification"
+    static let testType = "starpilotTest"
+
     var onEvent: ((String) -> Void)?
     @Published private(set) var phase: Phase = .idle
+    @Published private(set) var testStatus: String?
     private let transport: () -> (any GalaxyRequestTransport)?
     private let supported: () -> Bool
     private let bond: () async throws -> Void
@@ -72,6 +77,34 @@ final class NotificationSharing: ObservableObject {
     }
 
     func dismiss() { if active { cancel() } else { phase = .idle } }
+
+    /// Posts a local notification; iOS shares it with comma like any other, so it checks the whole path.
+    func sendTest() async {
+        let center = UNUserNotificationCenter.current()
+        let allowed: Bool
+        switch await center.notificationSettings().authorizationStatus {
+        case .authorized, .provisional, .ephemeral: allowed = true
+        case .notDetermined: allowed = (try? await center.requestAuthorization(options: [.alert])) ?? false
+        default: allowed = false
+        }
+        guard allowed else {
+            testStatus = "Allow notifications for this app in iPhone **Settings → Notifications** so it can send a test."
+            return
+        }
+        let content = UNMutableNotificationContent()
+        content.title = Self.testTitle
+        content.body = "If sharing works, this shows on your comma and car screen."
+        content.userInfo = ["type": Self.testType]
+        let request = UNNotificationRequest(identifier: "starpilot-test-" + UUID().uuidString, content: content,
+                                            trigger: UNTimeIntervalNotificationTrigger(timeInterval: 1, repeats: false))
+        do {
+            try await center.add(request)
+            onEvent?("Phone notifications test posted")
+            testStatus = "Test sent. Look at the top of the comma screen or car screen. If nothing shows within a few seconds, check that **Share System Notifications** is on for comma in **Settings → Bluetooth** and that **Show phone notifications** is on in Galaxy → Toggles → Phone."
+        } catch {
+            testStatus = "Couldn't send the test. Try again."
+        }
+    }
 
     private func run() async {
         guard let transport = transport(), transport.connected else { phase = .message(Self.bluetoothMessage); return }

@@ -24,11 +24,17 @@ struct NotificationSharingSheet: View {
                     .multilineTextAlignment(.center)
                 ProgressView()
             case .done:
-                Text("Notifications are shared with comma. To change this later, open **Settings → Bluetooth**, tap ⓘ next to your comma and switch **Share System Notifications**. Choose which apps appear in Galaxy → StarPort → Phone notifications.")
+                Text("Notifications are shared with comma. To change this later, open **Settings → Bluetooth**, tap ⓘ next to your comma and switch **Share System Notifications**. Choose which apps appear in Galaxy → Toggles → Phone.")
                     .multilineTextAlignment(.center)
             case .message(let text):
                 Text(LocalizedStringKey(text)).multilineTextAlignment(.center)
                 Button("Try again") { sharing.start() }.buttonStyle(.bordered).disabled(!bluetoothConnected)
+            }
+            if sharing.phase == .done || (sharing.phase == .idle && sharing.sharedWithThisComma) {
+                Button("Send test notification") { Task { await sharing.sendTest() } }.buttonStyle(.bordered)
+                if let status = sharing.testStatus {
+                    Text(LocalizedStringKey(status)).font(.callout).multilineTextAlignment(.center)
+                }
             }
             Button(sharing.phase == .done ? "Done" : "Close") { close() }.padding(.top, 6)
         }.padding(24).presentationDetents([.medium, .large])

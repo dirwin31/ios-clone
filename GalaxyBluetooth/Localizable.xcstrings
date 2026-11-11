@@ -4242,30 +4242,30 @@
         }
       }
     },
-    "Notifications are shared with comma. To change this later, open **Settings → Bluetooth**, tap ⓘ next to your comma and switch **Share System Notifications**. Choose which apps appear in Galaxy → StarPort → Phone notifications.": {
+    "Notifications are shared with comma. To change this later, open **Settings → Bluetooth**, tap ⓘ next to your comma and switch **Share System Notifications**. Choose which apps appear in Galaxy → Toggles → Phone.": {
       "localizations": {
         "es": {
           "stringUnit": {
             "state": "translated",
-            "value": "Las notificaciones se comparten con comma. Para cambiarlo más tarde, abre **Ajustes → Bluetooth**, toca ⓘ junto a tu comma y cambia **Compartir notificaciones del sistema**. Elige qué apps aparecen en Galaxy → StarPort → Phone notifications."
+            "value": "Las notificaciones se comparten con comma. Para cambiarlo más tarde, abre **Ajustes → Bluetooth**, toca ⓘ junto a tu comma y cambia **Compartir notificaciones del sistema**. Elige qué apps aparecen en Galaxy → Toggles → Phone."
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Les notifications sont partagées avec comma. Pour modifier ce choix, ouvrez **Réglages → Bluetooth**, touchez ⓘ à côté de votre comma et changez **Partager les notifications du système**. Choisissez les apps affichées dans Galaxy → StarPort → Phone notifications."
+            "value": "Les notifications sont partagées avec comma. Pour modifier ce choix, ouvrez **Réglages → Bluetooth**, touchez ⓘ à côté de votre comma et changez **Partager les notifications du système**. Choisissez les apps affichées dans Galaxy → Toggles → Phone."
           }
         },
         "ko": {
           "stringUnit": {
             "state": "translated",
-            "value": "알림이 comma와 공유됩니다. 나중에 변경하려면 **설정 → Bluetooth**를 열고 comma 옆의 ⓘ를 탭한 다음 **시스템 알림 공유**를 전환하세요. 표시할 앱은 Galaxy → StarPort → Phone notifications에서 선택하세요."
+            "value": "알림이 comma와 공유됩니다. 나중에 변경하려면 **설정 → Bluetooth**를 열고 comma 옆의 ⓘ를 탭한 다음 **시스템 알림 공유**를 전환하세요. 표시할 앱은 Galaxy → Toggles → Phone에서 선택하세요."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "通知已与 comma 共享。以后如需更改，请打开**设置 → 蓝牙**，轻点 comma 旁边的 ⓘ，然后切换**共享系统通知**。在 Galaxy → StarPort → Phone notifications 中选择要显示的 App。"
+            "value": "通知已与 comma 共享。以后如需更改，请打开**设置 → 蓝牙**，轻点 comma 旁边的 ⓘ，然后切换**共享系统通知**。在 Galaxy → Toggles → Phone 中选择要显示的 App。"
           }
         }
       }
