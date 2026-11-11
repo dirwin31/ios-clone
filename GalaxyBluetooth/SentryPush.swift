@@ -176,14 +176,3 @@ final class SentryAppDelegate: NSObject, UIApplicationDelegate, UNUserNotificati
         }
     }
 }
-
-struct SentrySettingsView: View {
-    @ObservedObject private var push = SentryPush.shared
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Toggle("Sentry phone alerts", isOn: Binding(get: { push.enabled }, set: { on in Task { await push.setEnabled(on) } }))
-            Text(push.status).font(.caption).foregroundStyle(.secondary)
-            if push.enabled && push.registered { Button("Send test to this iPhone") { Task { await push.test() } } }
-        }.padding(14)
-    }
-}

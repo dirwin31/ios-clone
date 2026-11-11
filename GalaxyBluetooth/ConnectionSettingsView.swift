@@ -12,6 +12,7 @@ struct ConnectionSettingsView: View {
     @ObservedObject var discovery: LANDiscovery
     @ObservedObject var location: PhoneLocation
     @ObservedObject var audio: AudioPairing
+    @ObservedObject private var sentry = SentryPush.shared
     let returningFromGalaxy: Bool
     let select: (CompanionTab) -> Void
     let submitReport: () -> Void
@@ -451,7 +452,11 @@ struct ConnectionSettingsView: View {
                 Toggle("Share phone location", isOn: Binding(get: { location.sharing }, set: { location.setSharing($0) })).labelsHidden()
             }
             separator
-            SentrySettingsView()
+            row("bell.badge", title: "Sentry phone alerts", subtitle: sentry.status) {
+                Toggle("Sentry phone alerts", isOn: Binding(get: { sentry.enabled }, set: { enabled in
+                    Task { await sentry.setEnabled(enabled) }
+                })).labelsHidden()
+            }
             separator
             row("rectangle.on.rectangle", title: "Galaxy screens", subtitle: pairing ? "Waiting for pairing" : checking ? "Checking version…" : assets.status == "Galaxy matches comma." ? "Up to date · just checked" : assets.status.contains("screens have changed") ? "Update available · connect over Wi-Fi or Tunnel" : assets.readyRoot != nil ? "Saved from your comma" : "Not downloaded · needs Local Wi-Fi or Tunnel") {
                 Button {
@@ -483,6 +488,14 @@ struct ConnectionSettingsView: View {
 
     private var advancedControls: some View {
         VStack(alignment: .leading, spacing: 12) {
+            if sentry.enabled && sentry.registered {
+                row("bell", title: "Test Sentry alerts", subtitle: sentry.status) {
+                    Button("Test") { Task { await sentry.test() } }
+                        .font(.system(size: 12)).frame(minHeight: 44)
+                        .accessibilityLabel("Send test to this iPhone")
+                }
+                Divider()
+            }
             Toggle("Hide background location indicator", isOn: Binding(get: { hideLocationIndicator }, set: { hideLocationIndicator = $0; location.setHideBackgroundIndicator($0) }))
             Text("Requires Always location access. iOS may still show the indicator with While Using access.")
                 .font(.system(size: 11)).foregroundStyle(muted)
