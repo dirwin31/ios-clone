@@ -171,7 +171,7 @@ enum CommaDestination {
 /// Siri and Shortcuts action: comma starts the route to a shared place; when comma is out of reach the place is saved for later.
 struct SendToStarPilotIntent: AppIntent, ForegroundContinuableIntent {
     static let title: LocalizedStringResource = "Send to StarPilot"
-    static let description = IntentDescription("Sets comma's destination to a place shared from Google Maps, Apple Maps or Waze and starts the route.")
+    static let description = IntentDescription("Starts a route on your comma using a shared map link.")
     static let openAppWhenRun = false
     @Parameter(title: "Place", description: "A shared Google Maps, Apple Maps or Waze place or link") var text: String
 
