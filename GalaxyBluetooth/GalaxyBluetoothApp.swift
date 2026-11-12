@@ -974,9 +974,8 @@ struct GalaxyRootView: View {
                 CompanionNavigationBar(tab: model.tab, developerMode: model.developerMode,
                     navigation: model.navigationServices.navigation, expanded: $appTabsExpanded,
                     compactIconOnly: true, statusModel: model, select: select)
-                    .padding(.horizontal, 14).padding(.vertical, 0)
-
-
+                    .padding(.horizontal, 14)
+                    .padding(.bottom, model.tab == .galaxy ? 8 : 0)
             }
         }
         .background {
