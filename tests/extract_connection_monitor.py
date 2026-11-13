@@ -32,11 +32,13 @@ enum ConnectionMode: String { case automatic, bluetooth, lan }
 @MainActor final class LAN {
     var endpoint: URL?
     var connected = false
+    var pairingIdentityMismatch = false
+    var probeDelay: UInt64 = 60_000_000_000
     var probes = 0
     func configure(address: String) throws { endpoint = URL(string: "http://\(address):8082") }
     func probe() async -> Bool {
         probes += 1
-        try? await Task.sleep(nanoseconds: 60_000_000_000)
+        try? await Task.sleep(nanoseconds: probeDelay)
         return false
     }
 }
@@ -70,6 +72,7 @@ enum ConnectionMode: String { case automatic, bluetooth, lan }
     var showAudioPairing = false
     var galaxyOpens = 0, galaxyChecks = 0, musicStarts = 0
     var selectingDiscoveredComma = false
+    var pairingResetNeeded = false
     var wantsConnection = true, pairingInProgress = false, openingGalaxy = false, offerAudioPairing = false
     var mode = ConnectionMode.automatic
     var pairingKey = "saved", address = "", connectionMessage = "", lastRoute = ""
@@ -114,6 +117,23 @@ tests = r'''
         saved.address = "192.168.1.20"
         saved.connect()
         precondition(saved.lan.endpoint != nil && !saved.discovery.searching)
+        let mismatch = MonitorProbe()
+        mismatch.lan.pairingIdentityMismatch = true
+        mismatch.lan.probeDelay = 0
+        mismatch.probeLocalConnection()
+        await mismatch.lanProbeTask?.value
+        precondition(mismatch.pairingResetNeeded, "A confirmed pairing mismatch must offer recovery")
+        let timeout = MonitorProbe()
+        timeout.lan.probeDelay = 0
+        timeout.probeLocalConnection()
+        await timeout.lanProbeTask?.value
+        precondition(!timeout.pairingResetNeeded, "An unsuccessful probe alone must not request a pairing reset")
+        let cancelled = MonitorProbe()
+        cancelled.lan.pairingIdentityMismatch = true
+        cancelled.probeLocalConnection()
+        cancelled.lanProbeTask?.cancel()
+        await cancelled.lanProbeTask?.value
+        precondition(!cancelled.pairingResetNeeded, "A cancelled probe must not request a pairing reset")
         let selecting = MonitorProbe()
         selecting.selectingDiscoveredComma = true
         let selectionMonitor = Task { await selecting.monitor() }
