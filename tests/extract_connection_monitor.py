@@ -169,4 +169,4 @@ tests = r'''
     }
 }
 '''
-Path(sys.argv[1]).write_text(stubs + '\n' + method('    private func resumeAutomaticTunnel()').replace('private func', 'func') + '\n' + method('    func connect()') + '\n' + method('    private func probeLocalConnection()') + '\n' + method('    func monitor() async') + tests)
+Path(sys.argv[1]).write_text(stubs + '\n' + method('    private func resumeAutomaticTunnel()').replace('private func', 'func') + '\n' + method('    func connect()') + '\n' + method('    private func probeLocalConnection()').replace('private func', 'func') + '\n' + method('    func monitor() async') + tests)
