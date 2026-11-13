@@ -26,6 +26,7 @@ import Foundation
     var requests: [URLRequest] = []
     var errorBody: Data?
     var legacyOnly = false
+    var redirect: String?
     var htmlEverywhere = false
     func load(_ request: URLRequest, _ limit: Int) async throws -> (Data, HTTPURLResponse) {
         requests.append(request)
@@ -36,7 +37,7 @@ import Foundation
             return (Data(("<html>private response " + String(repeating: "x", count: 2580)).utf8), HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: ["Content-Type":"text/html"])!)
         }
         let data = try JSONSerialization.data(withJSONObject: ["schemaVersion": 1, "monitor": "local", "instance": identity])
-        return (data, HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: [:])!)
+        return (data, HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: redirect.map { ["Location": $0] } ?? [:])!)
     }
 }
 @main struct TunnelRegression {
@@ -80,7 +81,19 @@ import Foundation
         _ = await tunnel.probe()
         server.status = 302
         do { _ = try await tunnel.request(path: "/api/settings/pages/hub", method: "GET", headers: [:], body: Data()); preconditionFailure() } catch is URLError {}
-        precondition(!tunnel.connected)
+        precondition(!tunnel.connected && !tunnel.loginRequired)
+        server.redirect = "https://other.example/login"
+        _ = await tunnel.probe()
+        precondition(!tunnel.loginRequired)
+        server.redirect = "/abcdefghijklmnop/login"
+        _ = await tunnel.probe()
+        precondition(tunnel.loginRequired)
+        server.status = 200
+        _ = await tunnel.probe()
+        precondition(tunnel.connected && !tunnel.loginRequired)
+        server.status = 401
+        _ = await tunnel.probe()
+        precondition(tunnel.loginRequired)
         for cookie in ["bad\r\nCookie:x", "bad;other=x", ""] {
             do { try tunnel.configure(TunnelCredential(url: url, cookie: cookie, deviceID: "")); preconditionFailure() } catch {}
         }

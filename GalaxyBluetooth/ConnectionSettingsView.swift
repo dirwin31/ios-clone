@@ -45,7 +45,7 @@ struct ConnectionSettingsView: View {
         (model.mode == .bluetooth && (Data(hex: model.pairingKey)?.count != 32 || !bluetooth.hasSavedDevice))
             || (model.mode != .lan && bluetooth.pairingRecoveryNeeded)
     }
-    private var needsTunnelLogin: Bool { model.mode != .bluetooth && tunnel.loginRequired }
+    private var needsTunnelLogin: Bool { model.mode == .automatic && tunnel.loginRequired }
     private var needsRecoveryAction: Bool { model.pairingResetNeeded || needsTunnelLogin }
     private var connecting: Bool { !connected && (bluetooth.connecting || bluetooth.isScanning) }
     private var primaryTitle: String {
@@ -63,12 +63,7 @@ struct ConnectionSettingsView: View {
         return "Connect"
     }
     private var connectionCandidates: [DiscoveredComma] {
-        var devices = discovery.devices
-        if let host = try? LANTransport.endpoint(model.address).host,
-           !devices.contains(where: { $0.address == host }) {
-            devices.append(DiscoveredComma(id: "manual-" + host, name: "Comma", address: host))
-        }
-        return devices
+        discovery.devices.count > 1 ? discovery.devices : []
     }
 
     private var checking: Bool { model.matchingGalaxy || assets.checking }
@@ -155,7 +150,7 @@ struct ConnectionSettingsView: View {
                     model.resetPairingForReconnect()
                 }
             } message: {
-                Text("Removes this app’s saved Bluetooth pairing, comma identity, local address and Tunnel login. Keep your phone and comma on the same Wi-Fi. Select your comma from the search results, then set up Bluetooth and Tunnel again.")
+                Text("Removes this app’s saved Bluetooth pairing, comma identity, local address and Tunnel login. Keep your phone and comma on the same Wi-Fi to reconnect, then set up Bluetooth and Tunnel again.")
             }
     }
 
@@ -318,10 +313,10 @@ struct ConnectionSettingsView: View {
                 }
                 Text(model.hasLANPairingSetup
                      ? "1. Keep comma on and nearby.\n2. Join the same Wi-Fi as comma, or comma’s hotspot.\n3. Tap the button below. This app opens pairing on comma automatically, then connects over Bluetooth."
-                     : "1. Join the same Wi-Fi as comma, or comma’s hotspot.\n2. Tap below and select your comma.\n3. Once Local Wi-Fi connects, select Bluetooth here to finish setup.")
+                     : "Join the same Wi-Fi as comma, or comma’s hotspot. The app checks the comma it finds automatically. Once Local Wi-Fi connects, choose Bluetooth to finish setup.")
                     .font(.caption).foregroundStyle(muted).multilineTextAlignment(.center)
             }
-            if !model.pairingResetNeeded && model.mode != .bluetooth && !connected && !pairing && (discovery.searching || !connectionCandidates.isEmpty) {
+            if model.mode != .bluetooth && !connected && !pairing && (discovery.searching || !discovery.devices.isEmpty) {
                 discoveredCommas
             }
             Button {
@@ -366,7 +361,7 @@ struct ConnectionSettingsView: View {
                     .font(.system(size: 11)).foregroundStyle(accent).frame(minHeight: 30)
             }
             if !connected && !pairing && model.pairingResetNeeded {
-                Text("The comma you selected has a different pairing identity. Confirm it is your comma before resetting.")
+                Text("The comma found on Wi-Fi has a different pairing identity. Confirm it is yours before resetting.")
                     .font(.caption2).foregroundStyle(muted).multilineTextAlignment(.center)
             }
             if !pairing && !connecting && !connected {
@@ -402,6 +397,10 @@ struct ConnectionSettingsView: View {
 
     private var discoveredCommas: some View {
         VStack(spacing: 8) {
+            if discovery.devices.count == 1, let device = discovery.devices.first {
+                Text("\(device.name) · \(device.address)")
+                    .font(.caption).foregroundStyle(muted)
+            }
             ForEach(connectionCandidates) { device in
                 Button {
                     connectingCommaID = device.id
@@ -452,7 +451,7 @@ struct ConnectionSettingsView: View {
             }
             HStack(spacing: 8) {
                 if discovery.searching { ProgressView().controlSize(.mini).tint(accent) }
-                Text(discovery.searching ? "Finding comma on Local Wi-Fi…" : "Select your comma")
+                Text(connectionCandidates.isEmpty ? discovery.status : "Select your comma")
                     .font(.system(size: 11)).foregroundStyle(muted)
                 Spacer()
                 Button(discovery.searching ? "Stop" : "Search again") {

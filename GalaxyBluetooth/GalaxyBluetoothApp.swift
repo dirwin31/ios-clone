@@ -474,6 +474,7 @@ final class AppModel: ObservableObject {
                 self.automaticLAN?.cancel(); self.lanProbeTask?.cancel()
                 self.firstConnection?.cancel(); self.firstConnection = nil
                 self.initialDiscoveryStarted = false
+                self.pairingResetNeeded = false
                 self.discovery.networkChanged()
                 self.triedLANAddresses.removeAll()
                 self.lastLANDiscovery = .distantPast
@@ -652,12 +653,15 @@ final class AppModel: ObservableObject {
         pairingFailure = ""
         pairingResetNeeded = false
         mode = .lan
-        connectionMessage = "Select your comma below. After Local Wi-Fi connects, choose Bluetooth to set up pairing again."
+        wantsConnection = true
+        initialDiscoveryStarted = true
+        connectionMessage = "Looking for your comma. After Local Wi-Fi connects, choose Bluetooth to set up pairing again."
         discovery.start()
-        connectionLog.record("User reset app pairing; searching Local Wi-Fi for explicit comma selection")
+        connectionLog.record("User reset app pairing; searching Local Wi-Fi")
     }
     func selectDiscoveredComma(_ device: DiscoveredComma, userSelected: Bool = true) async -> Bool {
         guard !selectingDiscoveredComma, mode != .bluetooth else { return false }
+        if userSelected { pairingResetNeeded = false }
         selectingDiscoveredComma = true
         automaticLAN?.cancel()
         lanProbeTask?.cancel()
@@ -818,13 +822,24 @@ final class AppModel: ObservableObject {
                     && !self.pairingInProgress && !self.selectingDiscoveredComma && !self.lan.connected
                     && self.lan.generation == generation && self.lan.expectedDeviceID == identity
             }
+            var mismatchedAddress: String?
             let address = await LANDiscoveryMatch.first(addresses: addresses, expectedDeviceID: identity, stillCurrent: stillCurrent) { address, identity in
                 let candidate = LANTransport()
                 candidate.bind(to: identity)
                 guard (try? candidate.configure(address: address)) != nil else { return false }
-                return await candidate.probe()
+                let verified = await candidate.probe()
+                if candidate.pairingIdentityMismatch { mismatchedAddress = address }
+                return verified
             }
-            guard let address, !Task.isCancelled, stillCurrent() else { return }
+            guard !Task.isCancelled, stillCurrent() else { return }
+            guard let address else {
+                if let mismatchedAddress, self.discovery.devices.count == 1,
+                   self.discovery.devices.first?.address == mismatchedAddress {
+                    self.pairingResetNeeded = true
+                }
+                return
+            }
+            self.pairingResetNeeded = false
             do { try self.lan.configure(address: address) } catch { return }
             self.address = address
             UserDefaults.standard.set(address, forKey: "galaxy.lan.address")
@@ -846,9 +861,6 @@ final class AppModel: ObservableObject {
                 catch { self.connectionMessage = error.localizedDescription }
             }
             _ = await self.lan.probe()
-            if !Task.isCancelled && self.lan.pairingIdentityMismatch {
-                self.pairingResetNeeded = true
-            }
             if !Task.isCancelled, self.lan.connected { self.discovery.stop() }
         }
     }

@@ -63,10 +63,12 @@ enum Mode { case automatic, bluetooth, lan }
 struct Model {
     var mode = Mode.bluetooth
     var pairingKey = String(repeating: "a", count: 64)
-    var opened = false, hasLANPairingSetup = false
+    var opened = false, hasLANPairingSetup = false, pairingResetNeeded = false
     var pairingFailure = ""
 }
+struct TunnelProbe { var loginRequired = false }
 struct SettingsProbe {
+    var tunnel = TunnelProbe()
     var model = Model()
     let bluetooth = Probe()
     var pairing = false, connected = false, connecting = false
@@ -103,7 +105,7 @@ struct SettingsProbe {
         precondition(noDevice.scans == 0 && noDevice.status.contains("No saved"))
         var settings = SettingsProbe()
         precondition(settings.needsPairing, "A saved key without a peripheral must offer pairing, not a dead-end Connect button")
-        precondition(settings.primaryTitle == "Connect over Local Wi-Fi first")
+        precondition(settings.primaryTitle == "Find comma on Local Wi-Fi")
         settings.model.hasLANPairingSetup = true
         precondition(settings.primaryTitle == "Set up Bluetooth")
         settings.model.pairingFailure = "Setup failed"
@@ -128,7 +130,7 @@ struct SettingsProbe {
         precondition(settings.bluetooth.central.lookups == 0 && settings.bluetooth.scans == 0,
                      "Recovery must pause automatic retries so the action remains usable")
         settings.model.hasLANPairingSetup = false
-        precondition(settings.primaryTitle == "Connect over Local Wi-Fi first")
+        precondition(settings.primaryTitle == "Find comma on Local Wi-Fi")
         settings.model.hasLANPairingSetup = true
         settings.bluetooth.retrySavedPairing()
         precondition(!settings.needsPairing && settings.primaryTitle == "Reconnect Bluetooth")
@@ -152,6 +154,12 @@ struct SettingsProbe {
         }
         UserDefaults.standard.saved = saved.uuidString
         let off = Probe(); off.central.state = .off; off.reconnectSaved(pairingKey: key)
+        settings.tunnel.loginRequired = true
+        precondition(settings.primaryTitle == "Sign in to Tunnel again")
+        settings.model.mode = .lan
+        precondition(settings.primaryTitle != "Sign in to Tunnel again")
+        settings.model.pairingResetNeeded = true
+        precondition(settings.primaryTitle == "Reset pairing and reconnect")
         precondition(off.scans == 0 && off.central.lookups == 0)
         print("Bluetooth reconnect: cached device, targeted scan recovery, unrelated-device rejection, missing setup and powered-off guards passed")
     }

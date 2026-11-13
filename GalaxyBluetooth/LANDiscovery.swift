@@ -70,7 +70,7 @@ final class LANDiscovery: NSObject, ObservableObject, @preconcurrency NetService
             self.stop(reason: "search deadline")
             self.status = self.devices.isEmpty
                 ? "No comma found. Use the same Wi-Fi, allow Local Network access, and update comma for discovery. You can still enter its IP."
-                : "Select your comma below."
+                : (self.devices.count == 1 ? "Found one comma on Local Wi-Fi." : "Select your comma below.")
             self.onEvent?("Local Wi-Fi discovery finished: \(self.devices.count) result(s)")
         }
     }
@@ -87,7 +87,7 @@ final class LANDiscovery: NSObject, ObservableObject, @preconcurrency NetService
         for service in services.values { service.delegate = nil; service.stop() }
         services.removeAll()
         retriedServices.removeAll()
-        if searching { status = devices.isEmpty ? "Search stopped." : "Select your comma below." }
+        if searching { status = devices.isEmpty ? "Search stopped." : (devices.count == 1 ? "Found one comma on Local Wi-Fi." : "Select your comma below.") }
         searching = false
     }
 
@@ -169,7 +169,7 @@ final class LANDiscovery: NSObject, ObservableObject, @preconcurrency NetService
         devices.removeAll { $0.id == device.id }
         devices.append(device)
         devices.sort { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
-        status = "Found \(devices.count) comma device(s). Select one below."
+        status = devices.count == 1 ? "Found one comma on Local Wi-Fi." : "Found \(devices.count) comma devices. Select yours below."
         onEvent?("Local Wi-Fi discovery found Galaxy at \(address):8082")
         onDevicesChanged?()
     }

@@ -220,7 +220,7 @@ final class LANTransport: ObservableObject, GalaxyRequestTransport {
             else {
                 pairingIdentityMismatch = expectedDeviceID?.hasPrefix("galaxy:") == true && persistent != nil && persistent != expectedDeviceID
                 status = pairingIdentityMismatch
-                    ? "This comma has a different pairing identity. If it is your comma, choose Reset pairing and reconnect in Settings."
+                    ? "This address belongs to a different pairing identity. Select your comma in Settings to verify it."
                     : "Couldn’t verify the saved comma. Reconnect Bluetooth to confirm its identity."
                 onEvent?("Comma identity mismatch: saved=\(expectedDeviceID ?? "none"); received=\(identity ?? "none"). A legacy runtime pin needs Bluetooth verification or explicit local-only selection after a restart.")
             }
@@ -572,6 +572,16 @@ final class TunnelTransport: ObservableObject, GalaxyRequestTransport {
     }
     func invalidate(_ reason: String) { connected = false; generation = UUID().uuidString; status = reason; onEvent?(reason) }
     func forget() { credential = nil; loginRequired = false; invalidate("Not configured") }
+    private static func requiresLogin(_ response: HTTPURLResponse) -> Bool {
+        if response.statusCode == 401 { return true }
+        guard [301, 302, 303, 307, 308].contains(response.statusCode),
+              let source = response.url,
+              let location = response.value(forHTTPHeaderField: "Location"),
+              let target = URL(string: location, relativeTo: source)?.absoluteURL,
+              target.scheme == "https", target.host == source.host, target.port == source.port,
+              let slug = source.pathComponents.dropFirst().first else { return false }
+        return ["/login", "/\(slug)/login"].contains(target.path)
+    }
     func probe() async -> Bool {
         guard let credential else { return false }
         let original = generation
@@ -633,12 +643,12 @@ final class TunnelTransport: ObservableObject, GalaxyRequestTransport {
                   (LANTransport.matches(expectedDeviceID, runtime: runtime, persistent: persistent)
                    || (expectedDeviceID == credential.deviceID && !credential.deviceID.isEmpty && !credential.deviceID.hasPrefix("galaxy:"))) else {
                 let reason: String
-                if response.statusCode == 401 || (300..<400).contains(response.statusCode) {
+                if Self.requiresLogin(response) {
                     loginRequired = true
                     reason = "Sign in to Tunnel again"
                 }
                 else if response.statusCode != 200 { reason = "Tunnel server returned HTTP \(response.statusCode)" }
-                else if runtime == nil { reason = "Tunnel returned \(LANTransport.runtimeDiagnostic(data)). Sign in to Tunnel again." }
+                else if runtime == nil { reason = "Tunnel returned \(LANTransport.runtimeDiagnostic(data))." }
                 else { reason = "Tunnel identity does not match the saved comma" }
                 lastProbeDetail += "; rejected: " + reason
                 invalidate(reason)
@@ -718,10 +728,14 @@ final class TunnelTransport: ObservableObject, GalaxyRequestTransport {
     private func perform(path: String, method: String, headers: [String: String], body: Data) async throws -> BridgeResponse {
         guard connected else { throw URLError(.notConnectedToInternet) }
         let (data, response) = try await send(path: path, method: method, headers: headers, body: body, limit: 8 * Wire.maxBody)
-        if response.statusCode == 401 || (300..<400).contains(response.statusCode) {
+        if Self.requiresLogin(response) {
             loginRequired = true
             invalidate("Sign in to Tunnel again")
             throw URLError(.userAuthenticationRequired)
+        }
+        if (300..<400).contains(response.statusCode) {
+            invalidate("Unexpected Tunnel response (HTTP \(response.statusCode))")
+            throw URLError(.badServerResponse)
         }
         var filtered: [String: String] = [:]
         for (key, value) in response.allHeaderFields {

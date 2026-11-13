@@ -122,7 +122,7 @@ tests = r'''
         mismatch.lan.probeDelay = 0
         mismatch.probeLocalConnection()
         await mismatch.lanProbeTask?.value
-        precondition(mismatch.pairingResetNeeded, "A confirmed pairing mismatch must offer recovery")
+        precondition(!mismatch.pairingResetNeeded, "A background probe of a reused IP must never request a reset")
         let timeout = MonitorProbe()
         timeout.lan.probeDelay = 0
         timeout.probeLocalConnection()
