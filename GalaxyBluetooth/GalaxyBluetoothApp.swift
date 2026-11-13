@@ -296,6 +296,7 @@ final class AppModel: ObservableObject {
     @Published var showConnections = false
     @Published var pairingInProgress = false
     @Published var pairingFailure = ""
+    @Published private(set) var pairingResetNeeded = false
     @Published var showBluetoothPermission = false
     @Published var opened = false
     @Published var connectionMessage = "Choose a connection, or use Automatic to follow your connection priority."
@@ -597,6 +598,7 @@ final class AppModel: ObservableObject {
         }
     }
     func openIfReady() {
+        if transport.connected { pairingResetNeeded = false }
         guard wantsConnection, !pairingInProgress, !offerAudioPairing, !showAudioPairing, transport.connected, !opened, !openingGalaxy else { return }
         openingGalaxy = true
         Task { @MainActor in
@@ -635,6 +637,25 @@ final class AppModel: ObservableObject {
         bluetooth.disconnect(reason: "User selected Disconnect"); lan.invalidate(reason: "User selected Disconnect")
         connectionMessage = "Disconnected."
     }
+    func resetPairingForReconnect() {
+        cancelPairing()
+        disconnect()
+        bluetooth.forgetSavedDevice()
+        PairingKeyStore.remove()
+        pairingKey = ""
+        lan.bind(to: nil)
+        UserDefaults.standard.removeObject(forKey: "galaxy.comma.identity")
+        forgetTunnel()
+        address = ""
+        lan.clearEndpoint()
+        UserDefaults.standard.removeObject(forKey: "galaxy.lan.address")
+        pairingFailure = ""
+        pairingResetNeeded = false
+        mode = .lan
+        connectionMessage = "Select your comma below. After Local Wi-Fi connects, choose Bluetooth to set up pairing again."
+        discovery.start()
+        connectionLog.record("User reset app pairing; searching Local Wi-Fi for explicit comma selection")
+    }
     func selectDiscoveredComma(_ device: DiscoveredComma, userSelected: Bool = true) async -> Bool {
         guard !selectingDiscoveredComma, mode != .bluetooth else { return false }
         selectingDiscoveredComma = true
@@ -658,6 +679,10 @@ final class AppModel: ObservableObject {
         do {
             try candidate.configure(address: device.address)
             guard await candidate.probe() else {
+                if userSelected && candidate.pairingIdentityMismatch && !Task.isCancelled
+                    && lan.generation == originalGeneration && mode == originalMode {
+                    pairingResetNeeded = true
+                }
                 connectionMessage = "Couldn’t connect to \(device.address): \(candidate.status)"
                 connectionLog.record("Selected comma \(device.address) rejected: \(candidate.status)")
                 return false
@@ -667,6 +692,7 @@ final class AppModel: ObservableObject {
                 return false
             }
             lan.bind(to: candidate.verifiedDeviceID)
+            pairingResetNeeded = false
             UserDefaults.standard.set(candidate.verifiedDeviceID, forKey: "galaxy.comma.identity")
             address = device.address
             connect()
@@ -820,6 +846,9 @@ final class AppModel: ObservableObject {
                 catch { self.connectionMessage = error.localizedDescription }
             }
             _ = await self.lan.probe()
+            if !Task.isCancelled && self.lan.pairingIdentityMismatch {
+                self.pairingResetNeeded = true
+            }
             if !Task.isCancelled, self.lan.connected { self.discovery.stop() }
         }
     }

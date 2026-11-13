@@ -13,6 +13,7 @@ struct ConnectionSettingsView: View {
     @ObservedObject var location: PhoneLocation
     @ObservedObject var audio: AudioPairing
     @ObservedObject private var sentry = SentryPush.shared
+    @ObservedObject private var tunnel: TunnelTransport
     let returningFromGalaxy: Bool
     let select: (CompanionTab) -> Void
     let submitReport: () -> Void
@@ -26,6 +27,7 @@ struct ConnectionSettingsView: View {
     @State private var showTunnel = false
     @State private var advanced = false
     @State private var confirmForget = false
+    @State private var confirmPairingReset = false
     @State private var confirmNavigationAlpha = false
     @State private var showPairingHelp = false
     @State private var checked = false
@@ -40,15 +42,20 @@ struct ConnectionSettingsView: View {
     private var connected: Bool { model.transport.connected }
     private var pairing: Bool { model.pairingInProgress }
     private var needsPairing: Bool {
-        model.mode == .bluetooth && (Data(hex: model.pairingKey)?.count != 32 || !bluetooth.hasSavedDevice || bluetooth.pairingRecoveryNeeded)
+        (model.mode == .bluetooth && (Data(hex: model.pairingKey)?.count != 32 || !bluetooth.hasSavedDevice))
+            || (model.mode != .lan && bluetooth.pairingRecoveryNeeded)
     }
+    private var needsTunnelLogin: Bool { model.mode != .bluetooth && tunnel.loginRequired }
+    private var needsRecoveryAction: Bool { model.pairingResetNeeded || needsTunnelLogin }
     private var connecting: Bool { !connected && (bluetooth.connecting || bluetooth.isScanning) }
     private var primaryTitle: String {
         if pairing { return "Pairing…" }
         if connected { return model.opened ? "Open Galaxy" : "Preparing Galaxy…" }
+        if model.pairingResetNeeded { return "Reset pairing and reconnect" }
+        if needsTunnelLogin { return "Sign in to Tunnel again" }
         if connecting { return bluetooth.isScanning ? "Finding comma…" : "Connecting…" }
         if needsPairing {
-            if !model.hasLANPairingSetup { return "Connect over Local Wi-Fi first" }
+            if !model.hasLANPairingSetup { return "Find comma on Local Wi-Fi" }
             if bluetooth.pairingRecoveryNeeded { return "Pair Bluetooth again" }
             return model.pairingFailure.isEmpty ? "Set up Bluetooth" : "Retry Bluetooth setup"
         }
@@ -71,6 +78,7 @@ struct ConnectionSettingsView: View {
         self.model = model; self.returningFromGalaxy = returningFromGalaxy; self.select = select
         self.submitReport = submitReport
         bluetooth = model.bluetooth; lan = model.lan; assets = model.assets; server = model.server
+        tunnel = model.tunnel
         discovery = model.discovery; location = model.phoneLocation; audio = model.audioPairing
     }
 
@@ -141,6 +149,14 @@ struct ConnectionSettingsView: View {
                     lan.bind(to: nil); UserDefaults.standard.removeObject(forKey: "galaxy.comma.identity")
                 }
             } message: { Text("This removes the saved app pairing. Pair your phone again to reconnect.") }
+            .confirmationDialog("Reset app pairing and reconnect?", isPresented: $confirmPairingReset, titleVisibility: .visible) {
+                Button("Reset pairing and find comma", role: .destructive) {
+                    openAfterReconnect = false
+                    model.resetPairingForReconnect()
+                }
+            } message: {
+                Text("Removes this app’s saved Bluetooth pairing, comma identity, local address and Tunnel login. Keep your phone and comma on the same Wi-Fi. Select your comma from the search results, then set up Bluetooth and Tunnel again.")
+            }
     }
 
     private func settingsPage(wide: Bool) -> AnyView {
@@ -305,14 +321,16 @@ struct ConnectionSettingsView: View {
                      : "1. Join the same Wi-Fi as comma, or comma’s hotspot.\n2. Tap below and select your comma.\n3. Once Local Wi-Fi connects, select Bluetooth here to finish setup.")
                     .font(.caption).foregroundStyle(muted).multilineTextAlignment(.center)
             }
-            if model.mode != .bluetooth && !connected && !pairing && (discovery.searching || !connectionCandidates.isEmpty) {
+            if !model.pairingResetNeeded && model.mode != .bluetooth && !connected && !pairing && (discovery.searching || !connectionCandidates.isEmpty) {
                 discoveredCommas
-            } else {
+            }
             Button {
                 if connected && model.opened { select(.galaxy) }
+                else if model.pairingResetNeeded { confirmPairingReset = true }
+                else if needsTunnelLogin { showTunnel = true }
                 else if needsPairing {
                     if model.hasLANPairingSetup { model.pairWithComma() }
-                    else { model.mode = .automatic; model.connect() }
+                    else { model.mode = .lan; model.connect(); discovery.start() }
                 }
                 else {
                     openAfterReconnect = true
@@ -322,15 +340,14 @@ struct ConnectionSettingsView: View {
             } label: {
                 HStack(spacing: 7) {
                     if pairing { PairingSignal() }
-                    else if connecting || (connected && !model.opened) { ProgressView().controlSize(.small) }
+                    else if (connecting && !needsRecoveryAction) || (connected && !model.opened) { ProgressView().controlSize(.small) }
                     Text(LocalizedStringKey(pairing ? model.connectionMessage : primaryTitle))
                         .lineLimit(2).minimumScaleFactor(0.85).multilineTextAlignment(.center)
                 }.font(.system(size: 12, weight: .medium)).padding(.horizontal, 18)
                     .frame(maxWidth: .infinity, minHeight: 44)
                     .background(LinearGradient(colors: [Color(red: 0.73, green: 0.55, blue: 1), accent], startPoint: .leading, endPoint: .trailing), in: Capsule())
                     .foregroundStyle(Color(red: 0.12, green: 0.06, blue: 0.19))
-            }.buttonStyle(.plain).disabled(pairing || connecting || (connected && !model.opened))
-            }
+            }.buttonStyle(.plain).disabled(pairing || (connecting && !needsRecoveryAction) || (connected && !model.opened))
             if bluetooth.pairingRecoveryNeeded && model.mode == .bluetooth && !pairing && !connecting && !connected {
                 Button("Try saved pairing once more") {
                     bluetooth.retrySavedPairing()
@@ -347,6 +364,10 @@ struct ConnectionSettingsView: View {
             if !pairing && (!model.pairingFailure.isEmpty || (bluetooth.connectionFailed && model.mode != .lan)) {
                 Button("Bluetooth connection help") { showPairingHelp = true }
                     .font(.system(size: 11)).foregroundStyle(accent).frame(minHeight: 30)
+            }
+            if !connected && !pairing && model.pairingResetNeeded {
+                Text("The comma you selected has a different pairing identity. Confirm it is your comma before resetting.")
+                    .font(.caption2).foregroundStyle(muted).multilineTextAlignment(.center)
             }
             if !pairing && !connecting && !connected {
                 VStack(spacing: 4) {

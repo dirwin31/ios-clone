@@ -155,6 +155,7 @@ final class LANTransport: ObservableObject, GalaxyRequestTransport {
         guard let expected else { return true }
         return expected.hasPrefix("galaxy:") ? expected == persistent : expected == runtime
     }
+    private(set) var pairingIdentityMismatch = false
     func bind(to identity: String?) {
         if expectedDeviceID != identity { expectedDeviceID = identity; invalidate(reason: "Paired comma identity changed") }
     }
@@ -166,6 +167,7 @@ final class LANTransport: ObservableObject, GalaxyRequestTransport {
     }
     func probe() async -> Bool {
         guard endpoint != nil else { return false }
+        pairingIdentityMismatch = false
         let expectedGeneration = generation
         probeNumber += 1
         let attempt = probeNumber, started = ProcessInfo.processInfo.systemUptime
@@ -216,7 +218,10 @@ final class LANTransport: ObservableObject, GalaxyRequestTransport {
                 onEvent?("Comma identity verification unavailable: stable identity missing; saved identity preserved")
             }
             else {
-                status = "Couldn’t verify the saved comma. Reconnect Bluetooth or select your comma again."
+                pairingIdentityMismatch = expectedDeviceID?.hasPrefix("galaxy:") == true && persistent != nil && persistent != expectedDeviceID
+                status = pairingIdentityMismatch
+                    ? "This comma has a different pairing identity. If it is your comma, choose Reset pairing and reconnect in Settings."
+                    : "Couldn’t verify the saved comma. Reconnect Bluetooth to confirm its identity."
                 onEvent?("Comma identity mismatch: saved=\(expectedDeviceID ?? "none"); received=\(identity ?? "none"). A legacy runtime pin needs Bluetooth verification or explicit local-only selection after a restart.")
             }
             if changed || !available { onEvent?(available ? "LAN probe succeeded; comma identity verified" : "LAN probe rejected: " + status) }
@@ -520,6 +525,7 @@ enum TunnelKeyStore {
 
 @MainActor
 final class TunnelTransport: ObservableObject, GalaxyRequestTransport {
+    @Published private(set) var loginRequired = false
     @Published private(set) var connected = false
     @Published private(set) var status = "Not configured"
     private(set) var generation = UUID().uuidString
@@ -561,10 +567,11 @@ final class TunnelTransport: ObservableObject, GalaxyRequestTransport {
               value.cookie.utf8.allSatisfy({ $0 > 32 && $0 < 127 && $0 != 59 }) else {
             throw BridgeError.message("Invalid Galaxy tunnel login.")
         }
+        loginRequired = false
         credential = value; invalidate("Tunnel configured")
     }
     func invalidate(_ reason: String) { connected = false; generation = UUID().uuidString; status = reason; onEvent?(reason) }
-    func forget() { credential = nil; invalidate("Not configured") }
+    func forget() { credential = nil; loginRequired = false; invalidate("Not configured") }
     func probe() async -> Bool {
         guard let credential else { return false }
         let original = generation
@@ -626,7 +633,10 @@ final class TunnelTransport: ObservableObject, GalaxyRequestTransport {
                   (LANTransport.matches(expectedDeviceID, runtime: runtime, persistent: persistent)
                    || (expectedDeviceID == credential.deviceID && !credential.deviceID.isEmpty && !credential.deviceID.hasPrefix("galaxy:"))) else {
                 let reason: String
-                if response.statusCode == 401 || (300..<400).contains(response.statusCode) { reason = "Sign in to Tunnel again" }
+                if response.statusCode == 401 || (300..<400).contains(response.statusCode) {
+                    loginRequired = true
+                    reason = "Sign in to Tunnel again"
+                }
                 else if response.statusCode != 200 { reason = "Tunnel server returned HTTP \(response.statusCode)" }
                 else if runtime == nil { reason = "Tunnel returned \(LANTransport.runtimeDiagnostic(data)). Sign in to Tunnel again." }
                 else { reason = "Tunnel identity does not match the saved comma" }
@@ -637,6 +647,7 @@ final class TunnelTransport: ObservableObject, GalaxyRequestTransport {
             runtimePath = path
             self.credential = TunnelCredential(url: credential.url, cookie: credential.cookie, deviceID: persistent)
             expectedDeviceID = persistent
+            loginRequired = false
             connected = true; status = "Tunnel verified"
             return true
         } catch {
@@ -708,6 +719,7 @@ final class TunnelTransport: ObservableObject, GalaxyRequestTransport {
         guard connected else { throw URLError(.notConnectedToInternet) }
         let (data, response) = try await send(path: path, method: method, headers: headers, body: body, limit: 8 * Wire.maxBody)
         if response.statusCode == 401 || (300..<400).contains(response.statusCode) {
+            loginRequired = true
             invalidate("Sign in to Tunnel again")
             throw URLError(.userAuthenticationRequired)
         }
