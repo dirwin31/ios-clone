@@ -7,7 +7,7 @@ final class SentryPush: ObservableObject {
     static let shared = SentryPush()
     @Published private(set) var enabled: Bool
     @Published private(set) var registered = false
-    @Published private(set) var status = "Enable phone alerts to set up notifications automatically."
+    @Published private(set) var status = "Phone alerts off"
     @Published var openEvents = false
     private var token = ""
     private var busy = false
@@ -26,6 +26,7 @@ final class SentryPush: ObservableObject {
         self.environment = environment
         self.now = now
         enabled = defaults.bool(forKey: "galaxy.sentry.enabled")
+        if enabled { status = "Waiting for registration" }
     }
     private var identity: String { defaults.string(forKey: "galaxy.comma.identity") ?? "" }
     private var subscribed: [String: String] {

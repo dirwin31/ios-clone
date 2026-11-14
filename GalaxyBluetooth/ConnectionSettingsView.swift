@@ -468,15 +468,13 @@ struct ConnectionSettingsView: View {
                 Button("Set up") { model.startAudioPairing() }.disabled(!connected || pairing).font(.system(size: 12)).frame(minHeight: 44)
             }
             separator
-            row("location", title: "Share phone location", subtitle: location.status.isEmpty ? "Optional" : location.status) {
-                Toggle("Share phone location", isOn: Binding(get: { location.sharing }, set: { location.setSharing($0) })).labelsHidden()
-            }
+            toggleRow("location", title: "Share phone location", subtitle: location.status.isEmpty ? "Optional" : location.status,
+                      isOn: Binding(get: { location.sharing }, set: { location.setSharing($0) }))
             separator
-            row("bell.badge", title: "Sentry phone alerts", subtitle: sentry.status) {
-                Toggle("Sentry phone alerts", isOn: Binding(get: { sentry.enabled }, set: { enabled in
-                    Task { await sentry.setEnabled(enabled) }
-                })).labelsHidden()
-            }
+            toggleRow("bell", title: "Sentry phone alerts", subtitle: sentry.status,
+                      isOn: Binding(get: { sentry.enabled }, set: { enabled in
+                          Task { await sentry.setEnabled(enabled) }
+                      }))
             separator
             row("rectangle.on.rectangle", title: "Galaxy screens", subtitle: pairing ? "Waiting for pairing" : checking ? "Checking version…" : assets.status == "Galaxy matches comma." ? "Up to date · just checked" : assets.status.contains("screens have changed") ? "Update available · connect over Wi-Fi or Tunnel" : assets.readyRoot != nil ? "Saved from your comma" : "Not downloaded · needs Local Wi-Fi or Tunnel") {
                 Button {
@@ -578,6 +576,11 @@ struct ConnectionSettingsView: View {
     private var separator: some View { Rectangle().fill(accent.opacity(0.12)).frame(height: 1).padding(.leading, 42) }
     private func message(_ text: String) -> some View {
         Text(LocalizedStringKey(text)).font(.system(size: 11)).foregroundStyle(muted).fixedSize(horizontal: false, vertical: true)
+    }
+    private func toggleRow(_ symbol: String, title: String, subtitle: String, isOn: Binding<Bool>) -> some View {
+        row(symbol, title: title, subtitle: subtitle) {
+            Toggle(LocalizedStringKey(title), isOn: isOn).labelsHidden()
+        }
     }
     private func row<Control: View>(_ symbol: String, title: String, subtitle: String, @ViewBuilder control: () -> Control) -> some View {
         HStack(spacing: 10) {
