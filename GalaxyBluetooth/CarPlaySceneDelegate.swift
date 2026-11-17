@@ -97,33 +97,57 @@ final class CarPlaySceneDelegate: NSObject, CPTemplateApplicationSceneDelegate, 
         overview = nil; temperatures = nil; rates = nil; toggles = nil
         navigating = false
         refreshTelemetry()
+        mapController = nil; mapTemplate = nil
+        window?.rootViewController = UIViewController()
+        catalog = localCatalogue()
+        let settings = CPListTemplate(title: localizedCarPlay("Toggles"), sections: [])
+        toggles = settings
+        settings.tabTitle = localizedCarPlay("Toggles")
+        settings.tabImage = UIImage(systemName: "switch.2")
+        guard let overview, let temperatures, let rates else { return }
+        var pages: [CPTemplate] = [overview, temperatures, rates, settings]
+        let tabs = CPTabBarTemplate(templates: pages)
+        tabs.delegate = self
         if alpha {
-            let map = CompanionCarPlayMap()
-            mapController = map
-            window?.rootViewController = map
-            let template = CPMapTemplate()
-            template.mapDelegate = self
-            template.guidanceBackgroundColor = StarPilotTheme.uiAccent
-            template.automaticallyHidesNavigationBar = false
-            template.trailingNavigationBarButtons = [CPBarButton(title: localizedCarPlay("Stats"), handler: { [weak self] _ in
-                guard let self, let overview = self.overview else { return }
-                self.pushTemplate(overview, animated: true, completion: nil)
-            })]
-            mapTemplate = template
-            controller.setRootTemplate(template, animated: false, completion: nil)
-            refreshNavigation()
-        } else {
-            mapController = nil; mapTemplate = nil
-            window?.rootViewController = UIViewController()
-            catalog = localCatalogue()
-            toggles = CPListTemplate(title: localizedCarPlay("Toggles"), sections: [])
-            toggles?.tabTitle = localizedCarPlay("Toggles")
-            toggles?.tabImage = UIImage(systemName: "switch.2")
-            guard let overview, let temperatures, let rates, let toggles else { return }
-            let tabs = CPTabBarTemplate(templates: [overview, temperatures, rates, toggles])
-            tabs.delegate = self
-            controller.setRootTemplate(tabs, animated: false, completion: nil)
-            showCategories()
+            let openMap: @MainActor () -> Void = { [weak self, weak tabs] in
+                guard let self, let tabs else { return }
+                self.openNavigation(returningTo: tabs)
+            }
+            if pages.count < CPTabBarTemplate.maximumTabCount {
+                let map = CPListTemplate(title: localizedCarPlay("Navigation"), sections: [
+                    CPListSection(items: [settingsItem("Open map", icon: "map", action: openMap)])
+                ])
+                map.tabTitle = localizedCarPlay("Navigation")
+                map.tabImage = UIImage(systemName: "map")
+                pages.append(map)
+                tabs.updateTemplates(pages)
+            } else {
+                overview.leadingNavigationBarButtons = [CPBarButton(title: localizedCarPlay("Navigation")) { _ in openMap() }]
+            }
+        }
+        controller.setRootTemplate(tabs, animated: false, completion: nil)
+        showCategories()
+    }
+
+    private func openNavigation(returningTo tabs: CPTabBarTemplate) {
+        guard let controller, AppModel.shared.navigationEnabled else { return }
+        let map = CompanionCarPlayMap()
+        mapController = map
+        window?.rootViewController = map
+        let template = CPMapTemplate()
+        template.mapDelegate = self
+        template.guidanceBackgroundColor = StarPilotTheme.uiAccent
+        template.automaticallyHidesNavigationBar = false
+        template.leadingNavigationBarButtons = [CPBarButton(title: localizedCarPlay("Back")) { [weak self] _ in
+            guard let self else { return }
+            self.stopGuidance()
+            self.mapTemplate = nil; self.mapController = nil
+            self.window?.rootViewController = UIViewController()
+            self.controller?.setRootTemplate(tabs, animated: false, completion: nil)
+        }]
+        mapTemplate = template
+        controller.setRootTemplate(template, animated: false) { [weak self] success, _ in
+            if success { self?.refreshNavigation() }
         }
     }
 
@@ -337,7 +361,7 @@ final class CarPlaySceneDelegate: NSObject, CPTemplateApplicationSceneDelegate, 
         if let value {
             let format = UIGraphicsImageRendererFormat()
             format.scale = controller?.carTraitCollection.displayScale ?? 2
-            let text = value.replacingOccurrences(of: " °C", with: "°").replacingOccurrences(of: " FPS", with: "")
+            let text = value
             let asset = UIImageAsset()
             for (style, color) in [(UIUserInterfaceStyle.light, UIColor.black), (.dark, UIColor.white)] {
                 let rendered = UIGraphicsImageRenderer(size: CGSize(width: 72, height: 72), format: format).image { _ in
@@ -351,7 +375,9 @@ final class CarPlaySceneDelegate: NSObject, CPTemplateApplicationSceneDelegate, 
                         symbol.withTintColor(color, renderingMode: .alwaysOriginal).draw(in: CGRect(x: 22, y: 0, width: 28, height: 28))
                     }
                     let paragraph = NSMutableParagraphStyle(); paragraph.alignment = .center
-                    let size: CGFloat = text.count <= 6 ? 24 : text.count <= 10 ? 18 : 14
+                    let preferred = UIFont.monospacedDigitSystemFont(ofSize: 22, weight: .semibold)
+                    let width = (text as NSString).size(withAttributes: [.font: preferred]).width
+                    let size = preferred.pointSize * min(1, 70 / max(1, width))
                     (text as NSString).draw(in: CGRect(x: 0, y: value == "On" || value == "Off" ? 47 : 36, width: 72, height: 25), withAttributes: [
                         .font: UIFont.monospacedDigitSystemFont(ofSize: size, weight: .semibold),
                         .foregroundColor: color, .paragraphStyle: paragraph
@@ -462,7 +488,12 @@ final class CarPlaySceneDelegate: NSObject, CPTemplateApplicationSceneDelegate, 
         let storage = system["storage"] as? [String: Any] ?? [:]
         func value(_ source: [String: Any], _ key: String, _ unit: String) -> String {
             guard let number = source[key] as? NSNumber, number.doubleValue.isFinite else { return "—" }
-            return String(format: "%.1f %@", number.doubleValue, unit)
+            let amount = number.doubleValue.formatted(.number.precision(.fractionLength(0...1)))
+            switch unit {
+            case "": return amount
+            case "%": return amount + "%"
+            default: return amount + " " + unit
+            }
         }
         overview = telemetryGrid(overview, title: "Overview", icon: "sparkles", buttons: [
             button(model.transport.label, icon: "antenna.radiowaves.left.and.right"),
@@ -579,9 +610,7 @@ final class CarPlaySceneDelegate: NSObject, CPTemplateApplicationSceneDelegate, 
         work = Task { [weak self, weak page] in
             guard let self, let page else { return }
             do {
-                let name = state.name.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed.subtracting(CharacterSet(charactersIn: "/")))!
-                state.snapshot = try await self.request("/api/settings/pages/" + name)
-                state.session = self.session
+                try await self.refreshSnapshot(state)
                 self.drawSettings(page)
             } catch {
                 if !Task.isCancelled {
@@ -592,6 +621,11 @@ final class CarPlaySceneDelegate: NSObject, CPTemplateApplicationSceneDelegate, 
                 }
             }
         }
+    }
+    private func refreshSnapshot(_ state: SettingsPageState) async throws {
+        let name = state.name.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed.subtracting(CharacterSet(charactersIn: "/")))!
+        state.snapshot = try await request("/api/settings/pages/" + name)
+        state.session = session
     }
     private func drawSettings(_ page: CPListTemplate) {
         guard let state = page.userInfo as? SettingsPageState else { return }
@@ -644,17 +678,73 @@ final class CarPlaySceneDelegate: NSObject, CPTemplateApplicationSceneDelegate, 
                 paging(editor, index: choicePage, count: count) { next in choicePage = next; redraw() }
             }
             redraw()
+        } else if ((row["step"] as? NSNumber)?.doubleValue ?? 0) > 0 {
+            drawStepper(editor, parent: parent, index: index, row: row)
         } else {
-            let actions: [(String, String, Int)] = ((row["step"] as? NSNumber)?.doubleValue ?? 0) > 0
-                ? [("Decrease", "minus.circle", -1), ("Increase", "plus.circle", 1)]
-                : [("Continue", "checkmark.circle", 0)]
-            editor.updateSections([CPListSection(items: actions.map { title, icon, direction in
-                settingsItem(title, detail: current, icon: icon) { [weak self, weak parent] in
-                    guard let parent else { return }; self?.preview(parent, index: index, direction: direction)
+            editor.updateSections([CPListSection(items: [
+                settingsItem("Continue", detail: current, icon: "checkmark.circle") { [weak self, weak parent] in
+                    if let parent { self?.preview(parent, index: index) }
                 }
-            })])
+            ])])
         }
         pushTemplate(editor, animated: true, completion: nil)
+    }
+    private func drawStepper(_ editor: CPListTemplate, parent: CPListTemplate, index: Int, row: [String: Any]) {
+        let value = String(describing: row["value"] ?? "")
+        let items = [(-1, "Decrease", "minus.circle"), (1, "Increase", "plus.circle")].map { direction, title, icon in
+            settingsItem(title, detail: value, icon: icon, enabled: row["available"] as? Bool == true && row["action"] as? Bool == true) { [weak self, weak editor, weak parent] in
+                guard let self, let editor, let parent, !self.busy else { return }
+                self.applyStep(direction, editor: editor, parent: parent, index: index, row: row)
+            }
+        }
+        editor.updateSections([CPListSection(items: items)])
+    }
+
+    private func applyStep(_ direction: Int, editor: CPListTemplate, parent: CPListTemplate, index: Int, row: [String: Any]) {
+        guard let state = parent.userInfo as? SettingsPageState, let view = state.snapshot["view"] as? String else { return }
+        let attachedController = controller
+        busy = true
+        for section in editor.sections {
+            for case let item as CPListItem in section.items { item.isEnabled = false }
+        }
+        work?.cancel()
+        work = Task {
+            do {
+                guard state.session == session else { throw BridgeError.message("Connection changed. Refresh settings.") }
+                let pending = try await request("/api/settings/preview", payload: ["view": view, "row": index, "direction": direction])
+                guard let intent = pending["intent"] as? String else { throw BridgeError.message("Refresh settings and try again.") }
+                guard controller?.topTemplate === editor else {
+                    busy = false
+                    return
+                }
+                let result = try await request("/api/settings/confirm", payload: ["intent": intent, "confirmed": true])
+                guard result["saved"] as? Bool == true else { throw BridgeError.message("Save could not be confirmed. Check the current value.") }
+                try await refreshSnapshot(state)
+                busy = false
+                drawSettings(parent)
+                guard controller?.topTemplate === editor else { return }
+                guard let rows = state.snapshot["rows"] as? [[String: Any]], rows.indices.contains(index),
+                      rows[index]["label"] as? String == row["label"] as? String,
+                      ((rows[index]["step"] as? NSNumber)?.doubleValue ?? 0) > 0,
+                      (rows[index]["choices"] as? [String] ?? []).isEmpty else {
+                    popTemplate(animated: true, completion: nil)
+                    return
+                }
+                drawStepper(editor, parent: parent, index: index, row: rows[index])
+            } catch {
+                guard !Task.isCancelled, controller === attachedController else { return }
+                busy = false
+                let message = error.localizedDescription
+                if controller?.topTemplate === editor {
+                    popTemplate(animated: true) { [weak self] _, _ in
+                        self?.loadSettings(parent)
+                        self?.notice(message)
+                    }
+                } else {
+                    loadSettings(parent)
+                }
+            }
+        }
     }
     private func preview(_ page: CPListTemplate, index: Int, selection: String? = nil, direction: Int = 0) {
         guard !busy, let state = page.userInfo as? SettingsPageState, state.session == session,
