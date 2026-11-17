@@ -1,35 +1,33 @@
 # iPhone quick start
 
-use the SecretGood version of the app with a comma running the matching Bluetooth bridge. the older Dom app uses different Galaxy APIs.
+Use an iPhone and a comma running a StarPilot build with compatible Galaxy and Bluetooth support.
 
-## install
+## Install the app
 
-open your TestFlight invitation on the iPhone and install the build offered there.
+Open your TestFlight invitation on the iPhone and install the build offered there.
 
 To build it yourself, open `GalaxyBluetooth.xcodeproj` at the root of this repo in Xcode. Choose your signing team, connect your iPhone, select it as the destination and press Run. Follow the phone's trust and Developer Mode prompts if shown.
 
-## pair
+## Connect and pair
 
-1. Leave the comma powered and Offroad for setup. it needs internet for the first bridge installation.
+1. Park and leave comma powered on and offroad for setup. It needs internet for the first bridge installation.
 2. Join the same Wi-Fi network as comma, or join comma’s hotspot. In the app, select comma and wait for the Wi-Fi connection to be verified.
 3. Tap **Pair Bluetooth with comma** in the app’s Advanced connection options. The app opens comma’s pairing window automatically. Allow Bluetooth and Local Network access when asked.
-4. when the app says so, open iPhone Settings → Bluetooth and tap your comma once. that pairs phone music; iOS does not let an app do it.
-5. open Galaxy and check that settings load.
+4. Open Galaxy and check that settings load.
+5. If you also want phone music, choose **Set up** next to **Phone music** and follow the instructions to finish audio pairing in iPhone Bluetooth settings.
 
-the app and phone music pair in the same window. **Forget** on a Bluetooth device in comma Settings also removes its app key; it does not remove the car's Bluetooth pairing. connect over Wi-Fi and start Bluetooth setup in the app again afterwards.
+If you choose **Forget** for the phone in comma’s Bluetooth settings, reconnect over Wi-Fi and run the app’s Bluetooth setup again.
 
-## choose a connection
+## Choose a connection
 
 - **Automatic:** uses the first available connection in your saved order. Tap **Set order** to arrange Wi-Fi, Tunnel and Bluetooth.
-- **Bluetooth only:** nearby settings access without a network on either device.
-- **Wi-Fi only:** both devices must be able to reach each other on the local network.
+- **Bluetooth** lets you access nearby settings without a network on either device.
+- **Local Wi-Fi** uses the local network. Both devices must be able to reach each other.
 
-bluetooth cannot carry every Galaxy feature. Recordings, replay, cameras, map tiles, phone internet sharing, Android Auto upload/APK download and login/logout show a Wi-Fi message.
+For recordings, replay, cameras, or other features that show a Wi-Fi message, switch to Local Wi-Fi.
 
-## updates and reports
+## Updates and support
 
-install native app updates through TestFlight. Galaxy's web UI is downloaded from your comma over Wi-Fi/LAN (connect once before using Bluetooth) and refreshed whenever you reconnect; failed downloads keep the saved UI.
+Install app updates through TestFlight. Galaxy’s screens update separately from your comma when you reconnect over Wi-Fi. If a download fails, the app keeps the last saved copy.
 
-for a problem, enable **Developer Mode** in app Settings, reproduce it, then use **Dev / Logs → Copy all reports**. send the report with your phone model, comma version and what you tried. do not share pairing codes or credentials.
-
-the old FFmpeg capture flag and full-display Live View setup belong to the Dom pilot. They are not needed for this branch.
+If something goes wrong, open **Logs & support** in app Settings. Describe what happened and include your phone model, comma version, and connection mode. Review the report before sending it.

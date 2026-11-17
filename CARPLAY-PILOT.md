@@ -1,5 +1,7 @@
 # StarPilot BT CarPlay testing
 
+Historical notes for the early Dom capture pilot. For the current release, start with the [iPhone setup guide](QUICK-START.md). The current Live View experiment has its own [staging guide](https://github.com/natehuby76/starpilot-galaxy-ios/blob/ios-companion-staging/docs/CARPLAY-APP-ONLY-TEST.md).
+
 The phone receives a continuous JPEG stream of the full comma display over local Wi-Fi, targeting 20 FPS at 960 pixels wide. The actual received FPS is shown on the phone. Bluetooth carries diagnostics only. Hardware throughput and capture overhead still need measurement.
 
 CarPlay shows read-only temperatures, frame rates and observed message rates. Opening it selects Live View on the phone for when the phone is foregrounded. It does not unlock the phone or force it to the foreground. Custom driving-screen video is not included in the CarPlay display.

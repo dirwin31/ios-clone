@@ -4,9 +4,9 @@ start with a powered, Offroad comma and the matching SecretGood phone build. fir
 
 ## wi-fi and Bluetooth
 
-1. select **Automatic** and connect both devices to the same local network. confirm the app shows Wi-Fi and Galaxy loads.
+1. Select **Automatic**. Under **Set order**, put Local Wi-Fi first, Bluetooth second, and Tunnel third for this test. Connect both devices to the same local network and confirm Galaxy loads over Wi-Fi.
 2. open a display preference. turn Wi-Fi off in iPhone Settings, leaving Bluetooth on.
-3. confirm the app switches to Bluetooth and settings still load. change the display preference, reopen it and check that it saved.
+3. Confirm the app switches to Bluetooth and settings still load. Change the display preference, reopen it and check that it saved.
 4. restore Wi-Fi and check that Automatic returns to it.
 5. repeat with **Bluetooth only** and **Wi-Fi only** selected.
 
@@ -34,4 +34,4 @@ download the screens over comma's Wi-Fi first, then reopen with phone Wi-Fi and 
 
 ## feedback
 
-enable Developer Mode in Settings and use **Dev / Logs → Copy all reports** after a failure. include the connection mode, device versions, what you tried and any error you received. keep pairing codes and passwords out of screenshots.
+After a failure, open **Logs & support** in app Settings. Include the connection mode, device versions, what you tried, and the error you saw. Keep pairing codes and passwords out of screenshots.

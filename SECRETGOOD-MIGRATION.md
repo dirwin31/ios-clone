@@ -1,5 +1,7 @@
 # SecretGood Galaxy migration
 
+Historical notes from the migration to SecretGood. The release app now downloads its Galaxy screens directly from comma. See the [companion guide](docs/companion-guide.md) for current behavior.
+
 The iPhone app now targets `firestar5683/StarPilot:SecretGoodStarPilot` only.
 Bundled web source: `ff1beb12902ac441d3423f54cc12e9354c25e124`, `openpilot/starpilot/galaxy/web`.
 The bundled files retain their upstream contents and license. Sample runtime data is excluded; runtime identity always comes from the connected comma.
