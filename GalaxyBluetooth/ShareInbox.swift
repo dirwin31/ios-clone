@@ -7,7 +7,7 @@ import UserNotifications
 @MainActor
 final class ShareInbox: ObservableObject {
     static let shared = ShareInbox()
-    static let saved = "Saved. The route starts when your iPhone next connects to comma."
+    static let saved = "Destination saved. Open StarPilot when connected to your comma to send it."
     /// Text waiting for the Galaxy page to load it.
     @Published var galaxyText: String?
     @Published var notice: String?
@@ -79,6 +79,10 @@ final class ShareInbox: ObservableObject {
             defer {
                 delivering = false
                 if background != .invalid { UIApplication.shared.endBackgroundTask(background) }
+                // A new share can arrive while the previous send is awaiting comma.
+                if let next = ShareGroup.pending(), next.id != pending.id {
+                    self.deliverPending()
+                }
             }
             model.connectionLog.record("Saved shared destination: sending to comma")
             let outcome = await CommaDestination.send(text: pending.text, model: model, requestID: pending.id, identity: pending.identity)
@@ -97,7 +101,6 @@ final class ShareInbox: ObservableObject {
             case .unreachable: return
             }
             if active { notice = message } else { await Self.notify(message) }
-            if ShareGroup.pending() != nil { Task { self.deliverPending() } }
         }
     }
 

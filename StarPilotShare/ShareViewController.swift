@@ -96,7 +96,7 @@ struct ShareCard: View {
                 Text(message).multilineTextAlignment(.center)
             case .saved:
                 Image(systemName: "clock.arrow.circlepath").font(.system(size: 36)).foregroundStyle(.blue)
-                Text("Saved. The route starts when your iPhone next connects to comma.").multilineTextAlignment(.center)
+                Text("Destination saved. Open StarPilot when connected to your comma to send it.").multilineTextAlignment(.center)
                 Button("Done", action: done).buttonStyle(.borderedProminent)
             case .failed(let message):
                 Image(systemName: "exclamationmark.triangle.fill").font(.system(size: 36)).foregroundStyle(.orange)

@@ -695,9 +695,16 @@ private struct TunnelSetupView: View {
                                 error = ""; loginURL = url
                             }
                             if model.transport.connected {
-                                Button("Get link from comma") {
-                                    Task { if let url = await model.fetchLegacyURL() { address = url.absoluteString } else { error = model.legacyMessage } }
-                                }
+                                Button(model.loadingLegacyURL ? "Getting link…" : "Get link from comma") {
+                                    Task {
+                                        if let url = await model.fetchLegacyURL() {
+                                            address = url.absoluteString
+                                            error = ""
+                                        } else {
+                                            error = model.legacyMessage
+                                        }
+                                    }
+                                }.disabled(model.loadingLegacyURL)
                             }
                         } header: { Text("Your Galaxy link") } footer: { Text("Scan the Galaxy QR code on comma or paste its private link, then sign in with your Galaxy password. Connect over Bluetooth or Local Wi-Fi when setting up Tunnel so the app can confirm the link with your comma. Both phone and comma need internet for Tunnel. Automatic uses your saved connection order.") }
                         if model.tunnel.credential != nil {

@@ -14,7 +14,7 @@ The first time, StarPilot may not be in the row of app icons. Scroll the row to 
 
 The share sheet tries the saved home-network address first, then the Galaxy tunnel when it is signed in. Navigation is turned on if it was off. comma reads the place from the link, or looks up its name and address when the link has no coordinates. It needs a map key set up in Galaxy's Navigation settings.
 
-When comma can't be reached (the car is off, or the iPhone reaches comma only over Bluetooth), the card says "Saved. The route starts when your iPhone next connects to comma." StarPilot BT sends the saved place when it next connects over any route, including Bluetooth. That is within seconds while the app is running (open, on CarPlay, sharing GPS or navigating); otherwise iOS keeps it paused, and the place goes out the next time the app wakes or you open it. If the app was in the background it posts a notification when notifications are already allowed. Only the latest place is kept, and a saved place expires after 12 hours.
+When the share sheet can't reach your comma, it can save the destination for delivery. StarPilot BT retries while running when it connects to your comma, including over Bluetooth. If iOS has paused the app, open it while connected to send the saved place. A background delivery can post a notification if notifications are allowed. Only the latest place is kept, and a saved place expires after 12 hours.
 
 When comma finds no single match, StarPilot BT opens Galaxy's Navigation page with the place's search results the next time you open the app. If comma answers with a problem, such as a missing map key, the card shows comma's message.
 
