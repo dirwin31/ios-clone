@@ -746,7 +746,7 @@ final class CarPlaySceneDelegate: NSObject, CPTemplateApplicationSceneDelegate, 
             }
         }
     }
-    private func preview(_ page: CPListTemplate, index: Int, selection: String? = nil, direction: Int = 0) {
+    private func preview(_ page: CPListTemplate, index: Int, selection: String? = nil) {
         guard !busy, let state = page.userInfo as? SettingsPageState, state.session == session,
               let view = state.snapshot["view"] as? String else { loadSettings(page); return }
         busy = true
@@ -755,8 +755,12 @@ final class CarPlaySceneDelegate: NSObject, CPTemplateApplicationSceneDelegate, 
             guard let self, let page else { return }
             defer { self.busy = false }
             do {
-                var payload: [String: Any] = ["view": view, "row": index, "direction": direction]
-                if let selection { payload["value"] = selection }
+                var payload: [String: Any] = ["view": view, "row": index]
+                if let selection {
+                    payload["value"] = selection
+                } else {
+                    payload["direction"] = 0
+                }
                 let pending = try await self.request("/api/settings/preview", payload: payload)
                 guard let intent = pending["intent"] as? String else { throw BridgeError.message("Refresh settings and try again.") }
                 let confirm = CPAlertAction(title: localizedCarPlay("Save"), style: .default) { [weak self, weak page] _ in
