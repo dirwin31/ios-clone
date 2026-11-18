@@ -1013,8 +1013,7 @@ struct GalaxyRootView: View {
                     ConnectionSettingsView(model: model, returningFromGalaxy: hasVisitedGalaxy, select: select, submitReport: presentReport)
                 }
             }.frame(maxWidth: .infinity, maxHeight: .infinity)
-
-
+            .modifier(CompanionPageArrival(page: page))
         }
         .safeAreaInset(edge: .top, spacing: 0) {
             if !usesAdaptiveChrome && !editorFocused && model.tab != .navigation {
@@ -1111,6 +1110,55 @@ struct GalaxyRootView: View {
     private let brandPurple = Color(red: 139.0 / 255, green: 92.0 / 255, blue: 246.0 / 255)
 
 
+}
+
+private struct CompanionPageArrival: ViewModifier {
+    let page: CompanionTab
+    @Environment(\.reduceGalacticalMotion) private var reduceMotion
+    @Environment(\.scenePhase) private var scenePhase
+
+    func body(content: Content) -> some View {
+        content.keyframeAnimator(initialValue: 1.0, trigger: page) { screen, progress in
+            let active = !reduceMotion && scenePhase == .active && progress < 1
+            screen
+                .opacity(active ? 0.91 + 0.09 * progress : 1)
+                .overlay(alignment: .top) {
+                    if active {
+                        Canvas { context, size in
+                            // A shallow orbital arc. Its luminous section moves while the page stays anchored.
+                            let width = size.width
+                            let height = size.height
+                            guard width > 0, height > 0 else { return }
+                            let sweep = page == .connections ? 1 - progress : progress
+                            let x = width * (-0.18 + 1.36 * sweep)
+                            let reach = min(width * 0.36, 185)
+                            let strength = sin(.pi * progress)
+                            let tint: Color = page == .navigation ? .teal : .purple
+                            let glow = CGPoint(x: x, y: height * 0.38)
+                            context.fill(Path(CGRect(origin: .zero, size: size)), with: .radialGradient(
+                                Gradient(colors: [tint.opacity(0.16 * strength), .clear]),
+                                center: glow, startRadius: 0, endRadius: reach))
+
+                            var arc = Path()
+                            arc.move(to: CGPoint(x: 0, y: height * 0.15))
+                            arc.addQuadCurve(to: CGPoint(x: width, y: height * 0.15),
+                                             control: CGPoint(x: width * 0.5, y: height * 0.85))
+                            context.stroke(arc, with: .linearGradient(
+                                Gradient(colors: [.clear, tint.opacity(0.45 * strength),
+                                                  .white.opacity(0.76 * strength), .clear]),
+                                startPoint: CGPoint(x: x - reach, y: 0),
+                                endPoint: CGPoint(x: x + reach, y: 0)), lineWidth: 1.25)
+                        }
+                        .frame(height: 54)
+                        .allowsHitTesting(false)
+                        .accessibilityHidden(true)
+                    }
+                }
+        } keyframes: { _ in
+            MoveKeyframe(0.0)
+            CubicKeyframe(1.0, duration: 0.48)
+        }
+    }
 }
 
 private struct ReduceGalacticalMotionKey: EnvironmentKey {
