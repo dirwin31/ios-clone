@@ -1108,6 +1108,7 @@ struct GalaxyRootView: View {
 }
 
 struct CompanionNavigationBar: View {
+    @Namespace private var selection
     let tab: CompanionTab
     let developerMode: Bool
     @ObservedObject var navigation: NavigationModel
@@ -1134,13 +1135,18 @@ struct CompanionNavigationBar: View {
                                 .background {
                                     if tab == item || (tab == .logs && item == .connections) {
                                         Capsule().fill(LinearGradient(colors: [Color(red: 0.61, green: 0.39, blue: 0.91), Color(red: 0.40, green: 0.22, blue: 0.69)], startPoint: .topLeading, endPoint: .bottomTrailing))
+                                            .overlay {
+                                                Capsule().strokeBorder(LinearGradient(colors: [.white.opacity(0.5), .clear], startPoint: .topLeading, endPoint: .bottomTrailing))
+                                            }
+                                            .matchedGeometryEffect(id: "activeTab", in: selection)
                                     }
                                 }
                         }.buttonStyle(.plain).accessibilityIdentifier("main-tab-" + item.rawValue)
                             .accessibilityAddTraits((tab == item || (tab == .logs && item == .connections)) ? .isSelected : [])
                     }
 
-                }.padding(3)
+                }.animation(reduceMotion ? nil : .spring(duration: 0.38, bounce: 0.12), value: tab)
+                    .padding(3)
                     .padding(.trailing, statusModel == nil ? 0 : 32)
                     .frame(width: geometry.size.width)
                     .scaleEffect(x: expanded ? 1 : 0.18, y: expanded ? 1 : 0.65, anchor: .leading)

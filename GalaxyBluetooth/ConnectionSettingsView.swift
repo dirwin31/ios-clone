@@ -612,12 +612,39 @@ private struct PairingSignal: View {
 private struct ConnectionOrbit: View {
     let route: String
     let pairing: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var appeared = false
     private let purple = Color(red: 0.68, green: 0.48, blue: 0.96)
+    private var destinationAngle: Double {
+        if pairing || route == "Bluetooth" { return 110 }
+        if route == "Local Wi-Fi" { return 155 }
+        return route == "Tunnel" ? -25 : -90
+    }
     var body: some View {
         ZStack {
             Ellipse().stroke(purple.opacity(0.5), lineWidth: 1).frame(width: 232, height: 64).rotationEffect(.degrees(12)).position(x: 132, y: 48)
             Ellipse().stroke(purple.opacity(0.35), style: StrokeStyle(lineWidth: 1, dash: [2, 4]))
                 .frame(width: 258, height: 76).rotationEffect(.degrees(-9)).position(x: 132, y: 48)
+            if !reduceMotion {
+                Color.clear.keyframeAnimator(initialValue: 0.0, trigger: "\(appeared)-\(route)-\(pairing)") { _, progress in
+                    Canvas { context, _ in
+                        // Shorten the tail as the head arrives at the transport node.
+                        let head = destinationAngle - 290 * (1 - progress)
+                        let intensity = sin(.pi * progress)
+                        for index in 0..<22 {
+                            let fraction = Double(index) / 21
+                            let point = orbitPoint(head - 54 * (1 - fraction) * intensity)
+                            let radius = 0.6 + 1.6 * fraction
+                            let dot = CGRect(x: point.x - radius, y: point.y - radius, width: 2 * radius, height: 2 * radius)
+                            context.fill(Path(ellipseIn: dot), with: .color((index == 21 ? Color.white : purple).opacity(fraction * intensity)))
+                        }
+                    }
+                } keyframes: { _ in
+                    MoveKeyframe(0.0)
+                    CubicKeyframe(1.0, duration: 1.15)
+                }
+                .allowsHitTesting(false)
+            }
             Image("StarPilotMark").resizable().scaledToFit()
                 .clipShape(RoundedRectangle(cornerRadius: 14))
                 .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color.white.opacity(0.6)))
@@ -626,15 +653,22 @@ private struct ConnectionOrbit: View {
             node("ConnectionBluetooth", angle: 110, active: route == "Bluetooth" || pairing)
             node("ConnectionNetwork", angle: -25, active: route == "Tunnel")
         }.frame(width: 264, height: 88).accessibilityHidden(true)
+            .onAppear { appeared = true }
     }
-    private func node(_ symbol: String, angle: Double, active: Bool) -> some View {
+    private func orbitPoint(_ angle: Double) -> CGPoint {
         let theta = angle * .pi / 180, rotation = 12.0 * .pi / 180
         let x = 132 + 116 * cos(theta) * cos(rotation) - 32 * sin(theta) * sin(rotation)
         let y = 48 + 116 * cos(theta) * sin(rotation) + 32 * sin(theta) * cos(rotation)
+        return CGPoint(x: x, y: y)
+    }
+    private func node(_ symbol: String, angle: Double, active: Bool) -> some View {
         return Image(symbol).renderingMode(.template).resizable().scaledToFit().frame(width: 15, height: 15).foregroundStyle(active ? Color.white : Color.white.opacity(0.65))
             .frame(width: 30, height: 30).background(Color(red: 0.09, green: 0.075, blue: 0.15), in: Circle())
             .overlay(Circle().stroke(Color.white.opacity(active ? 0.75 : 0.4)))
-            .shadow(color: purple.opacity(active ? 0.35 : 0), radius: 7).position(x: x, y: y)
+            .shadow(color: purple.opacity(active ? 0.65 : 0), radius: 7)
+            .scaleEffect(active ? 1.1 : 1)
+            .animation(reduceMotion ? nil : .spring(duration: 0.4, bounce: 0.15), value: active)
+            .position(orbitPoint(angle))
     }
 }
 

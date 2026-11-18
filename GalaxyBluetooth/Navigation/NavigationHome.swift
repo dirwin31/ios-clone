@@ -152,8 +152,10 @@ private struct StandardNavigationHome: View {
                 if navigation.navigating {
                     HStack(alignment: .center, spacing: 18) {
                         Image(systemName: turnSymbol).font(.system(size: 42, weight: .bold)).frame(width: 52)
+                            .contentTransition(reduceMotion ? .identity : .symbolEffect(.replace))
+                            .animation(reduceMotion ? nil : .easeInOut(duration: 0.24), value: turnSymbol)
                         VStack(alignment: .leading, spacing: 4) {
-                            Text(navigation.usingComma && !navigation.commaFeedReady ? "—" : distance(navigation.distanceToTurn)).font(.system(size: 30, weight: .bold, design: .rounded))
+                            ManeuverDistance(label: navigation.usingComma && !navigation.commaFeedReady ? "—" : distance(navigation.distanceToTurn))
                             Text(LocalizedStringKey(navigation.instruction)).font(.title3.weight(.semibold)).lineLimit(3)
                         }
                         Spacer(minLength: 0)
@@ -393,6 +395,19 @@ private struct StandardNavigationHome: View {
     private func minutes(_ seconds: Double) -> String { NavigationDuration.text(seconds) }
 }
 
+private struct ManeuverDistance: View {
+    let label: String
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        Text(label)
+            .font(.system(size: 30, weight: .bold, design: .rounded))
+            .monospacedDigit()
+            .contentTransition(reduceMotion ? .identity : .numericText(countsDown: true))
+            .animation(reduceMotion ? nil : .easeOut(duration: 0.22), value: label)
+    }
+}
+
 private struct NavigationPanelHeightKey: PreferenceKey {
     static var defaultValue: CGFloat = 0
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
@@ -594,8 +609,10 @@ private struct DuoNavigationHome: View {
                 if navigation.navigating {
                     HStack(alignment: .center, spacing: 18) {
                         Image(systemName: turnSymbol).font(.system(size: 42, weight: .bold)).frame(width: 52)
+                            .contentTransition(reduceMotion ? .identity : .symbolEffect(.replace))
+                            .animation(reduceMotion ? nil : .easeInOut(duration: 0.24), value: turnSymbol)
                         VStack(alignment: .leading, spacing: 4) {
-                            Text(navigation.usingComma && !navigation.commaFeedReady ? "—" : distance(navigation.distanceToTurn)).font(.system(size: 30, weight: .bold, design: .rounded))
+                            ManeuverDistance(label: navigation.usingComma && !navigation.commaFeedReady ? "—" : distance(navigation.distanceToTurn))
                             Text(LocalizedStringKey(navigation.instruction)).font(.title3.weight(.semibold)).lineLimit(3)
                         }
                         Spacer(minLength: 0)
