@@ -1013,14 +1013,11 @@ struct GalaxyRootView: View {
                     ConnectionSettingsView(model: model, returningFromGalaxy: hasVisitedGalaxy, select: select, submitReport: presentReport)
                 }
             }.frame(maxWidth: .infinity, maxHeight: .infinity)
-            .animation(galacticalAnimations && !reduceMotion && scenePhase == .active
-                       ? .easeInOut(duration: 0.18) : nil, value: page)
-            .overlay {
-                if galacticalAnimations && !reduceMotion && scenePhase == .active {
-                    PageAurora(page: page)
-                        .allowsHitTesting(false)
-                        .accessibilityHidden(true)
-                }
+            .keyframeAnimator(initialValue: 1.0, trigger: page) { screen, opacity in
+                screen.opacity(galacticalAnimations && !reduceMotion && scenePhase == .active ? opacity : 1)
+            } keyframes: { _ in
+                MoveKeyframe(0.96)
+                CubicKeyframe(1.0, duration: 0.16)
             }
         }
         .safeAreaInset(edge: .top, spacing: 0) {
@@ -1128,37 +1125,6 @@ extension EnvironmentValues {
     var reduceGalacticalMotion: Bool {
         get { self[ReduceGalacticalMotionKey.self] }
         set { self[ReduceGalacticalMotionKey.self] = newValue }
-    }
-}
-
-private struct PageAurora: View {
-    let page: CompanionTab
-
-    var body: some View {
-        Color.clear.keyframeAnimator(initialValue: 1.0, trigger: page) { _, progress in
-            Canvas(opaque: false) { context, size in
-                guard progress > 0, progress < 1 else { return }
-                let rect = Path(CGRect(origin: .zero, size: size))
-                let travel = page == .connections ? 1 - progress : progress
-                let center = CGPoint(x: size.width * (0.04 + 0.92 * travel),
-                                     y: size.height * (0.82 - 0.64 * travel))
-                let radius = max(size.width, size.height) * 0.82
-                let tint: Color = page == .navigation ? .teal : .purple
-                // Overlapping fields of light stay soft across portrait and landscape.
-                context.opacity = pow(sin(.pi * progress), 2)
-                context.fill(rect, with: .radialGradient(
-                    Gradient(colors: [tint.opacity(0.24), tint.opacity(0.11), tint.opacity(0)]),
-                    center: center, startRadius: 0, endRadius: radius))
-                let fringe = CGPoint(x: center.x - size.width * 0.32,
-                                     y: center.y - size.height * 0.23)
-                context.fill(rect, with: .radialGradient(
-                    Gradient(colors: [.cyan.opacity(0.13), Color.cyan.opacity(0)]),
-                    center: fringe, startRadius: 0, endRadius: radius * 0.77))
-            }
-        } keyframes: { _ in
-            MoveKeyframe(0.0)
-            CubicKeyframe(1.0, duration: 0.55)
-        }
     }
 }
 
