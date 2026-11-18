@@ -1553,6 +1553,7 @@ private extension EnvironmentValues {
 
 @available(iOS 27.1, *)
 private struct AdaptiveCompanionLayout<Content: View>: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.toolbarVerticalEdge) private var verticalEdge
     @ObservedObject var model: AppModel
     let tab: CompanionTab
@@ -1568,12 +1569,25 @@ private struct AdaptiveCompanionLayout<Content: View>: View {
                 // Each action is a real toolbar item; the system owns its size and spacing.
                 ToolbarItemGroup(placement: .topBarLeading) {
                     ForEach(tabs) { item in
+                        let selected = tab == item || (tab == .logs && item == .connections)
                         Button { select(item) } label: {
-                            Label(item.rawValue, systemImage: item.icon)
+                            Label {
+                                Text(item.rawValue)
+                            } icon: {
+                                Image(systemName: item.icon)
+                                    .frame(width: 32, height: 30)
+                                    .foregroundStyle(selected ? Color.white : Color.primary)
+                                    .background {
+                                        Capsule().fill(Color.purple.gradient)
+                                            .opacity(selected ? 1 : 0)
+                                            .scaleEffect(reduceMotion || selected ? 1 : 0.65)
+                                    }
+                                    .animation(reduceMotion ? nil : .spring(duration: 0.36, bounce: 0.18), value: selected)
+                            }
                         }
-                        .tint(tab == item ? Color.purple : Color.primary)
+                        .tint(selected ? Color.purple : Color.primary)
                         .accessibilityIdentifier("main-tab-" + item.rawValue)
-                        .accessibilityAddTraits(tab == item ? .isSelected : [])
+                        .accessibilityAddTraits(selected ? .isSelected : [])
                     }
                 }.axisBehavior(.verticalPreferred)
                 ToolbarItem(placement: .topBarTrailing) {

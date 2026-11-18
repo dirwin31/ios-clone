@@ -613,7 +613,8 @@ private struct ConnectionOrbit: View {
     let route: String
     let pairing: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var appeared = false
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var sweepStart = Date()
     private let purple = Color(red: 0.68, green: 0.48, blue: 0.96)
     private var destinationAngle: Double {
         if pairing || route == "Bluetooth" { return 110 }
@@ -626,11 +627,13 @@ private struct ConnectionOrbit: View {
             Ellipse().stroke(purple.opacity(0.35), style: StrokeStyle(lineWidth: 1, dash: [2, 4]))
                 .frame(width: 258, height: 76).rotationEffect(.degrees(-9)).position(x: 132, y: 48)
             if !reduceMotion {
-                Color.clear.keyframeAnimator(initialValue: 0.0, trigger: "\(appeared)-\(route)-\(pairing)") { _, progress in
+                TimelineView(.animation(minimumInterval: 1.0 / 30, paused: scenePhase != .active)) { timeline in
                     Canvas { context, _ in
-                        // Shorten the tail as the head arrives at the transport node.
-                        let head = destinationAngle - 290 * (1 - progress)
-                        let intensity = sin(.pi * progress)
+                        let elapsed = max(0, timeline.date.timeIntervalSince(sweepStart))
+                        let progress = min(elapsed / 1.15, 1)
+                        // Ease out the opening arc into one steady revolution every 18 seconds.
+                        let head = destinationAngle - 267 * pow(1 - progress, 2) + 20 * (elapsed - 1.15)
+                        let intensity = 0.55 * progress + 0.7 * sin(.pi * progress)
                         for index in 0..<22 {
                             let fraction = Double(index) / 21
                             let point = orbitPoint(head - 54 * (1 - fraction) * intensity)
@@ -639,9 +642,6 @@ private struct ConnectionOrbit: View {
                             context.fill(Path(ellipseIn: dot), with: .color((index == 21 ? Color.white : purple).opacity(fraction * intensity)))
                         }
                     }
-                } keyframes: { _ in
-                    MoveKeyframe(0.0)
-                    CubicKeyframe(1.0, duration: 1.15)
                 }
                 .allowsHitTesting(false)
             }
@@ -653,7 +653,8 @@ private struct ConnectionOrbit: View {
             node("ConnectionBluetooth", angle: 110, active: route == "Bluetooth" || pairing)
             node("ConnectionNetwork", angle: -25, active: route == "Tunnel")
         }.frame(width: 264, height: 88).accessibilityHidden(true)
-            .onAppear { appeared = true }
+            .onAppear { sweepStart = Date() }
+            .onChange(of: destinationAngle) { _, _ in sweepStart = Date() }
     }
     private func orbitPoint(_ angle: Double) -> CGPoint {
         let theta = angle * .pi / 180, rotation = 12.0 * .pi / 180
