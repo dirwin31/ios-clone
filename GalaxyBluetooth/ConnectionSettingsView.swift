@@ -533,7 +533,7 @@ struct ConnectionSettingsView: View {
     }
 
     private func preferenceSection<Content: View>(_ title: LocalizedStringKey, expanded: Binding<Bool>,
-                                                  @ViewBuilder content: () -> Content) -> some View {
+                                                  @ViewBuilder content: @escaping () -> Content) -> some View {
         DisclosureGroup(isExpanded: expanded) {
             VStack(alignment: .leading, spacing: 8, content: content)
                 .padding(.bottom, 12)
