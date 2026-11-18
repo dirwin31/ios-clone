@@ -14,11 +14,13 @@ enum BridgeError: LocalizedError {
     var failure: Error?
     var dropOnRequest = false
     var posts = 0
+    var windowPosts = 0
     func request(path: String, method: String, headers: [String: String], body: Data) async throws -> BridgeResponse {
         precondition(path == "/_bridge/notification-bond" && method == "POST" && body == Data("{}".utf8))
         posts += 1
         if dropOnRequest { connected = false }
         if let failure { throw failure }
+        if posts <= windowPosts { return BridgeResponse(status: 409, bodyData: Data(#"{"error":"x","code":"pairing_window"}"#.utf8)) }
         return BridgeResponse(status: status, bodyData: Data(reply.utf8))
     }
 }
@@ -39,7 +41,7 @@ enum BridgeError: LocalizedError {
                                         bond: { reads += 1; if let bond { throw bond } },
                                         device: { "comma-1" }, defaults: defaults)
         model.start()
-        await settle(model) { $0 != .requesting && $0 != .pairing }
+        await settle(model) { $0 != .requesting && $0 != .pairing && $0 != .waitingForMusic }
         return (model, reads)
     }
 
@@ -125,6 +127,22 @@ enum BridgeError: LocalizedError {
         slow.dismiss()
         for _ in 0..<50 { await Task.yield() }
         precondition(slow.phase == .idle && !slow.sharedWithThisComma)
+
+        // Music's pairing window is still open: wait for it (closing it once music is done) instead of failing.
+        let windowed = BondComma(); windowed.windowPosts = 3
+        var closes = 0
+        let waiter = NotificationSharing(transport: { windowed }, supported: { true }, bond: {}, device: { "comma-4" }, defaults: defaults,
+                                         musicDone: { true }, closeMusicWindow: { closes += 1 }, pause: {})
+        waiter.start()
+        await settle(waiter) { $0 == .done }
+        precondition(windowed.posts == 4 && closes == 3, "Waits through the music window, then bonds")
+        let stuck = BondComma(); stuck.windowPosts = 1000
+        var stuckCloses = 0
+        let stalled = NotificationSharing(transport: { stuck }, supported: { true }, bond: {}, device: { "comma-5" }, defaults: defaults,
+                                          musicDone: { false }, closeMusicWindow: { stuckCloses += 1 }, pause: {})
+        stalled.start()
+        await settle(stalled) { $0 == .message(NotificationSharing.musicWindowMessage) }
+        precondition(stuckCloses == 0 && stuck.posts == NotificationSharing.musicWindowWaits + 1, "Gives up with a plain message")
 
         print("Phone notifications: not Bluetooth, old comma, busy, declined, timeout, disconnect, success and cancel passed")
     }

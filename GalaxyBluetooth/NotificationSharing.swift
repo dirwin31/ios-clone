@@ -12,6 +12,7 @@ final class NotificationSharing: ObservableObject {
     enum Phase: Equatable {
         case idle
         case requesting
+        case waitingForMusic
         case pairing
         case done
         case message(String)
@@ -32,16 +33,25 @@ final class NotificationSharing: ObservableObject {
     private let supported: () -> Bool
     private let bond: () async throws -> Void
     private let device: () -> String?
+    private let musicDone: () -> Bool
+    private let closeMusicWindow: () async -> Void
+    private let pause: () async -> Void
     private let defaults: UserDefaults
     private var task: Task<Void, Never>?
 
     /// `transport` must be the Bluetooth transport: the bond belongs to that link.
     init(transport: @escaping () -> (any GalaxyRequestTransport)?, supported: @escaping () -> Bool,
-         bond: @escaping () async throws -> Void, device: @escaping () -> String?, defaults: UserDefaults = .standard) {
+         bond: @escaping () async throws -> Void, device: @escaping () -> String?, defaults: UserDefaults = .standard,
+         musicDone: @escaping () -> Bool = { false }, closeMusicWindow: @escaping () async -> Void = {},
+         pause: @escaping () async -> Void = { try? await Task.sleep(nanoseconds: 2_000_000_000) }) {
         self.transport = transport; self.supported = supported; self.bond = bond; self.device = device; self.defaults = defaults
+        self.musicDone = musicDone; self.closeMusicWindow = closeMusicWindow; self.pause = pause
     }
 
-    var active: Bool { phase == .requesting || phase == .pairing }
+    /// Comma's music window lasts two minutes and blocks the notification bond; wait for it instead of failing.
+    static let musicWindowWaits = 70
+
+    var active: Bool { phase == .requesting || phase == .waitingForMusic || phase == .pairing }
 
     /// A hint only: the person can turn sharing off in iPhone Settings without the app knowing.
     var sharedWithThisComma: Bool {
@@ -51,7 +61,7 @@ final class NotificationSharing: ObservableObject {
 
     func summary(bluetoothConnected: Bool) -> String {
         switch phase {
-        case .requesting, .pairing: return "Setup in progress"
+        case .requesting, .waitingForMusic, .pairing: return "Setup in progress"
         case .done: return "Shared with comma"
         case .message: return "Setup needs attention"
         case .idle:
@@ -109,18 +119,29 @@ final class NotificationSharing: ObservableObject {
     private func run() async {
         guard let transport = transport(), transport.connected else { phase = .message(Self.bluetoothMessage); return }
         guard supported() else { phase = .message(Self.updateMessage); return }
-        let response: BridgeResponse
-        do {
-            response = try await transport.request(path: Self.windowPath, method: "POST",
-                                                   headers: ["Content-Type": "application/json"], body: Data("{}".utf8))
-        } catch {
+        var response: BridgeResponse
+        var waits = 0
+        while true {
+            do {
+                response = try await transport.request(path: Self.windowPath, method: "POST",
+                                                       headers: ["Content-Type": "application/json"], body: Data("{}".utf8))
+            } catch {
+                if Task.isCancelled { return }
+                onEvent?("Phone notifications window request failed: " + error.localizedDescription)
+                phase = .message(transport.connected ? Self.updateMessage : Self.bluetoothMessage)
+                return
+            }
             if Task.isCancelled { return }
-            onEvent?("Phone notifications window request failed: " + error.localizedDescription)
-            phase = .message(transport.connected ? Self.updateMessage : Self.bluetoothMessage)
-            return
+            onEvent?("Phone notifications window request finished: HTTP \(response.status)")
+            guard response.status == 409, Self.code(response.bodyData) == "pairing_window" else { break }
+            guard waits < Self.musicWindowWaits else { phase = .message(Self.musicWindowMessage); return }
+            // Music is already paired, so comma's window has nothing left to do: close it so setup continues at once.
+            if waits == 0 { phase = .waitingForMusic }
+            if musicDone() { await closeMusicWindow() } else { onEvent?("Phone notifications waiting for the music pairing window") }
+            waits += 1
+            await pause()
+            if Task.isCancelled { return }
         }
-        if Task.isCancelled { return }
-        onEvent?("Phone notifications window request finished: HTTP \(response.status)")
         switch response.status {
         case 200: break
         case 409:
@@ -147,10 +168,16 @@ final class NotificationSharing: ObservableObject {
         phase = .done
     }
 
+    nonisolated static let musicWindowMessage = "Comma is still finishing music pairing. Try again in a minute."
+
+    nonisolated static func code(_ body: Data) -> String? {
+        ((try? JSONSerialization.jsonObject(with: body)) as? [String: Any])?["code"] as? String
+    }
+
     /// Map comma's reason code to app copy; its own text is never shown.
     nonisolated static func busyMessage(_ body: Data) -> String {
-        let code = ((try? JSONSerialization.jsonObject(with: body)) as? [String: Any])?["code"] as? String
-        switch code {
+        switch code(body) {
+        case "pairing_window"?: return musicWindowMessage
         case "park_required"?: return "Park the car to set up phone notifications."
         case "bluetooth_off"?, "bluetooth_unavailable"?, "starting"?, "not_ready"?: return "Comma's Bluetooth isn't ready. Try again in a moment."
         case "disconnected"?: return message(for: NotificationBondError.disconnected)

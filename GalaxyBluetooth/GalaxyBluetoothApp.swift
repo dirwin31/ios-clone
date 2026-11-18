@@ -94,7 +94,9 @@ final class AppModel: ObservableObject {
                 guard let self else { throw NotificationBondError.disconnected }
                 try await self.bluetooth.readNotificationBond()
             },
-            device: { UserDefaults.standard.string(forKey: "galaxy.bluetooth.device") })
+            device: { UserDefaults.standard.string(forKey: "galaxy.bluetooth.device") },
+            musicDone: { [weak self] in self?.audioPairing.finished ?? false },
+            closeMusicWindow: { [weak self] in await self?.audioPairing.closeWindow() })
         value.onEvent = { [weak self] in self?.connectionLog.record($0) }
         return value
     }()
@@ -1065,7 +1067,8 @@ struct GalaxyRootView: View {
             DiscordReportSheet(logs: capture.logs, captureLogs: captureReportLogs) { reportWasSent = true }
         }
         .sheet(isPresented: $model.showAudioPairing, onDismiss: { model.audioPairing.dismiss() }) {
-            AudioPairingSheet(pairing: model.audioPairing) { model.showAudioPairing = false }
+            AudioPairingSheet(pairing: model.audioPairing, notifications: model.notificationSharing,
+                              bluetoothConnected: model.bluetooth.connected, notificationsSupported: model.bluetooth.notificationBondSupported) { model.showAudioPairing = false }
         }
         .alert("Bluetooth access needed", isPresented: $model.showBluetoothPermission) {
             Button("Open Settings") {
