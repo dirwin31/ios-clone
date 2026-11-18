@@ -13,14 +13,14 @@ struct AudioPairingSheet: View {
             Text("Bluetooth music").font(.title3.weight(.semibold))
             switch pairing.phase {
             case .idle, .opening:
-                if notifications.phase != .idle { notificationStep } else { ProgressView("Asking comma to open pairing…") }
+                ProgressView("Asking comma to open pairing…")
             case .waiting(let name):
                 Text("On your iPhone, open **Settings → Bluetooth** and select **\(name)** to pair music.")
                     .multilineTextAlignment(.center)
                 ProgressView()
                 Text("Already says Connected? In Control Center, check whether comma is available as an audio output.")
                     .font(.callout).multilineTextAlignment(.center)
-                Button("Skip music, set up notifications") { skipMusic() }.buttonStyle(.bordered)
+                Text("Pairing music also lets comma show your iPhone notifications.").font(.callout).multilineTextAlignment(.center)
             case .confirm(let code, _, _):
                 Text("Check that comma and this iPhone both show").multilineTextAlignment(.center)
                 Text(code).font(.system(size: 34, weight: .semibold, design: .monospaced))
@@ -36,12 +36,10 @@ struct AudioPairingSheet: View {
                 notificationStep
             case .message(let text):
                 Text(LocalizedStringKey(text)).multilineTextAlignment(.center)
-                notificationStep
             }
             Button((pairing.phase == .done || pairing.phase == .connected) ? "Done" : "Close") { close() }.padding(.top, 6)
         }.padding(24).presentationDetents([.medium, .large])
             .onChange(of: pairing.phase) { _, phase in
-                if case .message = phase { continueToNotifications(); return }
                 guard phase == .done || phase == .connected else { return }
                 continueToNotifications()
             }
@@ -51,12 +49,6 @@ struct AudioPairingSheet: View {
     private func continueToNotifications() {
         guard bluetoothConnected, notificationsSupported, notifications.phase == .idle, !notifications.sharedWithThisComma else { return }
         notifications.start()
-    }
-
-    /// Music is optional: stop it and carry on with notifications.
-    private func skipMusic() {
-        pairing.cancel()
-        continueToNotifications()
     }
 
     @ViewBuilder private var notificationStep: some View {

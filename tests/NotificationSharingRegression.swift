@@ -128,6 +128,15 @@ enum BridgeError: LocalizedError {
         for _ in 0..<50 { await Task.yield() }
         precondition(slow.phase == .idle && !slow.sharedWithThisComma)
 
+        // The Bluetooth link is refreshed before asking comma, so a pairing made in iPhone Settings applies to it.
+        var relinks = 0
+        let relinked = NotificationSharing(transport: { good }, supported: { true }, bond: {}, device: { "comma-6" }, defaults: defaults,
+                                           relink: { relinks += 1 })
+        relinked.start()
+        await settle(relinked) { $0 == .done }
+        precondition(relinks == 1, "Refreshes the link once")
+        precondition(NotificationSharing.message(for: NotificationBondError.declined) == NotificationSharing.needsMusicMessage)
+
         // Music's pairing window is still open: wait for it (closing it once music is done) instead of failing.
         let windowed = BondComma(); windowed.windowPosts = 3
         var closes = 0

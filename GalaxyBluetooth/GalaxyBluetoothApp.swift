@@ -112,7 +112,8 @@ final class AppModel: ObservableObject {
             },
             device: { UserDefaults.standard.string(forKey: "galaxy.bluetooth.device") },
             musicDone: { [weak self] in !(self?.audioPairing.inProgress ?? false) },
-            closeMusicWindow: { [weak self] in await self?.audioPairing.closeWindow() })
+            closeMusicWindow: { [weak self] in await self?.audioPairing.closeWindow() },
+            relink: { [weak self] in await self?.refreshBluetoothLink() })
         value.onEvent = { [weak self] in self?.connectionLog.record($0) }
         return value
     }()
@@ -583,6 +584,19 @@ final class AppModel: ObservableObject {
             connectionMessage = String(localized: "Checking your comma…")
         } catch { connectionMessage = error.localizedDescription }
     }
+    /// Drop and reopen the Bluetooth LE link so iOS and comma use the pairing made in iPhone Settings.
+    func refreshBluetoothLink() async {
+        guard !pairingKey.isEmpty, bluetooth.connected else { return }
+        bluetooth.disconnect(reason: "Refreshing Bluetooth link for phone notifications")
+        try? await Task.sleep(nanoseconds: 2_000_000_000)
+        bluetooth.reconnectSaved(pairingKey: pairingKey)
+        for _ in 0..<40 {
+            if bluetooth.connected { return }
+            try? await Task.sleep(nanoseconds: 500_000_000)
+            if !bluetooth.connected && !bluetooth.connecting && !bluetooth.isScanning { bluetooth.reconnectSaved(pairingKey: pairingKey) }
+        }
+    }
+
     func startAudioPairing() {
         guard phoneMusicEnabled, transport.connected else { return }
         audioPairing.onEvent = { [weak self] event in self?.connectionLog.record(event) }
