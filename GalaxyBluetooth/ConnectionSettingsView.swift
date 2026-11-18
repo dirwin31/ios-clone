@@ -190,7 +190,7 @@ struct ConnectionSettingsView: View {
             }
             .confirmationDialog("Forget Bluetooth pairing?", isPresented: $confirmForget, titleVisibility: .visible) {
                 Button("Forget pairing", role: .destructive) {
-                    model.disconnect(); bluetooth.forgetSavedDevice(); PairingKeyStore.remove(); model.pairingKey = ""
+                    model.disconnect(); bluetooth.forgetSavedDevice(); model.resetPhoneSetup(); PairingKeyStore.remove(); model.pairingKey = ""
                     lan.bind(to: nil); UserDefaults.standard.removeObject(forKey: "galaxy.comma.identity")
                 }
             } message: { Text("This removes the saved app pairing. Pair your phone again to reconnect.") }
