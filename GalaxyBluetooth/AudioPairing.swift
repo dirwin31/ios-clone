@@ -29,7 +29,12 @@ final class AudioPairing: ObservableObject {
     }
 
     var onEvent: ((String) -> Void)?
-    @Published private(set) var phase: Phase = .idle
+    @Published private(set) var phase: Phase = .idle {
+        didSet { if phase == .done || phase == .connected { notePaired() } }
+    }
+    static let hintKey = "galaxy.music.pairedDevice"
+    private let device: () -> String?
+    private let defaults: UserDefaults
     private let transport: () -> (any GalaxyRequestTransport)?
     private let pause: () async -> Void
     private let audioOutput: (String) -> Bool
@@ -38,8 +43,27 @@ final class AudioPairing: ObservableObject {
 
     init(transport: @escaping () -> (any GalaxyRequestTransport)?, attempts: Int = 125,
          audioOutput: ((String) -> Bool)? = nil,
-         pause: @escaping () async -> Void = { try? await Task.sleep(nanoseconds: 1_000_000_000) }) {
+         pause: @escaping () async -> Void = { try? await Task.sleep(nanoseconds: 1_000_000_000) },
+         device: @escaping () -> String? = { nil }, defaults: UserDefaults = .standard) {
         self.transport = transport; self.attempts = attempts; self.pause = pause; self.audioOutput = audioOutput ?? { AudioPairing.isAudioOutput($0) }
+        self.device = device; self.defaults = defaults
+    }
+
+    /// A hint only: forgetting comma in iPhone Settings removes the pairing without the app knowing.
+    var pairedWithThisComma: Bool {
+        guard let id = device(), !id.isEmpty else { return false }
+        return defaults.string(forKey: Self.hintKey) == id
+    }
+
+    /// After the app's data is cleared, comma playing this iPhone's audio still shows music is paired.
+    func refreshPaired() async {
+        guard phase == .idle, !pairedWithThisComma, let snapshot = await status() else { return }
+        let name = snapshot.adapterName.isEmpty ? "comma" : snapshot.adapterName
+        if audioOutput(name) { notePaired(); objectWillChange.send() }
+    }
+
+    private func notePaired() {
+        if let id = device(), !id.isEmpty { defaults.set(id, forKey: Self.hintKey) }
     }
 
     static func isAudioOutput(_ commaName: String) -> Bool {
@@ -60,7 +84,7 @@ final class AudioPairing: ObservableObject {
         case .done: return "Paired · choose comma as audio output"
         case .opening, .waiting, .confirm: return "Music pairing in progress"
         case .message: return "Music setup needs attention"
-        case .idle: return "Music output not checked"
+        case .idle: return pairedWithThisComma ? "Paired with comma" : "Not set up"
         }
     }
 

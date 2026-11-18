@@ -478,11 +478,13 @@ struct ConnectionSettingsView: View {
         VStack(spacing: extraSpacing) {
             preferenceSection("Phone & alerts", expanded: $phoneExpanded) {
                 row("music.note", title: "Phone music", subtitle: pairing ? "Waiting for app pairing" : audio.summary) {
-                    Button("Set up") { model.startAudioPairing() }.disabled(!connected || pairing).font(.system(size: 12)).frame(minHeight: 44)
+                    setupControl(done: audio.pairedWithThisComma || audio.finished, label: "Phone music") { model.startAudioPairing() }
+                        .disabled(!connected || pairing)
                 }
                 separator
                 row("bell.badge", title: "Phone notifications", subtitle: pairing ? "Waiting for app pairing" : notifications.summary(bluetoothConnected: bluetooth.connected)) {
-                    Button("Set up") { showNotifications = true }.disabled(pairing).font(.system(size: 12)).frame(minHeight: 44)
+                    setupControl(done: notifications.sharedWithThisComma || notifications.phase == .done, label: "Phone notifications") { showNotifications = true }
+                        .disabled(pairing)
                 }
                 separator
                 toggleRow("location", title: "Share phone location", subtitle: location.status.isEmpty ? "Optional" : location.status,
@@ -542,6 +544,7 @@ struct ConnectionSettingsView: View {
                 }
             }
         }.background(panel, in: RoundedRectangle(cornerRadius: 20))
+            .task(id: connected) { if connected { await audio.refreshPaired() } }
             .overlay(RoundedRectangle(cornerRadius: 20).stroke(accent.opacity(0.23)).allowsHitTesting(false))
     }
 
@@ -613,6 +616,14 @@ struct ConnectionSettingsView: View {
     private var separator: some View { Rectangle().fill(accent.opacity(0.12)).frame(height: 1).padding(.leading, 42) }
     private func message(_ text: String) -> some View {
         Text(LocalizedStringKey(text)).font(.system(size: 11)).foregroundStyle(muted).fixedSize(horizontal: false, vertical: true)
+    }
+    /// "Set up" until it is done, then a checkmark that reopens it.
+    @ViewBuilder private func setupControl(done: Bool, label: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            if done { Image(systemName: "checkmark.circle.fill").font(.system(size: 20)).foregroundStyle(.green).frame(width: 44, height: 44) }
+            else { Text("Set up") }
+        }.font(.system(size: 12)).frame(minHeight: 44)
+            .accessibilityLabel(done ? "\(label) is set up" : "Set up \(label)")
     }
     private func toggleRow(_ symbol: String, title: String, subtitle: String, isOn: Binding<Bool>) -> some View {
         row(symbol, title: title, subtitle: subtitle) {

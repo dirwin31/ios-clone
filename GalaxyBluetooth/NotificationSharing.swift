@@ -65,11 +65,11 @@ final class NotificationSharing: ObservableObject {
     func summary(bluetoothConnected: Bool) -> String {
         switch phase {
         case .requesting, .waitingForMusic, .relinking, .pairing: return "Setup in progress"
-        case .done: return "Shared with comma"
+        case .done: return "On · shared with comma"
         case .message: return "Setup needs attention"
         case .idle:
             if bluetoothConnected && !supported() { return "Needs a StarPilot update on comma" }
-            return sharedWithThisComma ? "Set up on this comma" : "Not set up"
+            return sharedWithThisComma ? "On · shared with comma" : "Not set up"
         }
     }
 
