@@ -111,6 +111,14 @@ final class AudioPairing: ObservableObject {
 
     var finished: Bool { phase == .done || phase == .connected }
 
+    /// Music setup is actually running (not just a pairing window left open from pairing the app).
+    var inProgress: Bool {
+        switch phase {
+        case .opening, .waiting, .confirm: return true
+        default: return false
+        }
+    }
+
     func dismiss() { if case .message = phase { phase = .idle } else if phase == .done || phase == .connected { phase = .idle } else { cancel() } }
 
     private func post(_ payload: [String: Any]) async throws -> BridgeResponse? {
