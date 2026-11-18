@@ -14,6 +14,10 @@ struct NotificationSharingProgress: View {
             ProgressView("Asking comma to get ready…")
         case .waitingForMusic:
             ProgressView("Finishing music pairing…")
+        case .relinking:
+            ProgressView("Reconnecting to comma so it can see your notifications…")
+            Text("If iOS asks to allow notifications for comma, tap **Allow**. This takes a few seconds.")
+                .font(.callout).multilineTextAlignment(.center)
         case .pairing:
             Text("When iOS asks, tap **Pair**, then allow **Share System Notifications** (or **Allow Notifications**).")
                 .multilineTextAlignment(.center)

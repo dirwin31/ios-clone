@@ -13,6 +13,7 @@ final class NotificationSharing: ObservableObject {
         case idle
         case requesting
         case waitingForMusic
+        case relinking
         case pairing
         case done
         case message(String)
@@ -53,7 +54,7 @@ final class NotificationSharing: ObservableObject {
     /// Comma's music window lasts two minutes and blocks the notification bond; wait for it instead of failing.
     static let musicWindowWaits = 70
 
-    var active: Bool { phase == .requesting || phase == .waitingForMusic || phase == .pairing }
+    var active: Bool { phase == .requesting || phase == .waitingForMusic || phase == .relinking || phase == .pairing }
 
     /// A hint only: the person can turn sharing off in iPhone Settings without the app knowing.
     var sharedWithThisComma: Bool {
@@ -63,7 +64,7 @@ final class NotificationSharing: ObservableObject {
 
     func summary(bluetoothConnected: Bool) -> String {
         switch phase {
-        case .requesting, .waitingForMusic, .pairing: return "Setup in progress"
+        case .requesting, .waitingForMusic, .relinking, .pairing: return "Setup in progress"
         case .done: return "Shared with comma"
         case .message: return "Setup needs attention"
         case .idle:
@@ -127,47 +128,22 @@ final class NotificationSharing: ObservableObject {
     private func run() async {
         guard let first = transport(), first.connected else { phase = .message(Self.bluetoothMessage); return }
         guard supported() else { phase = .message(Self.updateMessage); return }
-        // Pairing music in iPhone Settings also gives comma the keys for this Bluetooth LE link, but a link opened
-        // before that pairing keeps its old unpaired identity. A fresh link is recognised as the paired iPhone.
-        onEvent?("Phone notifications refreshing the Bluetooth link")
-        await relink()
-        if Task.isCancelled { return }
-        guard let transport = transport(), transport.connected else { phase = .message(Self.bluetoothMessage); return }
-        onEvent?("Phone notifications Bluetooth link refreshed")
-        var response: BridgeResponse
-        var waits = 0
+        var relinked = false
         while true {
-            do {
-                response = try await transport.request(path: Self.windowPath, method: "POST",
-                                                       headers: ["Content-Type": "application/json"], body: Data("{}".utf8))
-            } catch {
-                if Task.isCancelled { return }
-                onEvent?("Phone notifications window request failed: " + error.localizedDescription)
-                phase = .message(transport.connected ? Self.updateMessage : Self.bluetoothMessage)
-                return
+            guard let transport = transport(), transport.connected else {
+                phase = .message(relinked ? Self.relinkMessage : Self.bluetoothMessage); return
             }
+            guard let seconds = await openWindow(transport) else { return }
+            // 0 means comma already knows this link as the paired iPhone (the pairing made with Phone music).
+            if seconds == 0 || relinked { break }
+            // Pairing music in iPhone Settings gives comma the keys for this iPhone, but a Bluetooth link opened before
+            // that pairing keeps its old unknown identity. A fresh link is recognised as the paired iPhone.
+            relinked = true
+            phase = .relinking
+            onEvent?("Phone notifications refreshing the Bluetooth link")
+            await relink()
             if Task.isCancelled { return }
-            onEvent?("Phone notifications window request finished: HTTP \(response.status)")
-            guard response.status == 409, Self.code(response.bodyData) == "pairing_window" else { break }
-            guard waits < Self.musicWindowWaits else { phase = .message(Self.musicWindowMessage); return }
-            // Nobody is setting up music (finished, cancelled, or the window is just left open from pairing the app): close it so setup continues at once.
-            if waits == 0 { phase = .waitingForMusic; onEvent?("Phone notifications: comma's pairing window is open; music setup running=\(!musicDone())") }
-            if musicDone() {
-                onEvent?("Phone notifications closing comma's leftover pairing window (attempt \(waits + 1))")
-                await closeMusicWindow()
-            } else if waits % 5 == 0 { onEvent?("Phone notifications waiting for the music pairing window") }
-            waits += 1
-            await pause()
-            if Task.isCancelled { return }
-        }
-        switch response.status {
-        case 200: break
-        case 409:
-            phase = .message(Self.busyMessage(response.bodyData)); return
-        case 400, 404, 405, 501:
-            phase = .message(Self.updateMessage); return
-        default:
-            phase = .message("Comma couldn't start setup. Try again."); return
+            phase = .requesting
         }
         phase = .pairing
         do {
@@ -186,7 +162,49 @@ final class NotificationSharing: ObservableObject {
         phase = .done
     }
 
+    /// Asks comma for its notification bond window; returns its seconds (0 when already paired), or nil after setting a message.
+    private func openWindow(_ transport: any GalaxyRequestTransport) async -> Int? {
+        var response: BridgeResponse
+        var waits = 0
+        while true {
+            do {
+                response = try await transport.request(path: Self.windowPath, method: "POST",
+                                                       headers: ["Content-Type": "application/json"], body: Data("{}".utf8))
+            } catch {
+                if Task.isCancelled { return nil }
+                onEvent?("Phone notifications window request failed: " + error.localizedDescription)
+                phase = .message(transport.connected ? Self.updateMessage : Self.bluetoothMessage)
+                return nil
+            }
+            if Task.isCancelled { return nil }
+            onEvent?("Phone notifications window request finished: HTTP \(response.status)")
+            guard response.status == 409, Self.code(response.bodyData) == "pairing_window" else { break }
+            guard waits < Self.musicWindowWaits else { phase = .message(Self.musicWindowMessage); return nil }
+            // Nobody is setting up music (finished, cancelled, or the window is just left open from pairing the app): close it so setup continues at once.
+            if waits == 0 { phase = .waitingForMusic; onEvent?("Phone notifications: comma's pairing window is open; music setup running=\(!musicDone())") }
+            if musicDone() {
+                onEvent?("Phone notifications closing comma's leftover pairing window (attempt \(waits + 1))")
+                await closeMusicWindow()
+            } else if waits % 5 == 0 { onEvent?("Phone notifications waiting for the music pairing window") }
+            waits += 1
+            await pause()
+            if Task.isCancelled { return nil }
+        }
+        switch response.status {
+        case 200:
+            let value = (try? JSONSerialization.jsonObject(with: response.bodyData)) as? [String: Any]
+            return (value?["seconds"] as? Int) ?? 60
+        case 409:
+            phase = .message(Self.busyMessage(response.bodyData)); return nil
+        case 400, 404, 405, 501:
+            phase = .message(Self.updateMessage); return nil
+        default:
+            phase = .message("Comma couldn't start setup. Try again."); return nil
+        }
+    }
+
     nonisolated static let needsMusicMessage = "Your iPhone didn't pair with comma for notifications. Set up **Phone music** first and tap **Pair** when iOS asks: notifications use the same pairing."
+    nonisolated static let relinkMessage = "Comma didn't reconnect in time. Tap **Try again**; setup picks up where it left off."
     nonisolated static let musicWindowMessage = "Comma is still finishing music pairing. Try again in a minute."
 
     nonisolated static func code(_ body: Data) -> String? {
