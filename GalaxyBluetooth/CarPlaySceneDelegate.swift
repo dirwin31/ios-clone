@@ -598,7 +598,8 @@ final class CarPlaySceneDelegate: NSObject, CPTemplateApplicationSceneDelegate, 
     }
 
     private func openSettings(_ name: String, title: String) {
-        let page = CPListTemplate(title: localizedCarPlay(title), sections: [])
+        let loading = settingsItem("Loading…", icon: "hourglass", enabled: false)
+        let page = CPListTemplate(title: localizedCarPlay(title), sections: [CPListSection(items: [loading])])
         page.userInfo = SettingsPageState(name)
         pushTemplate(page, animated: true) { [weak self, weak page] success, _ in
             if success, let page { self?.loadSettings(page) }
@@ -627,6 +628,31 @@ final class CarPlaySceneDelegate: NSObject, CPTemplateApplicationSceneDelegate, 
         state.snapshot = try await request("/api/settings/pages/" + name)
         state.session = session
     }
+    private static let categoryIcons = [
+        "vehicle": "car.fill", "lane": "road.lanes", "lane_change": "arrow.left.arrow.right",
+        "profiles": "slider.horizontal.3", "personalities": "person.2.fill", "slc": "speedometer",
+        "localization": "globe", "developer": "chevron.left.forwardslash.chevron.right",
+        "sounds": "speaker.wave.2.fill"
+    ]
+
+    private func isOnOffChoice(_ choices: [String]) -> Bool {
+        choices.count == 2 && choices.contains("On") && choices.contains("Off")
+    }
+
+    // CarPlay owns the row and its tap target. The trailing image reflects the
+    // last value read from comma, including while the user reviews a change.
+    private static func switchImage(on: Bool) -> UIImage {
+        let size = CGSize(width: 38, height: 22)
+        return UIGraphicsImageRenderer(size: size).image { _ in
+            (on ? UIColor.systemGreen : UIColor.systemGray).setFill()
+            UIBezierPath(roundedRect: CGRect(origin: .zero, size: size), cornerRadius: 11).fill()
+            UIColor.white.setFill()
+            UIBezierPath(ovalIn: CGRect(x: on ? 18 : 2, y: 2, width: 18, height: 18)).fill()
+        }.withRenderingMode(.alwaysOriginal)
+    }
+    private static let onImage = switchImage(on: true)
+    private static let offImage = switchImage(on: false)
+
     private func drawSettings(_ page: CPListTemplate) {
         guard let state = page.userInfo as? SettingsPageState else { return }
         let rows = state.snapshot["rows"] as? [[String: Any]] ?? []
@@ -637,16 +663,25 @@ final class CarPlaySceneDelegate: NSObject, CPTemplateApplicationSceneDelegate, 
         let items = (start..<min(rows.count, start + capacity)).map { index in
             let row = rows[index]
             let child = row["page"] as? String ?? ""
-            let value = row["value"].map { String(describing: $0) }
+            let value = row["value"].flatMap { $0 is NSNull ? nil : String(describing: $0) }
+            let choices = row["choices"] as? [String] ?? []
+            let binary = child.isEmpty && isOnOffChoice(choices) && (value == "On" || value == "Off")
+            let icon = child.isEmpty
+                ? (binary ? "power" : choices.isEmpty ? "slider.horizontal.3" : "list.bullet")
+                : (Self.categoryIcons[child] ?? "folder")
             let enabled = row["available"] as? Bool == true && (!child.isEmpty || row["action"] as? Bool == true) && !busy
             let item = settingsItem(row["label"] as? String ?? "Setting", detail: child.isEmpty ? value : nil,
-                                    icon: child.isEmpty ? "slider.horizontal.3" : "folder", enabled: enabled) { [weak self, weak page] in
+                                    icon: icon, enabled: enabled) { [weak self, weak page] in
                 guard let self, let page else { return }
                 guard state.session == self.session else { self.loadSettings(page); return }
                 if !child.isEmpty { self.openSettings(child, title: row["label"] as? String ?? "Toggles") }
                 else { self.editSetting(page, index: index, row: row) }
             }
-            item.accessoryType = .disclosureIndicator
+            if binary {
+                item.setAccessoryImage(value == "On" ? Self.onImage : Self.offImage)
+            } else if enabled {
+                item.accessoryType = .disclosureIndicator
+            }
             return item
         }
         page.updateSections([CPListSection(items: items.isEmpty ? [settingsItem("No settings available", icon: "info.circle", enabled: false)] : items)])
@@ -656,14 +691,14 @@ final class CarPlaySceneDelegate: NSObject, CPTemplateApplicationSceneDelegate, 
     }
     private func editSetting(_ parent: CPListTemplate, index: Int, row: [String: Any]) {
         let choices = row["choices"] as? [String] ?? []
-        if choices.count == 2, choices.contains("On"), choices.contains("Off") {
+        if isOnOffChoice(choices) {
             preview(parent, index: index, selection: row["value"] as? String == "On" ? "Off" : "On")
             return
         }
         let editor = CPListTemplate(title: row["label"] as? String, sections: [])
         let current = String(describing: row["value"] ?? "")
         if !choices.isEmpty {
-            var choicePage = 0
+            var choicePage = (choices.firstIndex(of: current) ?? 0) / max(1, CPListTemplate.maximumItemCount)
             func redraw() {
                 let capacity = max(1, CPListTemplate.maximumItemCount)
                 let count = max(1, (choices.count + capacity - 1) / capacity)
@@ -692,12 +727,12 @@ final class CarPlaySceneDelegate: NSObject, CPTemplateApplicationSceneDelegate, 
     private func drawStepper(_ editor: CPListTemplate, parent: CPListTemplate, index: Int, row: [String: Any]) {
         let value = String(describing: row["value"] ?? "")
         let items = [(-1, "Decrease", "minus.circle"), (1, "Increase", "plus.circle")].map { direction, title, icon in
-            settingsItem(title, detail: value, icon: icon, enabled: row["available"] as? Bool == true && row["action"] as? Bool == true) { [weak self, weak editor, weak parent] in
+            settingsItem(title, icon: icon, enabled: row["available"] as? Bool == true && row["action"] as? Bool == true) { [weak self, weak editor, weak parent] in
                 guard let self, let editor, let parent, !self.busy else { return }
                 self.applyStep(direction, editor: editor, parent: parent, index: index, row: row)
             }
         }
-        editor.updateSections([CPListSection(items: items)])
+        editor.updateSections([CPListSection(items: items, header: value, sectionIndexTitle: nil)])
     }
 
     private func applyStep(_ direction: Int, editor: CPListTemplate, parent: CPListTemplate, index: Int, row: [String: Any]) {
