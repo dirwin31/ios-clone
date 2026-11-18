@@ -467,8 +467,6 @@ struct ConnectionSettingsView: View {
 
     private func preferences(extraSpacing: CGFloat = 0) -> some View {
         VStack(spacing: extraSpacing) {
-            toggleRow("sparkles", title: "Galactical Animations", subtitle: "Animate the connection orbit, page transitions, and tab selection", isOn: $galacticalAnimations)
-            separator
             preferenceSection("Phone & alerts", expanded: $phoneExpanded) {
                 row("music.note", title: "Phone music", subtitle: pairing ? "Waiting for app pairing" : audio.summary) {
                     Button("Set up") { model.startAudioPairing() }.disabled(!connected || pairing).font(.system(size: 12)).frame(minHeight: 44)
@@ -495,7 +493,9 @@ struct ConnectionSettingsView: View {
                     .font(.system(size: 11)).foregroundStyle(muted)
             }
             separator
-            preferenceSection("Galaxy screens & language", expanded: $galaxyExpanded) {
+            preferenceSection("Appearance & language", expanded: $galaxyExpanded) {
+                toggleRow("sparkles", title: "Galactical Animations", subtitle: "Animate the connection orbit, page transitions, and tab selection", isOn: $galacticalAnimations)
+                separator
                 row("rectangle.on.rectangle", title: "Galaxy screens", subtitle: pairing ? "Waiting for pairing" : checking ? "Checking version…" : assets.status == "Galaxy matches comma." ? "Up to date · just checked" : assets.status.contains("screens have changed") ? "Update available · connect over Wi-Fi or Tunnel" : assets.readyRoot != nil ? "Saved from your comma" : "Not downloaded · needs Local Wi-Fi or Tunnel") {
                     Button {
                         Task { await model.checkGalaxyUpdates(); checked = true }

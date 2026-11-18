@@ -29,30 +29,30 @@
         }
       }
     },
-    "Galaxy screens & language": {
+    "Appearance & language": {
       "localizations": {
         "es": {
           "stringUnit": {
             "state": "translated",
-            "value": "Pantallas de Galaxy e idioma"
+            "value": "Apariencia e idioma"
           }
         },
         "fr": {
           "stringUnit": {
             "state": "translated",
-            "value": "Écrans Galaxy et langue"
+            "value": "Apparence et langue"
           }
         },
         "ko": {
           "stringUnit": {
             "state": "translated",
-            "value": "Galaxy 화면 및 언어"
+            "value": "화면 스타일 및 언어"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "Galaxy 界面与语言"
+            "value": "外观与语言"
           }
         }
       }
