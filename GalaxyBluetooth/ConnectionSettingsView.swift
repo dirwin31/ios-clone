@@ -21,6 +21,7 @@ struct ConnectionSettingsView: View {
     @Environment(\.openURL) private var openURL
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @AppStorage("galaxy.app.language") private var language = "en"
+    @AppStorage("galaxy.galacticalAnimations") private var galacticalAnimations = true
     @AppStorage("galaxy.app.followGalaxyLanguage") private var followGalaxyLanguage = true
     @AppStorage("galaxy.location.hideIndicator") private var hideLocationIndicator = false
     @State private var showOrder = false
@@ -178,6 +179,7 @@ struct ConnectionSettingsView: View {
                     }.frame(maxWidth: .infinity)
 
                     VStack(spacing: 8) {
+                        ConnectionOrbit(route: connected ? model.transport.label : "", pairing: pairing)
                         connectionPanel(extraSpacing: 6)
                         connectionExtras
                     }.frame(maxWidth: .infinity)
@@ -464,6 +466,8 @@ struct ConnectionSettingsView: View {
 
     private func preferences(extraSpacing: CGFloat = 0) -> some View {
         VStack(spacing: extraSpacing) {
+            toggleRow("sparkles", title: "Galactical Animations", subtitle: "Comet orbits and starbursts between app screens", isOn: $galacticalAnimations)
+            separator
             row("music.note", title: "Phone music", subtitle: pairing ? "Waiting for app pairing" : audio.summary) {
                 Button("Set up") { model.startAudioPairing() }.disabled(!connected || pairing).font(.system(size: 12)).frame(minHeight: 44)
             }
@@ -609,15 +613,27 @@ private struct PairingSignal: View {
     }
 }
 
-private struct ConnectionOrbit: View {
+struct ConnectionLandingPoint: PreferenceKey {
+    static var defaultValue: CGPoint? { nil }
+    static func reduce(value: inout CGPoint?, nextValue: () -> CGPoint?) {
+        if let point = nextValue() { value = point }
+    }
+}
+
+struct ConnectionOrbit: View {
     let route: String
     let pairing: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
     @State private var sweepStart = Date()
+    @State private var launchAngle = -380.0
+    @State private var landed = false
     private let purple = Color(red: 0.68, green: 0.48, blue: 0.96)
     private var destinationAngle: Double {
-        if pairing || route == "Bluetooth" { return 110 }
+        targetAngle(for: route)
+    }
+    private func targetAngle(for route: String) -> Double {
+        if route == "Bluetooth" { return 110 }
         if route == "Local Wi-Fi" { return 155 }
         return route == "Tunnel" ? -25 : -90
     }
@@ -627,16 +643,16 @@ private struct ConnectionOrbit: View {
             Ellipse().stroke(purple.opacity(0.35), style: StrokeStyle(lineWidth: 1, dash: [2, 4]))
                 .frame(width: 258, height: 76).rotationEffect(.degrees(-9)).position(x: 132, y: 48)
             if !reduceMotion {
-                TimelineView(.animation(minimumInterval: 1.0 / 30, paused: scenePhase != .active)) { timeline in
+                TimelineView(.animation(minimumInterval: 1.0 / 30, paused: scenePhase != .active || landed)) { timeline in
                     Canvas { context, _ in
                         let elapsed = max(0, timeline.date.timeIntervalSince(sweepStart))
-                        let progress = min(elapsed / 1.15, 1)
-                        // Ease out the opening arc into one steady revolution every 18 seconds.
-                        let head = destinationAngle - 267 * pow(1 - progress, 2) + 20 * (elapsed - 1.15)
-                        let intensity = 0.55 * progress + 0.7 * sin(.pi * progress)
+                        let progress = min(elapsed / Self.flightDuration, 1)
+                        let head = cometAngle(elapsed: elapsed, target: destinationAngle, connected: !route.isEmpty)
+                        let intensity = 0.55 + 0.45 * sin(.pi * progress)
                         for index in 0..<22 {
                             let fraction = Double(index) / 21
-                            let point = orbitPoint(head - 54 * (1 - fraction) * intensity)
+                            let tail = route.isEmpty ? 54 : 54 * (1 - progress)
+                            let point = orbitPoint(head - tail * (1 - fraction) * intensity)
                             let radius = 0.6 + 1.6 * fraction
                             let dot = CGRect(x: point.x - radius, y: point.y - radius, width: 2 * radius, height: 2 * radius)
                             context.fill(Path(ellipseIn: dot), with: .color((index == 21 ? Color.white : purple).opacity(fraction * intensity)))
@@ -653,8 +669,33 @@ private struct ConnectionOrbit: View {
             node("ConnectionBluetooth", angle: 110, active: route == "Bluetooth" || pairing)
             node("ConnectionNetwork", angle: -25, active: route == "Tunnel")
         }.frame(width: 264, height: 88).accessibilityHidden(true)
-            .onAppear { sweepStart = Date() }
-            .onChange(of: destinationAngle) { _, _ in sweepStart = Date() }
+            .background {
+                GeometryReader { geometry in
+                    let frame = geometry.frame(in: .named("companionPage"))
+                    let node = orbitPoint(destinationAngle)
+                    Color.clear.preference(key: ConnectionLandingPoint.self, value: CGPoint(x: frame.minX + node.x, y: frame.minY + node.y))
+                }
+            }
+            .task(id: route) {
+                landed = false
+                guard !route.isEmpty else { return }
+                do { try await Task.sleep(for: .seconds(Self.flightDuration + 0.08)) } catch { return }
+                landed = true
+            }
+            .onChange(of: route) { old, _ in
+                let oldTarget = targetAngle(for: old)
+                let now = Date()
+                launchAngle = cometAngle(elapsed: max(0, now.timeIntervalSince(sweepStart)), target: oldTarget, connected: !old.isEmpty)
+                sweepStart = now
+            }
+    }
+    static let flightDuration = 0.85
+    private func cometAngle(elapsed: Double, target: Double, connected: Bool) -> Double {
+        let progress = min(elapsed / Self.flightDuration, 1)
+        let gap = (target - launchAngle).truncatingRemainder(dividingBy: 360)
+        let travel = gap + (gap <= 0 ? 360 : 0) + (connected ? 360 : 0)
+        return launchAngle + travel * (1 - pow(1 - progress, 3))
+            + (connected ? 0 : 20 * max(0, elapsed - Self.flightDuration))
     }
     private func orbitPoint(_ angle: Double) -> CGPoint {
         let theta = angle * .pi / 180, rotation = 12.0 * .pi / 180
@@ -666,6 +707,11 @@ private struct ConnectionOrbit: View {
         return Image(symbol).renderingMode(.template).resizable().scaledToFit().frame(width: 15, height: 15).foregroundStyle(active ? Color.white : Color.white.opacity(0.65))
             .frame(width: 30, height: 30).background(Color(red: 0.09, green: 0.075, blue: 0.15), in: Circle())
             .overlay(Circle().stroke(Color.white.opacity(active ? 0.75 : 0.4)))
+            .overlay {
+                if active && landed && !route.isEmpty {
+                    Circle().stroke(purple.opacity(0.8), lineWidth: 1.5).padding(-3)
+                }
+            }
             .shadow(color: purple.opacity(active ? 0.65 : 0), radius: 7)
             .scaleEffect(active ? 1.1 : 1)
             .animation(reduceMotion ? nil : .spring(duration: 0.4, bounce: 0.15), value: active)

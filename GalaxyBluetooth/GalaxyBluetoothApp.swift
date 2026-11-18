@@ -922,6 +922,14 @@ struct GalaxyRootView: View {
     @ObservedObject private var navigation: NavigationModel
     @State private var hasVisitedGalaxy = false
     @State private var appTabsExpanded = true
+    @AppStorage("galaxy.galacticalAnimations") private var galacticalAnimations = true
+    @State private var presentedTab: CompanionTab
+    @State private var landingStarted: Date?
+    @State private var landingPoint: CGPoint?
+    @State private var burstOrigin: CGPoint?
+    @State private var passage = 0
+    private var motionEnabled: Bool { galacticalAnimations && !reduceMotion && scenePhase == .active }
+    private var page: CompanionTab { motionEnabled ? presentedTab : model.tab }
     @Environment(\.colorScheme) private var systemColorScheme
     private var chromeBackground: LinearGradient {
         if !DuoLayout.isEnabled {
@@ -955,9 +963,13 @@ struct GalaxyRootView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
     init(model: AppModel) {
+        _presentedTab = State(initialValue: model.tab)
         self.model = model; navigation = model.navigationServices.navigation; bluetooth = model.bluetooth; lan = model.lan; assets = model.assets; server = model.server; discovery = model.discovery; galaxyPage = model.galaxyPage
     }
     var body: some View {
+        chrome.environment(\.accessibilityReduceMotion, reduceMotion || !galacticalAnimations)
+    }
+    @ViewBuilder private var chrome: some View {
         if #available(iOS 27.1, *), DuoLayout.isEnabled {
             AdaptiveCompanionChrome(model: model, tab: model.tab, select: select) {
                 rootContent
@@ -988,26 +1000,47 @@ struct GalaxyRootView: View {
                                     .frame(height: 16).allowsHitTesting(false).accessibilityHidden(true)
                             }
                         }
-                        .opacity(model.tab == .galaxy ? 1 : 0)
-                        .allowsHitTesting(model.tab == .galaxy)
-                        .accessibilityHidden(model.tab != .galaxy)
-                } else if model.opened && model.tab == .galaxy {
+                        .opacity(page == .galaxy ? 1 : 0)
+                        .allowsHitTesting(page == .galaxy)
+                        .accessibilityHidden(page != .galaxy)
+                } else if model.opened && page == .galaxy {
                     VStack(spacing: 16) {
                         if server.error.isEmpty { ProgressView("Reconnecting Galaxy…") }
                         else { Text(server.error).multilineTextAlignment(.center) }
                         Button("Retry Galaxy") { model.recoverGalaxy(automatic: false) }.buttonStyle(.bordered)
                     }.padding(24)
                 }
-                if model.navigationEnabled && model.tab == .navigation {
+                if model.navigationEnabled && page == .navigation {
                     NavigationHome(connection: model.navigationServices.connection, navigation: model.navigationServices.navigation, saved: model.navigationServices.saved, selectAppTab: select, submitReport: presentReport) { select(.connections) }
-                } else if model.tab == .logs {
+                } else if page == .logs {
                     DeveloperLogsView(model: model, log: model.connectionLog, back: { select(.connections) }, submitReport: presentReport)
-                } else if model.developerMode && (model.tab == .live || model.tab == .diagnostics) {
+                } else if model.developerMode && (page == .live || page == .diagnostics) {
                     CompanionView(diagnostics: model.diagnostics)
-                } else if model.tab == .connections || !model.opened {
+                } else if page == .connections || !model.opened {
                     ConnectionSettingsView(model: model, returningFromGalaxy: hasVisitedGalaxy, select: select, submitReport: presentReport)
                 }
             }.frame(maxWidth: .infinity, maxHeight: .infinity)
+            .coordinateSpace(name: "companionPage")
+            .onPreferenceChange(ConnectionLandingPoint.self) { landingPoint = $0 }
+            .modifier(GalaxyPagePassage(trigger: passage, enabled: motionEnabled, origin: burstOrigin))
+            .onChange(of: model.transport.selectedRoute, initial: true) { _, route in
+                landingStarted = route == nil ? nil : Date()
+            }
+            .task(id: "\(model.tab.rawValue)-\(motionEnabled)") {
+                let next = model.tab
+                guard motionEnabled, presentedTab != next else { presentedTab = next; return }
+                let docking = presentedTab == .connections && next == .galaxy && model.transport.connected
+                if docking, landingPoint != nil, let start = landingStarted {
+                    let remaining = ConnectionOrbit.flightDuration - Date().timeIntervalSince(start)
+                    if remaining > 0 {
+                        do { try await Task.sleep(for: .seconds(remaining)) } catch { return }
+                    }
+                }
+                guard !Task.isCancelled, model.tab == next else { return }
+                burstOrigin = docking ? landingPoint : nil
+                presentedTab = next
+                passage += 1
+            }
 
         }
         .safeAreaInset(edge: .top, spacing: 0) {
@@ -1098,13 +1131,56 @@ struct GalaxyRootView: View {
         if tab == .connections { appTabsExpanded = true }
         if tab != .connections { discovery.stop() }
         model.connectionLog.record("UI tab selected: \(model.tab.rawValue) → \(tab.rawValue)")
-        withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.22)) { model.tab = tab }
+        withAnimation(motionEnabled ? .easeInOut(duration: 0.22) : nil) { model.tab = tab }
         if tab == .galaxy { hasVisitedGalaxy = true; model.applyMatchedGalaxy() }
         model.diagnostics.live = tab == .live
     }
     private let brandPurple = Color(red: 139.0 / 255, green: 92.0 / 255, blue: 246.0 / 255)
 
 
+}
+
+private struct GalaxyPagePassage: ViewModifier {
+    let trigger: Int
+    let enabled: Bool
+    let origin: CGPoint?
+
+    func body(content: Content) -> some View {
+        content.keyframeAnimator(initialValue: 1.0, trigger: trigger) { page, progress in
+            page
+                .scaleEffect(enabled ? 0.97 + 0.03 * progress : 1)
+                .overlay {
+                    if enabled && progress < 1 {
+                        Canvas { context, size in
+                            let center = origin.flatMap { CGRect(origin: .zero, size: size).contains($0) ? $0 : nil }
+                                ?? CGPoint(x: size.width * 0.5, y: size.height * 0.43)
+                            let radius = hypot(size.width, size.height) * 0.7
+                            let light = 1 - progress
+                            context.fill(Path(CGRect(origin: .zero, size: size)), with: .radialGradient(
+                                Gradient(colors: [.cyan.opacity(light * 0.35), .purple.opacity(light * 0.28), .clear]),
+                                center: center, startRadius: 0, endRadius: radius * (0.15 + progress)))
+                            for index in 0..<48 {
+                                let angle = Double(index) * 2.39996
+                                let depth = Double((index * 17) % 31) / 31
+                                let distance = radius * (0.15 + depth) * progress
+                                let trail = radius * 0.12 * light * progress
+                                var ray = Path()
+                                ray.move(to: CGPoint(x: center.x + cos(angle) * (distance - trail),
+                                                     y: center.y + sin(angle) * (distance - trail)))
+                                ray.addLine(to: CGPoint(x: center.x + cos(angle) * distance,
+                                                        y: center.y + sin(angle) * distance))
+                                let color: Color = index.isMultiple(of: 3) ? .cyan : .purple
+                                context.stroke(ray, with: .color(color.opacity(light * 0.9)), lineWidth: 1 + depth)
+                            }
+                        }
+                        .allowsHitTesting(false).accessibilityHidden(true)
+                    }
+                }
+        } keyframes: { _ in
+            MoveKeyframe(0.0)
+            CubicKeyframe(1.0, duration: 0.52)
+        }
+    }
 }
 
 struct CompanionNavigationBar: View {
