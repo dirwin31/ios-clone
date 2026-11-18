@@ -1121,43 +1121,68 @@ private struct CompanionPageArrival: ViewModifier {
         content.keyframeAnimator(initialValue: 1.0, trigger: page) { screen, progress in
             let active = !reduceMotion && scenePhase == .active && progress < 1
             screen
-                .opacity(active ? 0.91 + 0.09 * progress : 1)
                 .overlay(alignment: .top) {
                     if active {
                         Canvas { context, size in
-                            // A shallow orbital arc. Its luminous section moves while the page stays anchored.
-                            let width = size.width
-                            let height = size.height
-                            guard width > 0, height > 0 else { return }
-                            let sweep = page == .connections ? 1 - progress : progress
-                            let x = width * (-0.18 + 1.36 * sweep)
-                            let reach = min(width * 0.36, 185)
-                            let strength = sin(.pi * progress)
-                            let tint: Color = page == .navigation ? .teal : .purple
-                            let glow = CGPoint(x: x, y: height * 0.38)
-                            context.fill(Path(CGRect(origin: .zero, size: size)), with: .radialGradient(
-                                Gradient(colors: [tint.opacity(0.16 * strength), .clear]),
-                                center: glow, startRadius: 0, endRadius: reach))
-
-                            var arc = Path()
-                            arc.move(to: CGPoint(x: 0, y: height * 0.15))
-                            arc.addQuadCurve(to: CGPoint(x: width, y: height * 0.15),
-                                             control: CGPoint(x: width * 0.5, y: height * 0.85))
-                            context.stroke(arc, with: .linearGradient(
-                                Gradient(colors: [.clear, tint.opacity(0.45 * strength),
-                                                  .white.opacity(0.76 * strength), .clear]),
-                                startPoint: CGPoint(x: x - reach, y: 0),
-                                endPoint: CGPoint(x: x + reach, y: 0)), lineWidth: 1.25)
+                            drawConstellation(in: context, size: size, progress: progress)
                         }
-                        .frame(height: 54)
+                        .frame(height: 66)
                         .allowsHitTesting(false)
                         .accessibilityHidden(true)
                     }
                 }
         } keyframes: { _ in
             MoveKeyframe(0.0)
-            CubicKeyframe(1.0, duration: 0.48)
+            LinearKeyframe(1.0, duration: 0.78)
         }
+    }
+
+    // Each outline is a continuous flight path, so the light at its tip can
+    // draw the figure, linger at the final star, and dissolve in place.
+    private func drawConstellation(in context: GraphicsContext, size: CGSize, progress: Double) {
+        let tint: Color
+        let stars: [CGPoint]
+        switch page {
+        case .navigation:
+            tint = .teal
+            stars = [CGPoint(x: -19, y: 8), CGPoint(x: 17, y: -19),
+                     CGPoint(x: 6, y: 20), CGPoint(x: 0, y: 4), CGPoint(x: -19, y: 8)]
+        case .connections, .logs, .diagnostics:
+            tint = .indigo
+            stars = [CGPoint(x: -23, y: 2), CGPoint(x: -12, y: -12), CGPoint(x: 5, y: -15),
+                     CGPoint(x: 23, y: -2), CGPoint(x: 13, y: 13), CGPoint(x: -5, y: 16),
+                     CGPoint(x: -23, y: 2), CGPoint(x: 0, y: 0), CGPoint(x: 23, y: -2)]
+        case .galaxy, .live:
+            tint = .purple
+            stars = [CGPoint(x: -25, y: 8), CGPoint(x: -18, y: -8), CGPoint(x: -2, y: -17),
+                     CGPoint(x: 16, y: -13), CGPoint(x: 22, y: 1), CGPoint(x: 12, y: 13),
+                     CGPoint(x: -3, y: 14), CGPoint(x: -10, y: 4), CGPoint(x: -4, y: -3), .zero]
+        }
+        var sky = context
+        sky.translateBy(x: size.width * 0.78, y: size.height / 2)
+        sky.opacity = min(1, progress / 0.09, (1 - progress) / 0.26)
+        var outline = Path()
+        outline.addLines(stars)
+        let draw = CGFloat(min(progress / 0.65, 1))
+        let visible = outline.trimmedPath(from: 0, to: draw)
+        guard let head = visible.currentPoint else { return }
+        let halo = Gradient(colors: [tint.opacity(0.62), tint.opacity(0.16), .clear])
+        sky.fill(Path(ellipseIn: CGRect(x: head.x - 19, y: head.y - 19, width: 38, height: 38)),
+                 with: .radialGradient(halo, center: head, startRadius: 0, endRadius: 19))
+        sky.stroke(visible, with: .color(tint), style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
+        sky.stroke(visible, with: .color(.white.opacity(0.8)), lineWidth: 0.75)
+        for point in stars {
+            sky.fill(Path(ellipseIn: CGRect(x: point.x - 1.4, y: point.y - 1.4, width: 2.8, height: 2.8)),
+                     with: .color(.white.opacity(0.85)))
+        }
+        let flare = 3 + 3 * sin(.pi * min(1, max(0, (progress - 0.65) / 0.3)))
+        var glint = Path()
+        glint.move(to: CGPoint(x: head.x, y: head.y - flare))
+        glint.addQuadCurve(to: CGPoint(x: head.x + flare, y: head.y), control: head)
+        glint.addQuadCurve(to: CGPoint(x: head.x, y: head.y + flare), control: head)
+        glint.addQuadCurve(to: CGPoint(x: head.x - flare, y: head.y), control: head)
+        glint.addQuadCurve(to: CGPoint(x: head.x, y: head.y - flare), control: head)
+        sky.fill(glint, with: .color(.white))
     }
 }
 
