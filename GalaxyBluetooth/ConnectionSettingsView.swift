@@ -466,7 +466,7 @@ struct ConnectionSettingsView: View {
 
     private func preferences(extraSpacing: CGFloat = 0) -> some View {
         VStack(spacing: extraSpacing) {
-            toggleRow("sparkles", title: "Galactical Animations", subtitle: "Comet orbits and starbursts between app screens", isOn: $galacticalAnimations)
+            toggleRow("sparkles", title: "Galactical Animations", subtitle: "Animate the connection orbit and tab selection", isOn: $galacticalAnimations)
             separator
             row("music.note", title: "Phone music", subtitle: pairing ? "Waiting for app pairing" : audio.summary) {
                 Button("Set up") { model.startAudioPairing() }.disabled(!connected || pairing).font(.system(size: 12)).frame(minHeight: 44)
@@ -613,14 +613,7 @@ private struct PairingSignal: View {
     }
 }
 
-struct ConnectionLandingPoint: PreferenceKey {
-    static var defaultValue: CGPoint? { nil }
-    static func reduce(value: inout CGPoint?, nextValue: () -> CGPoint?) {
-        if let point = nextValue() { value = point }
-    }
-}
-
-struct ConnectionOrbit: View {
+private struct ConnectionOrbit: View {
     let route: String
     let pairing: Bool
     @Environment(\.reduceGalacticalMotion) private var reduceMotion
@@ -669,13 +662,6 @@ struct ConnectionOrbit: View {
             node("ConnectionBluetooth", angle: 110, active: route == "Bluetooth" || pairing)
             node("ConnectionNetwork", angle: -25, active: route == "Tunnel")
         }.frame(width: 264, height: 88).accessibilityHidden(true)
-            .background {
-                GeometryReader { geometry in
-                    let frame = geometry.frame(in: .named("companionPage"))
-                    let node = orbitPoint(destinationAngle)
-                    Color.clear.preference(key: ConnectionLandingPoint.self, value: CGPoint(x: frame.minX + node.x, y: frame.minY + node.y))
-                }
-            }
             .task(id: route) {
                 landed = false
                 guard !route.isEmpty else { return }
@@ -693,7 +679,7 @@ struct ConnectionOrbit: View {
     private func cometAngle(elapsed: Double, target: Double, connected: Bool) -> Double {
         let progress = min(elapsed / Self.flightDuration, 1)
         let gap = (target - launchAngle).truncatingRemainder(dividingBy: 360)
-        let travel = gap + (gap <= 0 ? 360 : 0) + (connected ? 360 : 0)
+        let travel = gap + (gap <= 0 ? 360 : 0)
         return launchAngle + travel * (1 - pow(1 - progress, 3))
             + (connected ? 0 : 20 * max(0, elapsed - Self.flightDuration))
     }
