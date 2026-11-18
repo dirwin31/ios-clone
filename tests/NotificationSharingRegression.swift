@@ -110,7 +110,7 @@ enum BridgeError: LocalizedError {
         precondition(model.phase == .done && reads == 1 && good.posts == 1)
         precondition(defaults.string(forKey: NotificationSharing.hintKey) == "comma-1")
         model.dismiss()
-        precondition(model.phase == .idle && model.summary(bluetoothConnected: true) == "Set up on this comma")
+        precondition(model.phase == .idle && model.summary(bluetoothConnected: true) == "On · shared with comma")
         model.start()
         await settle(model) { $0 == .done }
         precondition(good.posts == 2)

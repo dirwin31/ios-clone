@@ -102,7 +102,8 @@ final class AppModel: ObservableObject {
     private var offerAudioPairing = false
     private var audioWindowOpen = false
     private let claimer = ClaimTransport()
-    lazy var audioPairing = AudioPairing(transport: { [weak self] in self?.transport })
+    lazy var audioPairing = AudioPairing(transport: { [weak self] in self?.transport },
+                                         device: { UserDefaults.standard.string(forKey: "galaxy.bluetooth.device") })
     lazy var notificationSharing: NotificationSharing = {
         let value = NotificationSharing(transport: { [weak self] in self?.bluetooth },
             supported: { [weak self] in self?.bluetooth.notificationBondSupported ?? false },
