@@ -1,6 +1,13 @@
 import XCTest
 
 final class IntegrationUITests: XCTestCase {
+    private func openSettingsSection(_ title: String, containing control: XCUIElement, in app: XCUIApplication) {
+        guard !control.exists else { return }
+        let header = app.buttons[title]
+        for _ in 0..<4 where !header.isHittable { app.swipeUp() }
+        header.tap()
+        XCTAssertTrue(control.waitForExistence(timeout: 5))
+    }
     func testTunnelSetupValidation() {
         let app = XCUIApplication()
         app.launchArguments = ["-galaxy.app.developerMode", "NO", "-galaxy.app.navigationAlpha", "NO"]
@@ -68,12 +75,14 @@ final class IntegrationUITests: XCTestCase {
         XCTAssertFalse(app.switches["navigation-alpha-toggle"].exists)
         let regular = XCTAttachment(screenshot: app.screenshot()); regular.name = "Regular StarPilot BT"; regular.lifetime = .keepAlways; add(regular)
         let developer = app.switches["developer-mode-toggle"]
+        openSettingsSection("Support & developer", containing: developer, in: app)
         if !developer.isHittable { app.swipeUp() }
         developer.tap()
         let alpha = app.switches["navigation-alpha-toggle"]
         XCTAssertTrue(alpha.waitForExistence(timeout: 5))
         if !alpha.isHittable { app.swipeUp() }
         alpha.tap()
+        app.alerts.buttons["Enable alpha"].tap()
         XCTAssertTrue(app.buttons["expand-app-tabs"].waitForExistence(timeout: 5))
         alpha.tap()
         XCTAssertFalse(app.buttons["expand-app-tabs"].exists)
@@ -100,7 +109,7 @@ final class IntegrationUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Diagnostic report copied."].waitForExistence(timeout: 5))
         app.buttons["bluetooth-connection-status"].tap()
         XCTAssertTrue(app.staticTexts["Your comma"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.staticTexts["Share phone location"].exists)
+        openSettingsSection("Phone & alerts", containing: app.staticTexts["Share phone location"], in: app)
         if app.buttons["expand-app-tabs"].isHittable { app.buttons["expand-app-tabs"].tap() }
         app.buttons["main-tab-Navigation"].tap()
         XCTAssertTrue(app.buttons["bluetooth-connection-status"].exists)

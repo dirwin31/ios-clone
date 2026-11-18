@@ -27,6 +27,9 @@ struct ConnectionSettingsView: View {
     @State private var showOrder = false
     @State private var showTunnel = false
     @State private var advanced = false
+    @SceneStorage("settings.phoneExpanded") private var phoneExpanded = false
+    @SceneStorage("settings.galaxyExpanded") private var galaxyExpanded = false
+    @SceneStorage("settings.supportExpanded") private var supportExpanded = false
     @State private var confirmForget = false
     @State private var confirmPairingReset = false
     @State private var confirmNavigationAlpha = false
@@ -196,12 +199,10 @@ struct ConnectionSettingsView: View {
             if wide {
                 HStack(spacing: 24) {
                     footerLinks
-                    languageMenu
                     versionLabel
                 }.frame(maxWidth: .infinity).padding(.top, 8)
             } else {
                 footerLinks
-                languageMenu
             }
             if !model.legacyMessage.isEmpty { message(model.legacyMessage) }
             if !server.error.isEmpty { message(server.error) }
@@ -468,64 +469,83 @@ struct ConnectionSettingsView: View {
         VStack(spacing: extraSpacing) {
             toggleRow("sparkles", title: "Galactical Animations", subtitle: "Animate the connection orbit, page transitions, and tab selection", isOn: $galacticalAnimations)
             separator
-            row("music.note", title: "Phone music", subtitle: pairing ? "Waiting for app pairing" : audio.summary) {
-                Button("Set up") { model.startAudioPairing() }.disabled(!connected || pairing).font(.system(size: 12)).frame(minHeight: 44)
+            preferenceSection("Phone & alerts", expanded: $phoneExpanded) {
+                row("music.note", title: "Phone music", subtitle: pairing ? "Waiting for app pairing" : audio.summary) {
+                    Button("Set up") { model.startAudioPairing() }.disabled(!connected || pairing).font(.system(size: 12)).frame(minHeight: 44)
+                }
+                separator
+                toggleRow("location", title: "Share phone location", subtitle: location.status.isEmpty ? "Optional" : location.status,
+                          isOn: Binding(get: { location.sharing }, set: { location.setSharing($0) }))
+                separator
+                toggleRow("bell", title: "Sentry phone alerts", subtitle: sentry.status,
+                          isOn: Binding(get: { sentry.enabled }, set: { enabled in
+                              Task { await sentry.setEnabled(enabled) }
+                          }))
+                separator
+                if sentry.enabled && sentry.registered {
+                    row("bell", title: "Test Sentry alerts", subtitle: sentry.status) {
+                        Button("Test") { Task { await sentry.test() } }
+                            .font(.system(size: 12)).frame(minHeight: 44)
+                            .accessibilityLabel("Send test to this iPhone")
+                    }
+                    Divider()
+                }
+                Toggle("Hide background location indicator", isOn: Binding(get: { hideLocationIndicator }, set: { hideLocationIndicator = $0; location.setHideBackgroundIndicator($0) }))
+                Text("Requires Always location access. iOS may still show the indicator with While Using access.")
+                    .font(.system(size: 11)).foregroundStyle(muted)
             }
             separator
-            toggleRow("location", title: "Share phone location", subtitle: location.status.isEmpty ? "Optional" : location.status,
-                      isOn: Binding(get: { location.sharing }, set: { location.setSharing($0) }))
-            separator
-            toggleRow("bell", title: "Sentry phone alerts", subtitle: sentry.status,
-                      isOn: Binding(get: { sentry.enabled }, set: { enabled in
-                          Task { await sentry.setEnabled(enabled) }
-                      }))
-            separator
-            row("rectangle.on.rectangle", title: "Galaxy screens", subtitle: pairing ? "Waiting for pairing" : checking ? "Checking version…" : assets.status == "Galaxy matches comma." ? "Up to date · just checked" : assets.status.contains("screens have changed") ? "Update available · connect over Wi-Fi or Tunnel" : assets.readyRoot != nil ? "Saved from your comma" : "Not downloaded · needs Local Wi-Fi or Tunnel") {
-                Button {
-                    Task { await model.checkGalaxyUpdates(); checked = true }
-                } label: {
-                    if checking { ProgressView().controlSize(.small).accessibilityLabel("Checking Galaxy") }
-                    else { Text(checked ? assets.readyRoot != nil ? "✓ Checked" : "Retry" : "Check") }
-                }.font(.system(size: 12)).frame(minHeight: 44).disabled(checking || !connected || pairing)
-            }
-            if !checking && (checked || assets.status.contains("screens have changed") || assets.status.contains("Couldn’t check Galaxy screens")) { message(assets.status).padding(.horizontal, 14).padding(.bottom, 10) }
-            separator
-            row("ladybug", title: "Logs & support", subtitle: "Report a problem or share diagnostics") {
-                Button { select(.logs) } label: { Image(systemName: "chevron.right").frame(width: 44, height: 44) }.accessibilityLabel("Open Logs & support")
+            preferenceSection("Galaxy screens & language", expanded: $galaxyExpanded) {
+                row("rectangle.on.rectangle", title: "Galaxy screens", subtitle: pairing ? "Waiting for pairing" : checking ? "Checking version…" : assets.status == "Galaxy matches comma." ? "Up to date · just checked" : assets.status.contains("screens have changed") ? "Update available · connect over Wi-Fi or Tunnel" : assets.readyRoot != nil ? "Saved from your comma" : "Not downloaded · needs Local Wi-Fi or Tunnel") {
+                    Button {
+                        Task { await model.checkGalaxyUpdates(); checked = true }
+                    } label: {
+                        if checking { ProgressView().controlSize(.small).accessibilityLabel("Checking Galaxy") }
+                        else { Text(checked ? assets.readyRoot != nil ? "✓ Checked" : "Retry" : "Check") }
+                    }.font(.system(size: 12)).frame(minHeight: 44).disabled(checking || !connected || pairing)
+                }
+                if !checking && (checked || assets.status.contains("screens have changed") || assets.status.contains("Couldn’t check Galaxy screens")) { message(assets.status).padding(.horizontal, 14).padding(.bottom, 10) }
+                separator
+                languageMenu
+                Toggle("Follow Galaxy language", isOn: $followGalaxyLanguage)
+                Text("Use Galaxy’s selected language after connecting.")
+                    .font(.system(size: 11)).foregroundStyle(muted)
             }
             separator
-            row("chevron.left.forwardslash.chevron.right", title: "Developer mode", subtitle: "Advanced testing") {
-                Toggle("Developer mode", isOn: $model.developerMode).labelsHidden().accessibilityIdentifier("developer-mode-toggle")
-            }
-            if model.developerMode {
-                Divider().overlay(accent.opacity(0.12)).padding(.leading, 42)
-                row("location.fill", title: "Navigation alpha testing", subtitle: "Navigation UI and CarPlay maps · experimental") {
-                    Toggle("Navigation alpha testing", isOn: Binding(get: { model.navigationAlpha }, set: { if $0 { confirmNavigationAlpha = true } else { model.navigationAlpha = false } })).labelsHidden()
-                        .accessibilityIdentifier("navigation-alpha-toggle")
+            preferenceSection("Support & developer", expanded: $supportExpanded) {
+                row("ladybug", title: "Logs & support", subtitle: "Report a problem or share diagnostics") {
+                    Button { select(.logs) } label: { Image(systemName: "chevron.right").frame(width: 44, height: 44) }.accessibilityLabel("Open Logs & support")
+                }
+                separator
+                row("chevron.left.forwardslash.chevron.right", title: "Developer mode", subtitle: "Advanced testing") {
+                    Toggle("Developer mode", isOn: $model.developerMode).labelsHidden().accessibilityIdentifier("developer-mode-toggle")
+                }
+                if model.developerMode {
+                    Divider().overlay(accent.opacity(0.12)).padding(.leading, 42)
+                    row("location.fill", title: "Navigation alpha testing", subtitle: "Navigation UI and CarPlay maps · experimental") {
+                        Toggle("Navigation alpha testing", isOn: Binding(get: { model.navigationAlpha }, set: { if $0 { confirmNavigationAlpha = true } else { model.navigationAlpha = false } })).labelsHidden()
+                            .accessibilityIdentifier("navigation-alpha-toggle")
+                    }
                 }
             }
         }.background(panel, in: RoundedRectangle(cornerRadius: 20))
-            .overlay(RoundedRectangle(cornerRadius: 20).stroke(accent.opacity(0.23)))
+            .overlay(RoundedRectangle(cornerRadius: 20).stroke(accent.opacity(0.23)).allowsHitTesting(false))
+    }
+
+    private func preferenceSection<Content: View>(_ title: LocalizedStringKey, expanded: Binding<Bool>,
+                                                  @ViewBuilder content: () -> Content) -> some View {
+        DisclosureGroup(isExpanded: expanded) {
+            VStack(alignment: .leading, spacing: 8, content: content)
+                .padding(.bottom, 12)
+        } label: {
+            Text(title).font(.subheadline.weight(.semibold))
+                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                .contentShape(Rectangle())
+        }.tint(accent).padding(.horizontal, 14)
     }
 
     private var advancedControls: some View {
         VStack(alignment: .leading, spacing: 12) {
-            if sentry.enabled && sentry.registered {
-                row("bell", title: "Test Sentry alerts", subtitle: sentry.status) {
-                    Button("Test") { Task { await sentry.test() } }
-                        .font(.system(size: 12)).frame(minHeight: 44)
-                        .accessibilityLabel("Send test to this iPhone")
-                }
-                Divider()
-            }
-            Toggle("Hide background location indicator", isOn: Binding(get: { hideLocationIndicator }, set: { hideLocationIndicator = $0; location.setHideBackgroundIndicator($0) }))
-            Text("Requires Always location access. iOS may still show the indicator with While Using access.")
-                .font(.system(size: 11)).foregroundStyle(muted)
-            Divider()
-            Toggle("Follow Galaxy language", isOn: $followGalaxyLanguage)
-            Text("Use Galaxy’s selected language after connecting.")
-                .font(.system(size: 11)).foregroundStyle(muted)
-            Divider()
             if model.developerMode {
                 row("bolt", title: "Fast Bluetooth reads", subtitle: bluetooth.fastReadFallback ? "Reliable reads active after an error" : "Experimental · turn off for reliable reads") {
                     Toggle("Fast Bluetooth reads", isOn: $bluetooth.fastReads).labelsHidden()
