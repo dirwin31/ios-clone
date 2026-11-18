@@ -171,7 +171,8 @@ struct GalaxyRootView: View {
             DiscordReportSheet(logs: capture.logs, captureLogs: captureReportLogs) { reportWasSent = true }
         }
         .sheet(isPresented: $model.showAudioPairing, onDismiss: { model.audioPairing.dismiss() }) {
-            AudioPairingSheet(pairing: model.audioPairing) { model.showAudioPairing = false }
+            AudioPairingSheet(pairing: model.audioPairing, notifications: model.notificationSharing,
+                              bluetoothConnected: model.bluetooth.connected, notificationsSupported: model.bluetooth.notificationBondSupported) { model.showAudioPairing = false }
         }
         .alert("Bluetooth access needed", isPresented: $model.showBluetoothPermission) {
             Button("Open Settings") {

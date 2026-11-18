@@ -106,6 +106,11 @@ final class AudioPairing: ObservableObject {
         if wasOpen { Task { [weak self] in _ = try? await self?.post(["operation": "cancel_pair"]) } }
     }
 
+    /// Music is paired, so comma's pairing window is finished. Closing it lets phone notifications set up right away.
+    func closeWindow() async { _ = try? await post(["operation": "cancel_pair"]) }
+
+    var finished: Bool { phase == .done || phase == .connected }
+
     func dismiss() { if case .message = phase { phase = .idle } else if phase == .done || phase == .connected { phase = .idle } else { cancel() } }
 
     private func post(_ payload: [String: Any]) async throws -> BridgeResponse? {

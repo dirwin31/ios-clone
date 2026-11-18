@@ -110,7 +110,9 @@ final class AppModel: ObservableObject {
                 guard let self else { throw NotificationBondError.disconnected }
                 try await self.bluetooth.readNotificationBond()
             },
-            device: { UserDefaults.standard.string(forKey: "galaxy.bluetooth.device") })
+            device: { UserDefaults.standard.string(forKey: "galaxy.bluetooth.device") },
+            musicDone: { [weak self] in self?.audioPairing.finished ?? false },
+            closeMusicWindow: { [weak self] in await self?.audioPairing.closeWindow() })
         value.onEvent = { [weak self] in self?.connectionLog.record($0) }
         return value
     }()
