@@ -1123,17 +1123,17 @@ private struct CompanionPageArrival: ViewModifier {
             screen
                 .overlay(alignment: .top) {
                     if active {
-                        Canvas { context, size in
+                        Canvas(opaque: false) { context, size in
                             drawConstellation(in: context, size: size, progress: progress)
                         }
-                        .frame(height: 66)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .allowsHitTesting(false)
                         .accessibilityHidden(true)
                     }
                 }
         } keyframes: { _ in
             MoveKeyframe(0.0)
-            LinearKeyframe(1.0, duration: 0.78)
+            LinearKeyframe(1.0, duration: 0.94)
         }
     }
 
@@ -1158,24 +1158,61 @@ private struct CompanionPageArrival: ViewModifier {
                      CGPoint(x: 16, y: -13), CGPoint(x: 22, y: 1), CGPoint(x: 12, y: 13),
                      CGPoint(x: -3, y: 14), CGPoint(x: -10, y: 4), CGPoint(x: -4, y: -3), .zero]
         }
-        var sky = context
-        sky.translateBy(x: size.width * 0.78, y: size.height / 2)
-        sky.opacity = min(1, progress / 0.09, (1 - progress) / 0.26)
+        // Reserve the entire moving halo plus an antialiasing margin on every edge.
+        let haloRadius: CGFloat = 19
+        let margin = haloRadius + 2
+        guard let first = stars.first else { return }
         var outline = Path()
         outline.addLines(stars)
-        let draw = CGFloat(min(progress / 0.65, 1))
+        let bounds = outline.boundingRect.insetBy(dx: -margin, dy: -margin)
+        let scale = min(1, size.width / bounds.width, size.height / bounds.height)
+        guard scale > 0 else { return }
+        let reverse = page == .connections
+        let x = min(max(size.width * (reverse ? 0.29 : 0.71), -bounds.minX * scale), size.width - bounds.maxX * scale)
+        let y = min(max(size.height * 0.32, -bounds.minY * scale), size.height - bounds.maxY * scale)
+        let arrival = CGPoint(x: x + first.x * scale, y: y + first.y * scale)
+        // A single moving filament crosses the page and feeds into the first star.
+        // Keep the curve and both endpoints inset so its tip never hits a canvas edge.
+        var flight = Path()
+        let departure = CGPoint(x: size.width * (reverse ? 0.77 : 0.23), y: size.height * 0.76)
+        flight.move(to: departure)
+        flight.addQuadCurve(to: arrival, control: CGPoint(x: x, y: size.height * 0.71))
+        let travel = CGFloat(min(progress / 0.42, 1))
+        let tail = CGFloat(max(0, min(1, (progress - 0.10) / 0.40)))
+        if tail < travel {
+            let streak = flight.trimmedPath(from: tail, to: travel)
+            let tailPoint = flight.trimmedPath(from: 0, to: tail).currentPoint ?? departure
+            if let tip = streak.currentPoint {
+                context.stroke(streak, with: .linearGradient(Gradient(colors: [tint.opacity(0), tint.opacity(0.5), .white.opacity(0.85)]),
+                               startPoint: tailPoint, endPoint: tip), style: StrokeStyle(lineWidth: 1.6, lineCap: .round))
+                if travel < 1 {
+                    let radius = min(8, size.width * 0.12, size.height * 0.12)
+                    let light = Path(ellipseIn: CGRect(origin: tip, size: .zero).insetBy(dx: -radius, dy: -radius))
+                    context.fill(light, with: .radialGradient(Gradient(colors: [.white.opacity(0.9), tint.opacity(0.5), tint.opacity(0)]),
+                                 center: tip, startRadius: 0, endRadius: radius))
+                }
+            }
+        }
+        guard progress >= 0.42 else { return }
+        let reveal = (progress - 0.42) / 0.58
+        var sky = context
+        sky.translateBy(x: x, y: y)
+        sky.scaleBy(x: scale, y: scale)
+        sky.opacity = min(1, reveal / 0.09, (1 - reveal) / 0.26)
+        let draw = CGFloat(min(reveal / 0.65, 1))
         let visible = outline.trimmedPath(from: 0, to: draw)
         guard let head = visible.currentPoint else { return }
-        let halo = Gradient(colors: [tint.opacity(0.62), tint.opacity(0.16), .clear])
-        sky.fill(Path(ellipseIn: CGRect(x: head.x - 19, y: head.y - 19, width: 38, height: 38)),
-                 with: .radialGradient(halo, center: head, startRadius: 0, endRadius: 19))
+        let halo = Gradient(colors: [tint.opacity(0.62), tint.opacity(0.16), tint.opacity(0)])
+        let haloRect = CGRect(origin: head, size: .zero).insetBy(dx: -haloRadius, dy: -haloRadius)
+        sky.fill(Path(ellipseIn: haloRect),
+                 with: .radialGradient(halo, center: head, startRadius: 0, endRadius: haloRadius))
         sky.stroke(visible, with: .color(tint), style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
         sky.stroke(visible, with: .color(.white.opacity(0.8)), lineWidth: 0.75)
         for point in stars {
             sky.fill(Path(ellipseIn: CGRect(x: point.x - 1.4, y: point.y - 1.4, width: 2.8, height: 2.8)),
                      with: .color(.white.opacity(0.85)))
         }
-        let flare = 3 + 3 * sin(.pi * min(1, max(0, (progress - 0.65) / 0.3)))
+        let flare = 3 + 3 * sin(.pi * min(1, max(0, (reveal - 0.65) / 0.3)))
         var glint = Path()
         glint.move(to: CGPoint(x: head.x, y: head.y - flare))
         glint.addQuadCurve(to: CGPoint(x: head.x + flare, y: head.y), control: head)
