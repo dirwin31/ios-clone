@@ -107,9 +107,16 @@ final class AudioPairing: ObservableObject {
     }
 
     /// Music is paired, so comma's pairing window is finished. Closing it lets phone notifications set up right away.
+    /// Comma only lets the session that opened a pairing window cancel it, and the app's key was claimed in a window
+    /// opened from comma's own screen. Take that window over with accept_pair, then cancel it to clear it.
     func closeWindow() async {
-        let response = try? await post(["operation": "cancel_pair"])
-        onEvent?("Music pairing window close finished: " + (response.map { "HTTP \($0.status)" } ?? "no reply"))
+        let first = try? await post(["operation": "cancel_pair"])
+        if first?.status == 200 { onEvent?("Music pairing window closed"); return }
+        let opened = try? await post(["operation": "accept_pair"])
+        onEvent?("Music pairing window take over: " + (opened.map { "HTTP \($0.status)" } ?? "no reply"))
+        guard opened?.status == 200 else { return }
+        let closed = try? await post(["operation": "cancel_pair"])
+        onEvent?("Music pairing window close finished: " + (closed.map { "HTTP \($0.status)" } ?? "no reply"))
     }
 
     var finished: Bool { phase == .done || phase == .connected }
