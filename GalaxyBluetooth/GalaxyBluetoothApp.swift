@@ -535,12 +535,20 @@ final class AppModel: ObservableObject {
         guard !pairingKey.isEmpty, bluetooth.connected else { return }
         bluetooth.disconnect(reason: "Refreshing Bluetooth link for phone notifications")
         try? await Task.sleep(nanoseconds: 2_000_000_000)
-        bluetooth.reconnectSaved(pairingKey: pairingKey)
-        for _ in 0..<40 {
-            if bluetooth.connected { return }
+        // iOS may be showing its Allow Notifications alert and re-pairing the link meanwhile, so an attempt can stall.
+        // Restart a stalled attempt every 8 seconds, as the Reconnect button would, for up to 45 seconds.
+        var attemptStarted = Date.distantPast
+        for _ in 0..<90 {
+            if bluetooth.connected { connectionLog.record("Bluetooth link refreshed"); return }
+            if Date().timeIntervalSince(attemptStarted) >= 8 || (!bluetooth.connecting && !bluetooth.isScanning) {
+                if bluetooth.connecting || bluetooth.isScanning { bluetooth.disconnect(reason: "Restarting stalled Bluetooth reconnect") }
+                bluetooth.retrySavedPairing()
+                bluetooth.reconnectSaved(pairingKey: pairingKey)
+                attemptStarted = Date()
+            }
             try? await Task.sleep(nanoseconds: 500_000_000)
-            if !bluetooth.connected && !bluetooth.connecting && !bluetooth.isScanning { bluetooth.reconnectSaved(pairingKey: pairingKey) }
         }
+        connectionLog.record("Bluetooth link refresh did not reconnect in time")
     }
 
     func startAudioPairing() {

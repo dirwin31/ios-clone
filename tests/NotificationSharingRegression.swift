@@ -10,7 +10,7 @@ enum BridgeError: LocalizedError {
 @MainActor final class BondComma: GalaxyRequestTransport {
     var connected = true
     var status = 200
-    var reply = "{}"
+    var reply = #"{"ok":true,"seconds":0}"#
     var failure: Error?
     var dropOnRequest = false
     var posts = 0
@@ -41,7 +41,7 @@ enum BridgeError: LocalizedError {
                                         bond: { reads += 1; if let bond { throw bond } },
                                         device: { "comma-1" }, defaults: defaults)
         model.start()
-        await settle(model) { $0 != .requesting && $0 != .pairing && $0 != .waitingForMusic }
+        await settle(model) { $0 != .requesting && $0 != .pairing && $0 != .waitingForMusic && $0 != .relinking }
         return (model, reads)
     }
 
@@ -130,11 +130,18 @@ enum BridgeError: LocalizedError {
 
         // The Bluetooth link is refreshed before asking comma, so a pairing made in iPhone Settings applies to it.
         var relinks = 0
-        let relinked = NotificationSharing(transport: { good }, supported: { true }, bond: {}, device: { "comma-6" }, defaults: defaults,
-                                           relink: { relinks += 1 })
+        let stale = BondComma(); stale.reply = #"{"ok":true,"seconds":60}"#
+        let relinked = NotificationSharing(transport: { stale }, supported: { true }, bond: {}, device: { "comma-6" }, defaults: defaults,
+                                           relink: { relinks += 1; stale.reply = #"{"ok":true,"seconds":0}"# })
         relinked.start()
         await settle(relinked) { $0 == .done }
-        precondition(relinks == 1, "Refreshes the link once")
+        precondition(relinks == 1 && stale.posts == 2, "Refreshes an unrecognised link once, then asks again")
+        var quiet = 0
+        let known = NotificationSharing(transport: { good }, supported: { true }, bond: {}, device: { "comma-7" }, defaults: defaults,
+                                        relink: { quiet += 1 })
+        known.start()
+        await settle(known) { $0 == .done }
+        precondition(quiet == 0, "A link comma already knows is not dropped")
         precondition(NotificationSharing.message(for: NotificationBondError.declined) == NotificationSharing.needsMusicMessage)
 
         // Music's pairing window is still open: wait for it (closing it once music is done) instead of failing.
