@@ -600,7 +600,7 @@ struct ConnectionSettingsView: View {
 }
 
 private struct PairingSignal: View {
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.reduceGalacticalMotion) private var reduceMotion
     @State private var pulse = false
     var body: some View {
         HStack(alignment: .bottom, spacing: 2) {
@@ -623,7 +623,7 @@ struct ConnectionLandingPoint: PreferenceKey {
 struct ConnectionOrbit: View {
     let route: String
     let pairing: Bool
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.reduceGalacticalMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
     @State private var sweepStart = Date()
     @State private var launchAngle = -380.0

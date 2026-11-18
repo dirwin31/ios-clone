@@ -967,7 +967,7 @@ struct GalaxyRootView: View {
         self.model = model; navigation = model.navigationServices.navigation; bluetooth = model.bluetooth; lan = model.lan; assets = model.assets; server = model.server; discovery = model.discovery; galaxyPage = model.galaxyPage
     }
     var body: some View {
-        chrome.environment(\.accessibilityReduceMotion, reduceMotion || !galacticalAnimations)
+        chrome.environment(\.reduceGalacticalMotion, reduceMotion || !galacticalAnimations)
     }
     @ViewBuilder private var chrome: some View {
         if #available(iOS 27.1, *), DuoLayout.isEnabled {
@@ -1183,6 +1183,17 @@ private struct GalaxyPagePassage: ViewModifier {
     }
 }
 
+private struct ReduceGalacticalMotionKey: EnvironmentKey {
+    static let defaultValue = false
+}
+
+extension EnvironmentValues {
+    var reduceGalacticalMotion: Bool {
+        get { self[ReduceGalacticalMotionKey.self] }
+        set { self[ReduceGalacticalMotionKey.self] = newValue }
+    }
+}
+
 struct CompanionNavigationBar: View {
     @Namespace private var selection
     let tab: CompanionTab
@@ -1192,7 +1203,7 @@ struct CompanionNavigationBar: View {
     var compactIconOnly = false
     var statusModel: AppModel? = nil
     let select: (CompanionTab) -> Void
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.reduceGalacticalMotion) private var reduceMotion
     @Environment(\.accessibilityVoiceOverEnabled) private var voiceOver
     private var idleKey: String { "\(tab.rawValue)-\(expanded)-\(navigation.navigating)-\(voiceOver)" }
     var body: some View {
@@ -1629,7 +1640,7 @@ private extension EnvironmentValues {
 
 @available(iOS 27.1, *)
 private struct AdaptiveCompanionLayout<Content: View>: View {
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.reduceGalacticalMotion) private var reduceMotion
     @Environment(\.toolbarVerticalEdge) private var verticalEdge
     @ObservedObject var model: AppModel
     let tab: CompanionTab

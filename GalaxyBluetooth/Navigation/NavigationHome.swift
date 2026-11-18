@@ -6,7 +6,7 @@ private struct StandardNavigationHome: View {
     @ObservedObject var navigation: NavigationModel
     @ObservedObject var saved: SavedPlacesStore
     @ObservedObject private var bluetooth: BluetoothTransport
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.reduceGalacticalMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
     var submitReport: () -> Void
     var openSettings: () -> Void
@@ -397,7 +397,7 @@ private struct StandardNavigationHome: View {
 
 private struct ManeuverDistance: View {
     let label: String
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.reduceGalacticalMotion) private var reduceMotion
 
     var body: some View {
         Text(label)
@@ -450,7 +450,7 @@ private struct DuoNavigationHome: View {
     @ObservedObject var navigation: NavigationModel
     @ObservedObject var saved: SavedPlacesStore
     @ObservedObject private var bluetooth: BluetoothTransport
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.reduceGalacticalMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
     var submitReport: () -> Void
     var openSettings: () -> Void
