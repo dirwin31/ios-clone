@@ -94,9 +94,12 @@ final class NotificationSharing: ObservableObject {
     func sendTest() async {
         let center = UNUserNotificationCenter.current()
         let allowed: Bool
+        var justAllowed = false
         switch await center.notificationSettings().authorizationStatus {
         case .authorized, .provisional, .ephemeral: allowed = true
-        case .notDetermined: allowed = (try? await center.requestAuthorization(options: [.alert])) ?? false
+        case .notDetermined:
+            allowed = (try? await center.requestAuthorization(options: [.alert])) ?? false
+            justAllowed = allowed
         default: allowed = false
         }
         guard allowed else {
@@ -108,7 +111,10 @@ final class NotificationSharing: ObservableObject {
         content.body = "If sharing works, this shows on your comma and car screen."
         content.userInfo = ["type": Self.testType]
         let request = UNNotificationRequest(identifier: "starpilot-test-" + UUID().uuidString, content: content,
-                                            trigger: UNTimeIntervalNotificationTrigger(timeInterval: 1, repeats: false))
+                                            trigger: UNTimeIntervalNotificationTrigger(timeInterval: justAllowed ? 3 : 1, repeats: false))
+        // Right after the permission alert iOS can still be settling the new permission, and the first test was
+        // lost. Give it a moment so the test works on the first tap.
+        if justAllowed { try? await Task.sleep(nanoseconds: 1_500_000_000) }
         do {
             try await center.add(request)
             onEvent?("Phone notifications test posted")
