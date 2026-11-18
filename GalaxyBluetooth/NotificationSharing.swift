@@ -135,7 +135,7 @@ final class NotificationSharing: ObservableObject {
             onEvent?("Phone notifications window request finished: HTTP \(response.status)")
             guard response.status == 409, Self.code(response.bodyData) == "pairing_window" else { break }
             guard waits < Self.musicWindowWaits else { phase = .message(Self.musicWindowMessage); return }
-            // Music is already paired, so comma's window has nothing left to do: close it so setup continues at once.
+            // Nobody is setting up music (finished, cancelled, or the window is just left open from pairing the app): close it so setup continues at once.
             if waits == 0 { phase = .waitingForMusic }
             if musicDone() { await closeMusicWindow() } else { onEvent?("Phone notifications waiting for the music pairing window") }
             waits += 1

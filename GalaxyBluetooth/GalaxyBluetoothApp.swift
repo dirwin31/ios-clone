@@ -95,7 +95,7 @@ final class AppModel: ObservableObject {
                 try await self.bluetooth.readNotificationBond()
             },
             device: { UserDefaults.standard.string(forKey: "galaxy.bluetooth.device") },
-            musicDone: { [weak self] in self?.audioPairing.finished ?? false },
+            musicDone: { [weak self] in !(self?.audioPairing.inProgress ?? false) },
             closeMusicWindow: { [weak self] in await self?.audioPairing.closeWindow() })
         value.onEvent = { [weak self] in self?.connectionLog.record($0) }
         return value
