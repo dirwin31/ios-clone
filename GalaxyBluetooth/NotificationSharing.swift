@@ -119,7 +119,7 @@ final class NotificationSharing: ObservableObject {
         do {
             try await center.add(request)
             onEvent?("Phone notifications test posted")
-            testStatus = "Test sent. Look at the top of the comma screen or car screen. If nothing shows within a few seconds, check that **Share System Notifications** is on for comma in **Settings → Bluetooth** and that **Show phone notifications** is on in Galaxy → Toggles → Phone."
+            testStatus = "Test sent. It should show on the comma or car screen in a few seconds.\nNothing? In **Settings → Bluetooth**, tap ⓘ next to comma and turn on **Share System Notifications**."
         } catch {
             testStatus = "Couldn't send the test. Try again."
         }
