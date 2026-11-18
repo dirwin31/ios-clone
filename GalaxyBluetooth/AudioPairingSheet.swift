@@ -13,7 +13,7 @@ struct AudioPairingSheet: View {
             Text("Bluetooth music").font(.title3.weight(.semibold))
             switch pairing.phase {
             case .idle, .opening:
-                ProgressView("Asking comma to open pairing…")
+                VStack(spacing: 8) { ProgressView(); Text("Asking comma to open pairing…").multilineTextAlignment(.center).fixedSize(horizontal: false, vertical: true) }
             case .waiting(let name):
                 Text("On your iPhone, open **Settings → Bluetooth** and select **\(name)** to pair music.")
                     .multilineTextAlignment(.center).fixedSize(horizontal: false, vertical: true)
@@ -37,7 +37,7 @@ struct AudioPairingSheet: View {
             case .message(let text):
                 Text(LocalizedStringKey(text)).multilineTextAlignment(.center).fixedSize(horizontal: false, vertical: true)
             }
-            Button((pairing.phase == .done || pairing.phase == .connected) ? "Done" : "Close") { close() }.padding(.top, 6)
+            Button((pairing.phase == .done || pairing.phase == .connected) ? "Done" : "Close") { close() }.buttonStyle(.borderedProminent).controlSize(.large).padding(.top, 6)
         }.padding(24).presentationDetents([.medium, .large])
             .onChange(of: pairing.phase) { _, phase in
                 guard phase == .done || phase == .connected else { return }

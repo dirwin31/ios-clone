@@ -11,11 +11,11 @@ struct NotificationSharingProgress: View {
         case .idle:
             EmptyView()
         case .requesting:
-            ProgressView("Asking comma to get ready…")
+            VStack(spacing: 8) { ProgressView(); Text("Asking comma to get ready…").multilineTextAlignment(.center).fixedSize(horizontal: false, vertical: true) }
         case .waitingForMusic:
-            ProgressView("Finishing music pairing…")
+            VStack(spacing: 8) { ProgressView(); Text("Finishing music pairing…").multilineTextAlignment(.center).fixedSize(horizontal: false, vertical: true) }
         case .relinking:
-            ProgressView("Reconnecting to comma so it can see your notifications…")
+            VStack(spacing: 8) { ProgressView(); Text("Reconnecting to comma so it can see your notifications…").multilineTextAlignment(.center).fixedSize(horizontal: false, vertical: true) }
             Text("If iOS asks to allow notifications for comma, tap **Allow**. This takes a few seconds.")
                 .font(.callout).multilineTextAlignment(.center).fixedSize(horizontal: false, vertical: true)
         case .pairing:
@@ -70,7 +70,7 @@ struct NotificationSharingSheet: View {
             } else {
                 NotificationSharingProgress(sharing: sharing, bluetoothConnected: bluetoothConnected, setUpMusic: setUpMusic)
             }
-            Button(sharing.phase == .done ? "Done" : "Close") { close() }.padding(.top, 6)
+            Button(sharing.phase == .done ? "Done" : "Close") { close() }.buttonStyle(.borderedProminent).controlSize(.large).padding(.top, 6)
         }.padding(24).fixedSize(horizontal: false, vertical: true)
         }.presentationDetents([.medium, .large])
             .onAppear {
