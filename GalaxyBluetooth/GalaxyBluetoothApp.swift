@@ -402,12 +402,21 @@ final class AppModel: ObservableObject {
             }
         }
     }
+    /// Forgetting or re-pairing Bluetooth starts music and notification setup over, so their checkmarks clear too.
+    func resetPhoneSetup() {
+        UserDefaults.standard.removeObject(forKey: AudioPairing.hintKey)
+        UserDefaults.standard.removeObject(forKey: NotificationSharing.hintKey)
+        notificationSharing.cancel()
+        if !audioPairing.inProgress { audioPairing.dismiss() }
+        objectWillChange.send()
+    }
     func cancelPairing() { pairingTask?.cancel(); claimer.cancel() }
     private func importClaim(_ outcome: ClaimTransport.Outcome) {
         // The key is saved only after the encrypted handshake, like any imported key.
         opened = false
         wantsConnection = true
         bluetooth.forgetSavedDevice()
+        resetPhoneSetup()
         PairingKeyStore.stage(PairingCode(key: outcome.result.key, id: outcome.result.id))
         lan.clearEndpoint()
         lan.bind(to: nil)
@@ -675,6 +684,7 @@ final class AppModel: ObservableObject {
         connectionMessage = "Disconnected."
     }
     func resetPairingForReconnect() {
+        resetPhoneSetup()
         cancelPairing()
         disconnect()
         bluetooth.forgetSavedDevice()
