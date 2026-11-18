@@ -1124,6 +1124,47 @@ extension EnvironmentValues {
     }
 }
 
+private struct PlanetTabHighlight: View {
+    let tab: CompanionTab
+    @Environment(\.reduceGalacticalMotion) private var reduceMotion
+    @State private var risen = false
+
+    private var atmosphere: Color {
+        switch tab {
+        case .navigation: .teal
+        case .connections, .logs, .diagnostics: .indigo
+        case .galaxy, .live: .purple
+        }
+    }
+
+    var body: some View {
+        GeometryReader { geometry in
+            let size = geometry.size
+            let diameter = max(size.width * 1.35, size.height * 2.2)
+            ZStack {
+                LinearGradient(colors: [atmosphere, Color(red: 0.14, green: 0.09, blue: 0.30)],
+                               startPoint: .topLeading, endPoint: .bottomTrailing)
+                Circle()
+                    .fill(RadialGradient(stops: [
+                        .init(color: .clear, location: 0.64),
+                        .init(color: atmosphere.opacity(0.55), location: 0.89),
+                        .init(color: .white.opacity(0.78), location: 0.96),
+                        .init(color: atmosphere.opacity(0), location: 1)
+                    ], center: .center, startRadius: 0, endRadius: diameter / 2))
+                    .frame(width: diameter, height: diameter)
+                    .position(x: size.width * (risen || reduceMotion ? 0.68 : 0.10),
+                              y: diameter / 2 + size.height * (risen || reduceMotion ? 0.28 : 0.75))
+                    .animation(reduceMotion ? nil : .easeOut(duration: 0.48), value: risen)
+            }
+            .frame(width: size.width, height: size.height)
+            .clipShape(Capsule())
+        }
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+        .onAppear { risen = true }
+    }
+}
+
 struct CompanionNavigationBar: View {
     @Namespace private var selection
     let tab: CompanionTab
@@ -1151,10 +1192,7 @@ struct CompanionNavigationBar: View {
                                 .foregroundStyle((tab == item || (tab == .logs && item == .connections)) ? Color.white : Color.primary.opacity(0.7))
                                 .background {
                                     if tab == item || (tab == .logs && item == .connections) {
-                                        Capsule().fill(LinearGradient(colors: [Color(red: 0.61, green: 0.39, blue: 0.91), Color(red: 0.40, green: 0.22, blue: 0.69)], startPoint: .topLeading, endPoint: .bottomTrailing))
-                                            .overlay {
-                                                Capsule().strokeBorder(LinearGradient(colors: [.white.opacity(0.5), .clear], startPoint: .topLeading, endPoint: .bottomTrailing))
-                                            }
+                                        PlanetTabHighlight(tab: item)
                                             .matchedGeometryEffect(id: "activeTab", in: selection)
                                     }
                                 }
@@ -1598,7 +1636,7 @@ private struct AdaptiveCompanionLayout<Content: View>: View {
                                     .frame(width: 44, height: 44)
                                     .background {
                                         if selected {
-                                            Capsule().fill(Color.indigo)
+                                            PlanetTabHighlight(tab: item)
                                                 .padding(4)
                                                 .matchedGeometryEffect(id: "selectedTab", in: tabSelection)
                                         }
