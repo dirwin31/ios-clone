@@ -36,6 +36,7 @@ final class NotificationSharing: ObservableObject {
     private let musicDone: () -> Bool
     private let closeMusicWindow: () async -> Void
     private let pause: () async -> Void
+    private let relink: () async -> Void
     private let defaults: UserDefaults
     private var task: Task<Void, Never>?
 
@@ -43,9 +44,10 @@ final class NotificationSharing: ObservableObject {
     init(transport: @escaping () -> (any GalaxyRequestTransport)?, supported: @escaping () -> Bool,
          bond: @escaping () async throws -> Void, device: @escaping () -> String?, defaults: UserDefaults = .standard,
          musicDone: @escaping () -> Bool = { false }, closeMusicWindow: @escaping () async -> Void = {},
-         pause: @escaping () async -> Void = { try? await Task.sleep(nanoseconds: 2_000_000_000) }) {
+         pause: @escaping () async -> Void = { try? await Task.sleep(nanoseconds: 2_000_000_000) },
+         relink: @escaping () async -> Void = {}) {
         self.transport = transport; self.supported = supported; self.bond = bond; self.device = device; self.defaults = defaults
-        self.musicDone = musicDone; self.closeMusicWindow = closeMusicWindow; self.pause = pause
+        self.musicDone = musicDone; self.closeMusicWindow = closeMusicWindow; self.pause = pause; self.relink = relink
     }
 
     /// Comma's music window lasts two minutes and blocks the notification bond; wait for it instead of failing.
@@ -117,8 +119,15 @@ final class NotificationSharing: ObservableObject {
     }
 
     private func run() async {
-        guard let transport = transport(), transport.connected else { phase = .message(Self.bluetoothMessage); return }
+        guard let first = transport(), first.connected else { phase = .message(Self.bluetoothMessage); return }
         guard supported() else { phase = .message(Self.updateMessage); return }
+        // Pairing music in iPhone Settings also gives comma the keys for this Bluetooth LE link, but a link opened
+        // before that pairing keeps its old unpaired identity. A fresh link is recognised as the paired iPhone.
+        onEvent?("Phone notifications refreshing the Bluetooth link")
+        await relink()
+        if Task.isCancelled { return }
+        guard let transport = transport(), transport.connected else { phase = .message(Self.bluetoothMessage); return }
+        onEvent?("Phone notifications Bluetooth link refreshed")
         var response: BridgeResponse
         var waits = 0
         while true {
@@ -171,6 +180,7 @@ final class NotificationSharing: ObservableObject {
         phase = .done
     }
 
+    nonisolated static let needsMusicMessage = "Your iPhone didn't pair with comma for notifications. Set up **Phone music** first and tap **Pair** when iOS asks: notifications use the same pairing."
     nonisolated static let musicWindowMessage = "Comma is still finishing music pairing. Try again in a minute."
 
     nonisolated static func code(_ body: Data) -> String? {
@@ -190,7 +200,7 @@ final class NotificationSharing: ObservableObject {
 
     nonisolated static func message(for error: Error) -> String {
         switch error as? NotificationBondError {
-        case .declined?: return "Pairing wasn't completed. Try again and tap **Pair** when iOS asks."
+        case .declined?: return needsMusicMessage
         case .timedOut?: return "iOS didn't finish pairing in time. Try again and tap **Pair** when iOS asks."
         case .disconnected?: return "Comma disconnected during setup. Reconnect over Bluetooth and try again."
         case .unavailable?: return "Your iPhone hasn't seen comma's new Bluetooth features yet. Turn Bluetooth off and on, reconnect, then try again."

@@ -135,7 +135,10 @@ struct ConnectionSettingsView: View {
             }
             .sheet(isPresented: $showTunnel) { TunnelSetupView(model: model) }
             .sheet(isPresented: $showNotifications, onDismiss: { notifications.dismiss() }) {
-                NotificationSharingSheet(sharing: notifications, bluetoothConnected: bluetooth.connected) { showNotifications = false }
+                NotificationSharingSheet(sharing: notifications, bluetoothConnected: bluetooth.connected, setUpMusic: {
+                    showNotifications = false
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { model.startAudioPairing() }
+                }) { showNotifications = false }
             }
             .tint(accent)
             .alert("Join comma’s hotspot", isPresented: $showHotspotJoin) {
