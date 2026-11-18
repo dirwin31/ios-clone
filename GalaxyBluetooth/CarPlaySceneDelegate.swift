@@ -643,11 +643,16 @@ final class CarPlaySceneDelegate: NSObject, CPTemplateApplicationSceneDelegate, 
     // last value read from comma, including while the user reviews a change.
     private static func switchImage(on: Bool) -> UIImage {
         let size = CGSize(width: 38, height: 22)
+        // Keep the accessory canvas fixed so CarPlay preserves the clear margin.
+        let track = CGRect(origin: .zero, size: size).insetBy(dx: 3, dy: 1.75)
         return UIGraphicsImageRenderer(size: size).image { _ in
             (on ? UIColor.systemGreen : UIColor.systemGray).setFill()
-            UIBezierPath(roundedRect: CGRect(origin: .zero, size: size), cornerRadius: 11).fill()
+            UIBezierPath(roundedRect: track, cornerRadius: track.height / 2).fill()
+            let inner = track.insetBy(dx: 1.75, dy: 1.75)
+            let thumb = CGRect(x: on ? inner.maxX - inner.height : inner.minX, y: inner.minY,
+                               width: inner.height, height: inner.height)
             UIColor.white.setFill()
-            UIBezierPath(ovalIn: CGRect(x: on ? 18 : 2, y: 2, width: 18, height: 18)).fill()
+            UIBezierPath(ovalIn: thumb).fill()
         }.withRenderingMode(.alwaysOriginal)
     }
     private static let onImage = switchImage(on: true)
