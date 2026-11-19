@@ -739,6 +739,38 @@ final class CarPlaySceneDelegate: NSObject, CPTemplateApplicationSceneDelegate, 
     private static let onImage = switchImage(on: true)
     private static let offImage = switchImage(on: false)
 
+    private func binarySettingItem(label: String, description: String?, icon: String, on: Bool, enabled: Bool,
+                                   showDetails: @escaping @MainActor () -> Void,
+                                   toggle: @escaping @MainActor () -> Void) -> CPListImageRowItem {
+        let details = localizedCarPlay("Details")
+        let change = localizedCarPlay(on ? "Turn off" : "Turn on")
+        let detailImage = UIImage(systemName: icon) ?? UIImage(systemName: "info.circle")!
+        let switchImage = on ? Self.onImage : Self.offImage
+        let title = localizedCarPlay(label)
+        let item: CPListImageRowItem
+        if #available(iOS 26.0, *) {
+            let info = CPListImageRowItemCondensedElement(image: detailImage, imageShape: .roundedRectangle,
+                title: details, subtitle: description.map(localizedCarPlay), accessorySymbolName: nil)
+            let action = CPListImageRowItemCondensedElement(image: switchImage, imageShape: .roundedRectangle,
+                title: change, subtitle: nil, accessorySymbolName: nil)
+            item = CPListImageRowItem(text: title, condensedElements: [info, action], allowsMultipleLines: false)
+        } else if #available(iOS 17.4, *) {
+            item = CPListImageRowItem(text: title, images: [detailImage, switchImage], imageTitles: [details, change])
+        } else {
+            detailImage.accessibilityLabel = details
+            switchImage.accessibilityLabel = change
+            item = CPListImageRowItem(text: title, images: [detailImage, switchImage])
+        }
+        item.isEnabled = enabled
+        item.handler = { _, done in showDetails(); done() }
+        item.listImageRowHandler = { _, index, done in
+            if index == 0 { showDetails() }
+            if index == 1 { toggle() }
+            done()
+        }
+        return item
+    }
+
     private func displayedSettingValue(_ row: [String: Any]) -> String? {
         guard let raw = row["value"], !(raw is NSNull) else { return nil }
         let text = String(describing: raw)
@@ -762,7 +794,7 @@ final class CarPlaySceneDelegate: NSObject, CPTemplateApplicationSceneDelegate, 
         let count = max(1, (rows.count + capacity - 1) / capacity)
         state.index = min(state.index, count - 1)
         let start = state.index * capacity
-        let items = (start..<min(rows.count, start + capacity)).map { index in
+        let items = (start..<min(rows.count, start + capacity)).map { index -> CPListTemplateItem in
             let row = rows[index]
             let child = row["page"] as? String ?? ""
             let value = row["value"].flatMap { $0 is NSNull ? nil : String(describing: $0) }
@@ -772,6 +804,20 @@ final class CarPlaySceneDelegate: NSObject, CPTemplateApplicationSceneDelegate, 
             let icon = settingsIcon(page: state.name, child: child, label: label, binary: binary, hasChoices: !choices.isEmpty)
             let enabled = row["available"] as? Bool == true && (!child.isEmpty || row["action"] as? Bool == true) && !busy
             let description = (row["reason"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+            if binary {
+                return binarySettingItem(label: label, description: description, icon: icon, on: value == "On",
+                                         enabled: enabled, showDetails: { [weak self, weak page] in
+                    guard let self, let page else { return }
+                    guard state.session == self.session else { self.loadSettings(page); return }
+                    self.editSetting(page, index: index, row: row)
+                }, toggle: { [weak self, weak page] in
+                    guard let self, let page else { return }
+                    guard state.session == self.session,
+                          let latest = state.snapshot["rows"] as? [[String: Any]], latest.indices.contains(index),
+                          (latest[index] as NSDictionary).isEqual(row) else { self.loadSettings(page); return }
+                    self.preview(page, index: index, selection: value == "On" ? "Off" : "On")
+                })
+            }
             let detail = [child.isEmpty ? displayedSettingValue(row) : nil, description.map(localizedCarPlay)]
                 .compactMap { $0 }
                 .filter { !$0.isEmpty }
@@ -783,9 +829,7 @@ final class CarPlaySceneDelegate: NSObject, CPTemplateApplicationSceneDelegate, 
                 if !child.isEmpty { self.openSettings(child, title: row["label"] as? String ?? "Toggles") }
                 else { self.editSetting(page, index: index, row: row) }
             }
-            if binary {
-                item.setAccessoryImage(value == "On" ? Self.onImage : Self.offImage)
-            } else if enabled {
+            if enabled {
                 item.accessoryType = .disclosureIndicator
             }
             return item
@@ -964,7 +1008,7 @@ final class CarPlaySceneDelegate: NSObject, CPTemplateApplicationSceneDelegate, 
                 if result["saved"] as? Bool != true { self.notice("Save could not be confirmed. Check the current value.") }
             } catch { self.notice(error.localizedDescription) }
             self.busy = false
-            if self.controller?.topTemplate !== page {
+            if let editor = self.visibleSettingsList?.userInfo as? SettingsEditorState, editor.parent === page {
                 self.popTemplate(animated: true) { [weak self, weak page] _, _ in
                     if let page { self?.loadSettings(page) }
                 }
