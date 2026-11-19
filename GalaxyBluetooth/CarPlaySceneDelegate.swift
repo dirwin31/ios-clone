@@ -1,6 +1,7 @@
 import CarPlay
 import UIKit
 import CoreFoundation
+import CoreText
 import MapKit
 import Combine
 
@@ -578,7 +579,7 @@ final class CarPlaySceneDelegate: NSObject, CPTemplateApplicationSceneDelegate, 
         let parent: CPListTemplate
         let index: Int
         let label: String
-        var choicePage: Int?
+        var page = 0
         init(parent: CPListTemplate, index: Int, label: String) {
             self.parent = parent
             self.index = index
@@ -614,7 +615,8 @@ final class CarPlaySceneDelegate: NSObject, CPTemplateApplicationSceneDelegate, 
     }
     private func settingsItem(_ title: String, detail: String? = nil, icon: String,
                               enabled: Bool = true, action: @escaping @MainActor () -> Void = {}) -> CPListItem {
-        let item = CPListItem(text: localizedCarPlay(title), detailText: detail, image: UIImage(systemName: icon))
+        let image = UIImage(systemName: icon) ?? UIImage(systemName: "slider.horizontal.3")
+        let item = CPListItem(text: localizedCarPlay(title), detailText: detail, image: image)
         item.isEnabled = enabled
         item.handler = { _, completion in
             action()
@@ -688,8 +690,31 @@ final class CarPlaySceneDelegate: NSObject, CPTemplateApplicationSceneDelegate, 
         "vehicle": "car.fill", "lane": "road.lanes", "lane_change": "arrow.left.arrow.right",
         "profiles": "slider.horizontal.3", "personalities": "person.2.fill", "slc": "speedometer",
         "localization": "globe", "developer": "chevron.left.forwardslash.chevron.right",
-        "sounds": "speaker.wave.2.fill"
+        "sounds": "speaker.wave.2.fill", "driving_options": "car.2.fill", "aol": "steeringwheel",
+        "wheel": "steeringwheel", "curve": "arrow.triangle.turn.up.right.circle",
+        "torque": "dial.medium", "tuning": "slider.horizontal.3", "bluepilot": "dial.medium",
+        "conditional": "arrow.triangle.branch", "cem": "arrow.triangle.branch",
+        "traffic": "car.2.fill", "aggressive": "hare.fill", "standard": "gauge", "relaxed": "tortoise.fill",
+        "acceleration": "speedometer", "braking": "minus.circle", "following": "car.2.fill",
+        "appearance": "paintpalette.fill", "display": "sun.max.fill", "pip": "pip",
+        "sentry": "shield.fill", "vasm": "camera.viewfinder", "data": "arrow.up.arrow.down",
+        "power": "bolt.fill", "starport_options": "rectangle.connected.to.line.below",
+        "resets": "arrow.counterclockwise"
     ]
+    private static let toggleIcons = [
+        "Enhanced Stops": "stop.circle", "Always Hold Enhanced Stops": "stop.circle",
+        "Faster Takeoffs": "hare.fill", "Pause while following a lead": "pause.circle",
+        "Show Curve status": "eye", "Curve Speed Controller": "arrow.triangle.turn.up.right.circle"
+    ]
+
+    private func settingsIcon(page: String, child: String, label: String, binary: Bool, hasChoices: Bool) -> String {
+        let path = child.isEmpty ? page : child
+        let category = path.split(separator: "/").last.flatMap { Self.categoryIcons[String($0)] }
+        if !child.isEmpty { return category ?? "folder" }
+        if let icon = Self.toggleIcons[label] { return icon }
+        if binary { return category ?? "power" }
+        return hasChoices ? "list.bullet" : "slider.horizontal.3"
+    }
 
     private func isOnOffChoice(_ choices: [String]) -> Bool {
         choices.count == 2 && choices.contains("On") && choices.contains("Off")
@@ -743,16 +768,15 @@ final class CarPlaySceneDelegate: NSObject, CPTemplateApplicationSceneDelegate, 
             let value = row["value"].flatMap { $0 is NSNull ? nil : String(describing: $0) }
             let choices = row["choices"] as? [String] ?? []
             let binary = child.isEmpty && isOnOffChoice(choices) && (value == "On" || value == "Off")
-            let icon = child.isEmpty
-                ? (binary ? "power" : choices.isEmpty ? "slider.horizontal.3" : "list.bullet")
-                : (Self.categoryIcons[child] ?? "folder")
+            let label = row["label"] as? String ?? "Setting"
+            let icon = settingsIcon(page: state.name, child: child, label: label, binary: binary, hasChoices: !choices.isEmpty)
             let enabled = row["available"] as? Bool == true && (!child.isEmpty || row["action"] as? Bool == true) && !busy
             let description = (row["reason"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
             let detail = [child.isEmpty ? displayedSettingValue(row) : nil, description.map(localizedCarPlay)]
                 .compactMap { $0 }
                 .filter { !$0.isEmpty }
                 .joined(separator: " · ")
-            let item = settingsItem(row["label"] as? String ?? "Setting", detail: detail.isEmpty ? nil : detail,
+            let item = settingsItem(label, detail: detail.isEmpty ? nil : detail,
                                     icon: icon, enabled: enabled) { [weak self, weak page] in
                 guard let self, let page else { return }
                 guard state.session == self.session else { self.loadSettings(page); return }
@@ -772,11 +796,6 @@ final class CarPlaySceneDelegate: NSObject, CPTemplateApplicationSceneDelegate, 
         }
     }
     private func editSetting(_ parent: CPListTemplate, index: Int, row: [String: Any]) {
-        let choices = row["choices"] as? [String] ?? []
-        if isOnOffChoice(choices) {
-            preview(parent, index: index, selection: row["value"] as? String == "On" ? "Off" : "On")
-            return
-        }
         let editor = CPListTemplate(title: row["label"] as? String, sections: [])
         let state = SettingsEditorState(parent: parent, index: index, label: row["label"] as? String ?? "")
         editor.userInfo = state
@@ -784,46 +803,73 @@ final class CarPlaySceneDelegate: NSObject, CPTemplateApplicationSceneDelegate, 
         pushTemplate(editor, animated: true, completion: nil)
     }
 
+    private func descriptionLines(_ text: NSAttributedString, width: CGFloat) -> [String] {
+        let typesetter = CTTypesetterCreateWithAttributedString(text as CFAttributedString)
+        let string = text.string as NSString
+        var offset = 0
+        var lines: [String] = []
+        while offset < string.length {
+            let suggested = CTTypesetterSuggestLineBreak(typesetter, offset, Double(width))
+            let length = suggested > 0 ? suggested : string.rangeOfComposedCharacterSequence(at: offset).length
+            let line = string.substring(with: NSRange(location: offset, length: length))
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            if !line.isEmpty { lines.append(line) }
+            offset += length
+        }
+        return lines
+    }
+
+    private func descriptionItems(_ row: [String: Any]) -> [CPListItem] {
+        guard let reason = row["reason"] as? String, !reason.isEmpty else { return [] }
+        // CarPlay list rows have two single-line fields. Lay out the whole description
+        // across rows, including on head units with a short list or a narrow screen.
+        let screenWidth = window?.safeAreaLayoutGuide.layoutFrame.width ?? 0
+        let width = screenWidth > 0 ? max(150, min(460, screenWidth * 0.70 - 28)) : 220
+        let text = NSAttributedString(string: localizedCarPlay(reason), attributes: [.font: UIFont.preferredFont(forTextStyle: .headline)])
+        let lines = descriptionLines(text, width: width)
+        return stride(from: 0, to: lines.count, by: 2).map { index in
+            CPListItem(text: lines[index], detailText: index + 1 < lines.count ? lines[index + 1] : nil)
+        }
+    }
+
     private func drawEditor(_ editor: CPListTemplate, state: SettingsEditorState, row: [String: Any]) {
         let parent = state.parent
         let index = state.index
         let choices = row["choices"] as? [String] ?? []
         let current = String(describing: row["value"] ?? "")
+        let controls: [CPListItem]
         if !choices.isEmpty {
-            func redraw() {
-                let capacity = max(1, CPListTemplate.maximumItemCount)
-                let count = max(1, (choices.count + capacity - 1) / capacity)
-                let choicePage = min(state.choicePage ?? ((choices.firstIndex(of: current) ?? 0) / capacity), count - 1)
-                let start = choicePage * capacity
-                let items = choices[start..<min(start + capacity, choices.count)].map { choice in
-                    settingsItem(choice, icon: current == choice ? "checkmark.circle.fill" : "circle") { [weak self, weak parent] in
-                        guard let parent else { return }
-                        self?.preview(parent, index: index, selection: choice)
-                    }
+            controls = choices.map { choice in
+                settingsItem(choice, icon: current == choice ? "checkmark.circle.fill" : "circle") { [weak self, weak parent] in
+                    guard let parent else { return }
+                    self?.preview(parent, index: index, selection: choice)
                 }
-                editor.updateSections([CPListSection(items: items)])
-                paging(editor, index: choicePage, count: count) { next in state.choicePage = next; redraw() }
             }
-            redraw()
         } else if ((row["step"] as? NSNumber)?.doubleValue ?? 0) > 0 {
-            drawStepper(editor, parent: parent, index: index, row: row)
+            controls = [(-1, "Decrease", "minus.circle"), (1, "Increase", "plus.circle")].map { direction, title, icon in
+                settingsItem(title, icon: icon, enabled: row["available"] as? Bool == true && row["action"] as? Bool == true) { [weak self, weak editor, weak parent] in
+                    guard let self, let editor, let parent, !self.busy else { return }
+                    self.applyStep(direction, editor: editor, parent: parent, index: index, row: row)
+                }
+            }
         } else {
-            editor.updateSections([CPListSection(items: [
-                settingsItem("Continue", detail: displayedSettingValue(row), icon: "checkmark.circle") { [weak self, weak parent] in
+            controls = [
+                settingsItem("Continue", icon: "checkmark.circle") { [weak self, weak parent] in
                     if let parent { self?.preview(parent, index: index) }
                 }
-            ])])
+            ]
         }
-    }
-    private func drawStepper(_ editor: CPListTemplate, parent: CPListTemplate, index: Int, row: [String: Any]) {
-        let value = displayedSettingValue(row)
-        let items = [(-1, "Decrease", "minus.circle"), (1, "Increase", "plus.circle")].map { direction, title, icon in
-            settingsItem(title, icon: icon, enabled: row["available"] as? Bool == true && row["action"] as? Bool == true) { [weak self, weak editor, weak parent] in
-                guard let self, let editor, let parent, !self.busy else { return }
-                self.applyStep(direction, editor: editor, parent: parent, index: index, row: row)
-            }
+        let items = descriptionItems(row) + controls
+        let capacity = max(1, CPListTemplate.maximumItemCount)
+        let count = (items.count + capacity - 1) / capacity
+        state.page = min(state.page, count - 1)
+        let visible = Array(items.dropFirst(state.page * capacity).prefix(capacity))
+        editor.updateSections([CPListSection(items: visible, header: displayedSettingValue(row), sectionIndexTitle: nil)])
+        paging(editor, index: state.page, count: count) { [weak self, weak editor] next in
+            guard let editor else { return }
+            state.page = next
+            self?.drawEditor(editor, state: state, row: row)
         }
-        editor.updateSections([CPListSection(items: items, header: value, sectionIndexTitle: nil)])
     }
 
     private func applyStep(_ direction: Int, editor: CPListTemplate, parent: CPListTemplate, index: Int, row: [String: Any]) {
@@ -859,7 +905,9 @@ final class CarPlaySceneDelegate: NSObject, CPTemplateApplicationSceneDelegate, 
                     popTemplate(animated: true, completion: nil)
                     return
                 }
-                drawStepper(editor, parent: parent, index: index, row: rows[index])
+                if let editorState = editor.userInfo as? SettingsEditorState {
+                    drawEditor(editor, state: editorState, row: rows[index])
+                }
             } catch {
                 guard !Task.isCancelled, controller === attachedController else { return }
                 busy = false

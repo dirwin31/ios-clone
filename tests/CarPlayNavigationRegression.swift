@@ -1,4 +1,5 @@
 import Foundation
+import CoreText
 
 @MainActor final class UIImage {
     init?(systemName: String) {}
@@ -43,6 +44,11 @@ __PRODUCTION_METHODS__
 @main struct NavigationRegression {
     @MainActor static func main() {
         let controller = CPInterfaceController(), probe = NavigationProbe(controller)
+        let description = "Adjusts following distance. 🚘 " + String(repeating: "LongSettingName", count: 8) + "\nSaved on your comma."
+        let lines = probe.descriptionLines(NSAttributedString(string: description), width: 120)
+        precondition(lines.count > 2)
+        precondition(lines.joined().filter { !$0.isWhitespace } == description.filter { !$0.isWhitespace })
+        precondition(probe.descriptionLines(NSAttributedString(string: ""), width: 120).isEmpty)
         let settings = NavigationProbe.SettingsPageState("lane")
         func update(_ number: Int, _ toggle: String, _ token: String) -> Bool {
             settings.update(["view": token, "rows": [["value": number], ["value": toggle]]], session: "comma")
