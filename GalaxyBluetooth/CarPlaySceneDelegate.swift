@@ -22,6 +22,8 @@ final class CarPlaySceneDelegate: NSObject, CPTemplateApplicationSceneDelegate, 
     private var controller: CPInterfaceController?
     private var timer: Timer?
     private var work: Task<Void, Never>?
+    private var settingsRead: Task<Void, Never>?
+    private var lastSettingsRead = Date.distantPast
     private var overview: CPGridTemplate?
     private var temperatures: CPGridTemplate?
     private var rates: CPGridTemplate?
@@ -81,6 +83,7 @@ final class CarPlaySceneDelegate: NSObject, CPTemplateApplicationSceneDelegate, 
             Task { @MainActor in
                 self?.refreshTelemetry()
                 self?.refreshNavigation()
+                self?.refreshVisibleSettings()
             }
         }
     }
@@ -91,6 +94,8 @@ final class CarPlaySceneDelegate: NSObject, CPTemplateApplicationSceneDelegate, 
         let alpha = model.navigationEnabled
         guard alphaMode != alpha else { return }
         alphaMode = alpha
+        settingsRead?.cancel()
+        settingsRead = nil
         stopGuidance()
         model.navigationServices.setEnabled(alpha)
         model.navigationServices.setCarPlayActive(alpha)
@@ -236,6 +241,7 @@ final class CarPlaySceneDelegate: NSObject, CPTemplateApplicationSceneDelegate, 
         timer?.invalidate(); timer = nil
         subscriptions.removeAll()
         work?.cancel(); work = nil
+        settingsRead?.cancel(); settingsRead = nil
         stopGuidance()
         window?.rootViewController = nil; window = nil; mapController = nil; mapTemplate = nil; alphaMode = nil
         controller = nil
@@ -558,6 +564,26 @@ final class CarPlaySceneDelegate: NSObject, CPTemplateApplicationSceneDelegate, 
         var session = ""
         var index = 0
         init(_ name: String) { self.name = name }
+
+        func update(_ next: [String: Any], session nextSession: String) -> Bool {
+            let previousRows = snapshot["rows"] as? NSArray
+            let changed = session != nextSession || previousRows?.isEqual(next["rows"]) != true
+            // Even identical rows come with a fresh view token for the next edit.
+            snapshot = next
+            session = nextSession
+            return changed
+        }
+    }
+    private final class SettingsEditorState {
+        let parent: CPListTemplate
+        let index: Int
+        let label: String
+        var choicePage: Int?
+        init(parent: CPListTemplate, index: Int, label: String) {
+            self.parent = parent
+            self.index = index
+            self.label = label
+        }
     }
     private var session: String {
         let model = AppModel.shared
@@ -588,7 +614,7 @@ final class CarPlaySceneDelegate: NSObject, CPTemplateApplicationSceneDelegate, 
     }
     private func settingsItem(_ title: String, detail: String? = nil, icon: String,
                               enabled: Bool = true, action: @escaping @MainActor () -> Void = {}) -> CPListItem {
-        let item = CPListItem(text: localizedCarPlay(title), detailText: detail.map(localizedCarPlay), image: UIImage(systemName: icon))
+        let item = CPListItem(text: localizedCarPlay(title), detailText: detail, image: UIImage(systemName: icon))
         item.isEnabled = enabled
         item.handler = { _, completion in
             action()
@@ -605,16 +631,47 @@ final class CarPlaySceneDelegate: NSObject, CPTemplateApplicationSceneDelegate, 
             if success, let page { self?.loadSettings(page) }
         }
     }
-    private func loadSettings(_ page: CPListTemplate) {
+    private var visibleSettingsList: CPListTemplate? {
+        let top = controller?.topTemplate
+        return ((top as? CPTabBarTemplate)?.selectedTemplate ?? top) as? CPListTemplate
+    }
+
+    private func refreshVisibleSettings() {
+        guard settingsRead == nil, !busy, !navigating, controller?.presentedTemplate == nil,
+              AppModel.shared.transport.connected, Date().timeIntervalSince(lastSettingsRead) >= 3,
+              let visible = visibleSettingsList else { return }
+        let parent = (visible.userInfo as? SettingsEditorState)?.parent ?? visible
+        guard parent.userInfo is SettingsPageState else { return }
+        loadSettings(parent, refreshing: visible)
+    }
+
+    private func loadSettings(_ page: CPListTemplate, refreshing visible: CPListTemplate? = nil) {
         guard let state = page.userInfo as? SettingsPageState, !busy else { return }
-        work?.cancel()
-        work = Task { [weak self, weak page] in
+        settingsRead?.cancel()
+        lastSettingsRead = Date()
+        settingsRead = Task { [weak self, weak page] in
             guard let self, let page else { return }
+            defer { if !Task.isCancelled { self.settingsRead = nil } }
             do {
-                try await self.refreshSnapshot(state)
+                let snapshot = try await self.settingsSnapshot(state)
+                try Task.checkCancellation()
+                if let visible, (self.visibleSettingsList !== visible || self.busy || self.controller?.presentedTemplate != nil) { return }
+                let changed = state.update(snapshot, session: self.session)
+                guard changed || visible == nil else { return }
                 self.drawSettings(page)
+                if let visible, let editor = visible.userInfo as? SettingsEditorState {
+                    let rows = snapshot["rows"] as? [[String: Any]] ?? []
+                    guard rows.indices.contains(editor.index), let label = rows[editor.index]["label"] as? String,
+                          label == editor.label, rows[editor.index]["action"] as? Bool == true,
+                          rows[editor.index]["available"] as? Bool == true else {
+                        self.popTemplate(animated: true, completion: nil)
+                        return
+                    }
+                    self.drawEditor(visible, state: editor, row: rows[editor.index])
+                }
             } catch {
-                if !Task.isCancelled {
+                if visible == nil && !Task.isCancelled {
+                    state.snapshot = [:]
                     page.updateSections([CPListSection(items: [self.settingsItem("Retry", icon: "arrow.clockwise") { [weak self, weak page] in
                         if let page { self?.loadSettings(page) }
                     }])])
@@ -623,10 +680,9 @@ final class CarPlaySceneDelegate: NSObject, CPTemplateApplicationSceneDelegate, 
             }
         }
     }
-    private func refreshSnapshot(_ state: SettingsPageState) async throws {
+    private func settingsSnapshot(_ state: SettingsPageState) async throws -> [String: Any] {
         let name = state.name.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed.subtracting(CharacterSet(charactersIn: "/")))!
-        state.snapshot = try await request("/api/settings/pages/" + name)
-        state.session = session
+        return try await request("/api/settings/pages/" + name)
     }
     private static let categoryIcons = [
         "vehicle": "car.fill", "lane": "road.lanes", "lane_change": "arrow.left.arrow.right",
@@ -658,6 +714,22 @@ final class CarPlaySceneDelegate: NSObject, CPTemplateApplicationSceneDelegate, 
     private static let onImage = switchImage(on: true)
     private static let offImage = switchImage(on: false)
 
+    private func displayedSettingValue(_ row: [String: Any]) -> String? {
+        guard let raw = row["value"], !(raw is NSNull) else { return nil }
+        let text = String(describing: raw)
+        guard let number = Double(text), number.isFinite else { return localizedCarPlay(text) }
+        if row["displayScale"] as? String == "lane-strength",
+           let minimum = (row["minimum"] as? NSNumber)?.doubleValue, minimum < 100,
+           let maximum = (row["maximum"] as? NSNumber)?.doubleValue, maximum > 100 {
+            // Galaxy displays the saved neutral value (100) as 5 on its 1–10 scale.
+            let strength = number <= 100 ? 1 + 4 * (number - minimum) / (100 - minimum)
+                                         : 5 + 5 * (number - 100) / (maximum - 100)
+            return strength.formatted(.number.precision(.fractionLength(0...2)))
+        }
+        guard let unit = row["unit"] as? String, !unit.isEmpty else { return text }
+        return text + (unit == "%" ? "" : " ") + unit
+    }
+
     private func drawSettings(_ page: CPListTemplate) {
         guard let state = page.userInfo as? SettingsPageState else { return }
         let rows = state.snapshot["rows"] as? [[String: Any]] ?? []
@@ -675,7 +747,12 @@ final class CarPlaySceneDelegate: NSObject, CPTemplateApplicationSceneDelegate, 
                 ? (binary ? "power" : choices.isEmpty ? "slider.horizontal.3" : "list.bullet")
                 : (Self.categoryIcons[child] ?? "folder")
             let enabled = row["available"] as? Bool == true && (!child.isEmpty || row["action"] as? Bool == true) && !busy
-            let item = settingsItem(row["label"] as? String ?? "Setting", detail: child.isEmpty ? value : nil,
+            let description = (row["reason"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+            let detail = [child.isEmpty ? displayedSettingValue(row) : nil, description.map(localizedCarPlay)]
+                .compactMap { $0 }
+                .filter { !$0.isEmpty }
+                .joined(separator: " · ")
+            let item = settingsItem(row["label"] as? String ?? "Setting", detail: detail.isEmpty ? nil : detail,
                                     icon: icon, enabled: enabled) { [weak self, weak page] in
                 guard let self, let page else { return }
                 guard state.session == self.session else { self.loadSettings(page); return }
@@ -701,12 +778,22 @@ final class CarPlaySceneDelegate: NSObject, CPTemplateApplicationSceneDelegate, 
             return
         }
         let editor = CPListTemplate(title: row["label"] as? String, sections: [])
+        let state = SettingsEditorState(parent: parent, index: index, label: row["label"] as? String ?? "")
+        editor.userInfo = state
+        drawEditor(editor, state: state, row: row)
+        pushTemplate(editor, animated: true, completion: nil)
+    }
+
+    private func drawEditor(_ editor: CPListTemplate, state: SettingsEditorState, row: [String: Any]) {
+        let parent = state.parent
+        let index = state.index
+        let choices = row["choices"] as? [String] ?? []
         let current = String(describing: row["value"] ?? "")
         if !choices.isEmpty {
-            var choicePage = (choices.firstIndex(of: current) ?? 0) / max(1, CPListTemplate.maximumItemCount)
             func redraw() {
                 let capacity = max(1, CPListTemplate.maximumItemCount)
                 let count = max(1, (choices.count + capacity - 1) / capacity)
+                let choicePage = min(state.choicePage ?? ((choices.firstIndex(of: current) ?? 0) / capacity), count - 1)
                 let start = choicePage * capacity
                 let items = choices[start..<min(start + capacity, choices.count)].map { choice in
                     settingsItem(choice, icon: current == choice ? "checkmark.circle.fill" : "circle") { [weak self, weak parent] in
@@ -715,22 +802,21 @@ final class CarPlaySceneDelegate: NSObject, CPTemplateApplicationSceneDelegate, 
                     }
                 }
                 editor.updateSections([CPListSection(items: items)])
-                paging(editor, index: choicePage, count: count) { next in choicePage = next; redraw() }
+                paging(editor, index: choicePage, count: count) { next in state.choicePage = next; redraw() }
             }
             redraw()
         } else if ((row["step"] as? NSNumber)?.doubleValue ?? 0) > 0 {
             drawStepper(editor, parent: parent, index: index, row: row)
         } else {
             editor.updateSections([CPListSection(items: [
-                settingsItem("Continue", detail: current, icon: "checkmark.circle") { [weak self, weak parent] in
+                settingsItem("Continue", detail: displayedSettingValue(row), icon: "checkmark.circle") { [weak self, weak parent] in
                     if let parent { self?.preview(parent, index: index) }
                 }
             ])])
         }
-        pushTemplate(editor, animated: true, completion: nil)
     }
     private func drawStepper(_ editor: CPListTemplate, parent: CPListTemplate, index: Int, row: [String: Any]) {
-        let value = String(describing: row["value"] ?? "")
+        let value = displayedSettingValue(row)
         let items = [(-1, "Decrease", "minus.circle"), (1, "Increase", "plus.circle")].map { direction, title, icon in
             settingsItem(title, icon: icon, enabled: row["available"] as? Bool == true && row["action"] as? Bool == true) { [weak self, weak editor, weak parent] in
                 guard let self, let editor, let parent, !self.busy else { return }
@@ -743,6 +829,8 @@ final class CarPlaySceneDelegate: NSObject, CPTemplateApplicationSceneDelegate, 
     private func applyStep(_ direction: Int, editor: CPListTemplate, parent: CPListTemplate, index: Int, row: [String: Any]) {
         guard let state = parent.userInfo as? SettingsPageState, let view = state.snapshot["view"] as? String else { return }
         let attachedController = controller
+        settingsRead?.cancel()
+        settingsRead = nil
         busy = true
         for section in editor.sections {
             for case let item as CPListItem in section.items { item.isEnabled = false }
@@ -759,7 +847,8 @@ final class CarPlaySceneDelegate: NSObject, CPTemplateApplicationSceneDelegate, 
                 }
                 let result = try await request("/api/settings/confirm", payload: ["intent": intent, "confirmed": true])
                 guard result["saved"] as? Bool == true else { throw BridgeError.message("Save could not be confirmed. Check the current value.") }
-                try await refreshSnapshot(state)
+                let snapshot = try await settingsSnapshot(state)
+                _ = state.update(snapshot, session: session)
                 busy = false
                 drawSettings(parent)
                 guard controller?.topTemplate === editor else { return }
@@ -791,6 +880,8 @@ final class CarPlaySceneDelegate: NSObject, CPTemplateApplicationSceneDelegate, 
               let view = state.snapshot["view"] as? String else { loadSettings(page); return }
         busy = true
         let original = session
+        settingsRead?.cancel()
+        settingsRead = nil
         Task { [weak self, weak page] in
             guard let self, let page else { return }
             defer { self.busy = false }

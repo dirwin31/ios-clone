@@ -36,12 +36,25 @@ import Foundation
     let overflowParents = NSMapTable<CPTemplate, CPTemplate>.weakToStrongObjects()
     var notices: [String] = []
     func notice(_ message: String) { notices.append(message) }
+    func localizedCarPlay(_ text: String) -> String { text }
     init(_ controller: CPInterfaceController) { self.controller = controller }
 __PRODUCTION_METHODS__
 }
 @main struct NavigationRegression {
     @MainActor static func main() {
         let controller = CPInterfaceController(), probe = NavigationProbe(controller)
+        let settings = NavigationProbe.SettingsPageState("lane")
+        func update(_ number: Int, _ toggle: String, _ token: String) -> Bool {
+            settings.update(["view": token, "rows": [["value": number], ["value": toggle]]], session: "comma")
+        }
+        precondition(update(100, "Off", "a"))
+        precondition(!update(100, "Off", "b"))
+        precondition(settings.snapshot["view"] as? String == "b")
+        precondition(update(101, "Off", "c"))
+        precondition(update(101, "On", "d"))
+        precondition(probe.displayedSettingValue(["value": 25, "unit": "%"]) == "25%")
+        precondition(probe.displayedSettingValue(["value": 100, "displayScale": "lane-strength",
+                                                 "minimum": 50, "maximum": 200]) == "5")
         let pages = (0..<12).map { _ in Page() }
         for page in pages {
             probe.pushTemplate(page, animated: true, completion: nil)
