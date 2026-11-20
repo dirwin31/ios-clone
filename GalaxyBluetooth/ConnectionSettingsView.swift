@@ -62,10 +62,6 @@ struct ConnectionSettingsView: View {
         if model.mode == .bluetooth { return "Reconnect Bluetooth" }
         return "Connect"
     }
-    private var connectionCandidates: [DiscoveredComma] {
-        discovery.devices.count > 1 ? discovery.devices : []
-    }
-
     private var checking: Bool { model.matchingGalaxy || assets.checking }
     private var status: String { pairing ? "Pairing with comma…" : connected ? "Connected via \(model.transport.label)" : connecting ? "Connecting to comma…" : "Not connected" }
 
@@ -327,7 +323,10 @@ struct ConnectionSettingsView: View {
                     if model.hasLANPairingSetup { model.pairWithComma() }
                     else { model.mode = .lan; model.connect(); discovery.start() }
                 }
-                else {
+                else if model.mode != .bluetooth, model.address.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                        discovery.devices.count == 1, let device = discovery.devices.first {
+                    connectToDiscoveredComma(device)
+                } else {
                     openAfterReconnect = true
                     model.connect()
                     openReconnectedGalaxy()
@@ -342,7 +341,7 @@ struct ConnectionSettingsView: View {
                     .frame(maxWidth: .infinity, minHeight: 44)
                     .background(LinearGradient(colors: [Color(red: 0.73, green: 0.55, blue: 1), accent], startPoint: .leading, endPoint: .trailing), in: Capsule())
                     .foregroundStyle(Color(red: 0.12, green: 0.06, blue: 0.19))
-            }.buttonStyle(.plain).disabled(pairing || (connecting && !needsRecoveryAction) || (connected && !model.opened))
+            }.buttonStyle(.plain).disabled(pairing || model.selectingDiscoveredComma || (connecting && !needsRecoveryAction) || (connected && !model.opened))
             if bluetooth.pairingRecoveryNeeded && model.mode == .bluetooth && !pairing && !connecting && !connected {
                 Button("Try saved pairing once more") {
                     bluetooth.retrySavedPairing()
@@ -395,24 +394,26 @@ struct ConnectionSettingsView: View {
             .fixedSize(horizontal: false, vertical: true).padding(.horizontal, 8).padding(.top, 3)
     }
 
+    private func connectToDiscoveredComma(_ device: DiscoveredComma) {
+        guard connectingCommaID == nil, !model.selectingDiscoveredComma else { return }
+        connectingCommaID = device.id
+        openAfterReconnect = true
+        Task { @MainActor in
+            defer { connectingCommaID = nil }
+            if await model.selectDiscoveredComma(device) {
+                openReconnectedGalaxy()
+            } else {
+                openAfterReconnect = false
+                if device.address == "172.31.254.1" { showHotspotJoin = true }
+            }
+        }
+    }
+
     private var discoveredCommas: some View {
         VStack(spacing: 8) {
-            if discovery.devices.count == 1, let device = discovery.devices.first {
-                Text("\(device.name) · \(device.address)")
-                    .font(.caption).foregroundStyle(muted)
-            }
-            ForEach(connectionCandidates) { device in
+            ForEach(discovery.devices) { device in
                 Button {
-                    connectingCommaID = device.id
-                    openAfterReconnect = true
-                    Task { @MainActor in
-                        defer { connectingCommaID = nil }
-                        let selected = await model.selectDiscoveredComma(device)
-                        if !selected && device.address == "172.31.254.1" {
-                            openAfterReconnect = false
-                            showHotspotJoin = true
-                        } else if selected { openReconnectedGalaxy() }
-                    }
+                    connectToDiscoveredComma(device)
                 } label: {
                     HStack(spacing: 12) {
                         HStack(alignment: .bottom, spacing: 3) {
@@ -451,7 +452,7 @@ struct ConnectionSettingsView: View {
             }
             HStack(spacing: 8) {
                 if discovery.searching { ProgressView().controlSize(.mini).tint(accent) }
-                Text(connectionCandidates.isEmpty ? discovery.status : "Select your comma")
+                Text(discovery.devices.isEmpty ? discovery.status : "Select your comma")
                     .font(.system(size: 11)).foregroundStyle(muted)
                 Spacer()
                 Button(discovery.searching ? "Stop" : "Search again") {
