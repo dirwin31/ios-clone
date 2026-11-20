@@ -321,7 +321,23 @@ final class AppModel: ObservableObject {
     var connectionControllerDiagnostics: String {
         "Connection controller: requested=\(wantsConnection); phone active=\(phoneActive); CarPlay active=\(carPlayActive); monitor running=\(monitorTask != nil); setup busy=\(connectionSetupBusy); selecting device=\(selectingDiscoveredComma)\n"
         + "Connection tasks: first setup=\(firstConnection != nil); automatic LAN=\(automaticLAN != nil); LAN probe=\(lanProbeTask != nil); Tunnel probe=\(tunnelProbeTask != nil); pairing=\(pairingTask != nil)\n"
-        + "Address discovery: initial search started=\(initialDiscoveryStarted); Bluetooth lookup enabled=\(findAddressAutomatically); tried LAN candidates=\(triedLANAddresses.count); saved address present=\(!address.isEmpty)"
+        + "Address discovery: initial search started=\(initialDiscoveryStarted); Bluetooth lookup enabled=\(findAddressAutomatically); addresses queued for automatic verification this search=\(triedLANAddresses.count); saved address present=\(!address.isEmpty)\n"
+        + "Last discovered-device check: " + (lastDiscoveredDeviceCheck ?? "No check attempted this session")
+    }
+    private var lastDiscoveredDeviceCheck: String?
+    private func discoveryCheck(_ message: String) {
+        lastDiscoveredDeviceCheck = message
+        connectionLog.recordState("discovered-device-check", "Discovered-device check: " + message)
+    }
+
+    private func discoveryTransport(for address: String, context: String) -> LANTransport {
+        let candidate = LANTransport()
+        let log: (String) -> Void = { [weak self] event in
+            self?.connectionLog.record("\(context) \(address): \(event)")
+        }
+        candidate.onDiagnostic = log
+        candidate.onEvent = log
+        return candidate
     }
     private var firstConnection: Task<Void, Never>?
     private var openAfterFirstConnection = false
@@ -352,7 +368,7 @@ final class AppModel: ObservableObject {
             do {
                 // Bluetooth-only invalidates the normal LAN session. Use a separate, identity-checked
                 // connection just for opening the pairing window; do not change the selected route.
-                let pairingLAN = LANTransport()
+                let pairingLAN = discoveryTransport(for: address, context: "Bluetooth pairing via LAN")
                 pairingLAN.bind(to: lan.expectedDeviceID)
                 if !lan.connected, !address.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     connectionMessage = "Checking comma over Local Wi-Fi before Bluetooth pairing…"
@@ -668,11 +684,8 @@ final class AppModel: ObservableObject {
         discovery.stop()
         defer { selectingDiscoveredComma = false }
         // Advertised names and addresses are discovery hints, not pairing credentials.
-        let candidate = LANTransport()
-        candidate.onEvent = { [weak self] event in
-            self?.connectionLog.record("Selected comma \(device.address): \(event)")
-        }
-        connectionLog.record("Checking selected comma at \(device.address):8082")
+        let candidate = discoveryTransport(for: device.address, context: "Selected comma")
+        discoveryCheck("Verifying \(device.address):8082 after \(userSelected ? "user selection" : "first-time discovery")")
         // Explicit local-only selection can recover an old runtime pin or choose another comma.
         // Never apply that permission to background discovery or another saved transport.
         if !userSelected || !pairingKey.isEmpty || tunnel.credential != nil {
@@ -688,11 +701,12 @@ final class AppModel: ObservableObject {
                     pairingResetNeeded = true
                 }
                 connectionMessage = "Couldn’t connect to \(device.address): \(candidate.status)"
-                connectionLog.record("Selected comma \(device.address) rejected: \(candidate.status)")
+                discoveryCheck("Selected comma \(device.address) rejected: \(candidate.status)")
                 return false
             }
             guard !Task.isCancelled, lan.generation == originalGeneration, mode == originalMode, phoneActive else {
                 connectionMessage = "Connection changed. Select the comma again."
+                discoveryCheck("Selected comma check interrupted after verification; connection or app state changed")
                 return false
             }
             lan.bind(to: candidate.verifiedDeviceID)
@@ -702,13 +716,15 @@ final class AppModel: ObservableObject {
             connect()
             guard await lan.probe() else {
                 connectionMessage = "Couldn’t connect to \(device.address): \(lan.status)"
+                discoveryCheck("Selected comma \(device.address) failed final verification: \(lan.status)")
                 return false
             }
             openIfReady()
-            connectionLog.record("Discovered comma selected; LAN verification passed")
+            discoveryCheck("Discovered comma selected; LAN verification passed")
             return true
         } catch {
             connectionMessage = "Couldn’t connect to the discovered comma. Try again or enter its IP."
+            discoveryCheck("Selected comma address rejected before verification: \(LANTransport.failureCode(error))")
             return false
         }
     }
@@ -779,6 +795,9 @@ final class AppModel: ObservableObject {
     private func discoverAutomaticLAN() {
         guard phoneActive, wantsConnection, mode != .bluetooth, !connectionSetupBusy,
               !selectingDiscoveredComma, !lan.connected else { return }
+        if lan.expectedDeviceID == nil, !pairingKey.isEmpty, !discovery.devices.isEmpty, lan.endpoint == nil {
+            connectionLog.recordState("discovery-selection", "Automatic selection skipped: Bluetooth key saved without a saved comma identity; waiting for the user to select a discovered comma")
+        }
         if lan.expectedDeviceID == nil && pairingKey.isEmpty {
             if !initialDiscoveryStarted {
                 initialDiscoveryStarted = true
@@ -824,10 +843,16 @@ final class AppModel: ObservableObject {
             }
             var mismatchedAddress: String?
             let address = await LANDiscoveryMatch.first(addresses: addresses, expectedDeviceID: identity, stillCurrent: stillCurrent) { address, identity in
-                let candidate = LANTransport()
+                let candidate = self.discoveryTransport(for: address, context: "Automatic LAN verification")
                 candidate.bind(to: identity)
-                guard (try? candidate.configure(address: address)) != nil else { return false }
+                do { try candidate.configure(address: address) }
+                catch {
+                    self.discoveryCheck("Automatic candidate \(address) rejected before verification: \(LANTransport.failureCode(error))")
+                    return false
+                }
                 let verified = await candidate.probe()
+                guard stillCurrent() else { return false }
+                self.discoveryCheck("Automatic candidate \(address): \(candidate.status)")
                 if candidate.pairingIdentityMismatch { mismatchedAddress = address }
                 return verified
             }
@@ -1338,7 +1363,7 @@ final class ConnectionEventLog: ObservableObject {
         let info = Bundle.main.infoDictionary ?? [:]
         return """
         StarPilot BT connection diagnostics
-        Connection diagnostics revision: 4 (controller state, discovery evidence and optional lookup failures)
+        Connection diagnostics revision: 5 (discovered-device decisions and per-candidate verification)
         \(ISO8601DateFormatter().string(from: Date()))
         App: \(info["CFBundleShortVersionString"] ?? "?") (\(info["CFBundleVersion"] ?? "?"))
         Build distribution: \(model.buildDistribution)
