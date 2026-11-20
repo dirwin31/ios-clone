@@ -15,7 +15,7 @@ ui_start = settings.index('    private var needsPairing: Bool {')
 ui_end = settings.index('    private var connecting:', ui_start)
 ui_property = settings[ui_start:ui_end].replace('private var needsPairing', 'var needsPairing')
 title_start = settings.index('    private var primaryTitle: String {')
-title_end = settings.index('    private var connectionCandidates:', title_start)
+title_end = settings.index('    private var checking:', title_start)
 ui_property += settings[title_start:title_end].replace('private var primaryTitle', 'var primaryTitle')
 probe = r'''
 import Foundation
