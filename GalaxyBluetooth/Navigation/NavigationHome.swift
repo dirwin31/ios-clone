@@ -278,64 +278,7 @@ private struct StandardNavigationHome: View {
         }.frame(width: 78)
     }
     private var destinationPanel: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            if let place = navigation.destination {
-                HStack(alignment: .top) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(place.name).font(.title2.bold()).lineLimit(2)
-                        Text(place.address).font(.subheadline).foregroundStyle(.secondary).lineLimit(2)
-                    }
-                    Spacer()
-                    Button { navigation.clearPreview() } label: {
-                        Image(systemName: "xmark.circle.fill").font(.title2).foregroundStyle(.secondary)
-                    }.disabled(navigation.busy).accessibilityLabel("Close destination")
-                }
-                HStack(spacing: 16) {
-                    Button {
-                        if let favorite = saved.library.favorite(latitude: place.coordinate.latitude, longitude: place.coordinate.longitude) {
-                            saved.remove(favorite)
-                        } else { saved.save(place, as: .favorite) }
-                    } label: {
-                        Label(saved.library.favorite(latitude: place.coordinate.latitude, longitude: place.coordinate.longitude) == nil ?
-                            "Add Favorite" : "Saved", systemImage: "star.fill")
-                    }.font(.subheadline.weight(.medium))
-                    Menu {
-                        Button("Save as Home") { saved.save(place, as: .home) }
-                        Button("Save as Work") { saved.save(place, as: .work) }
-                    } label: { Image(systemName: "ellipsis.circle").font(.title3) }.accessibilityLabel("Save place options")
-                }
-            }
-            ForEach(Array(navigation.routes.enumerated()), id: \.offset) { index, route in
-                HStack(spacing: 14) {
-                    Button { navigation.chooseRoute(index) } label: {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(minutes(route.expectedTravelTime)).font(.title2.bold())
-                            Text("\(distance(route.distance)) · \(route.name)").font(.subheadline).foregroundStyle(.secondary).lineLimit(2)
-                        }.frame(maxWidth: .infinity, alignment: .leading)
-                    }.buttonStyle(.plain)
-                    Button {
-                        connection.recordAction("Phone Go button tapped")
-                        navigation.chooseRoute(index)
-                        Task { await navigation.start(connection: connection) }
-                    } label: {
-                        Text("Go").font(.title3.bold()).foregroundStyle(.white).padding(.horizontal, 24).padding(.vertical, 13)
-                            .background(StarPilotTheme.guidance, in: Capsule())
-                    }.buttonStyle(.plain).accessibilityLabel("Start route \(index + 1)")
-                }
-                .padding(14)
-                .background(navigation.selectedRoute == index ? StarPilotTheme.accent.opacity(0.08) : Color.secondary.opacity(0.05),
-                    in: RoundedRectangle(cornerRadius: 16))
-                .overlay(RoundedRectangle(cornerRadius: 16).stroke(navigation.selectedRoute == index ? StarPilotTheme.accent.opacity(0.5) : .clear))
-                .disabled(navigation.busy)
-            }
-            if navigation.busy { ProgressView("Getting directions…") }
-            else if navigation.routes.isEmpty {
-                Button("Get directions") { navigation.requestLocation(); Task { await navigation.calculateRoutes(refresh: false) } }
-                    .buttonStyle(.borderedProminent)
-            }
-            Toggle("Send destination to comma", isOn: $navigation.sendToComma).font(.subheadline).disabled(navigation.busy)
-            Text("Preview uses Apple routing. After Go, the app shows comma’s route when connected.").font(.caption).foregroundStyle(.secondary)
-        }
+        NavigationDestinationPanel(navigation: navigation, connection: connection, saved: saved)
     }
     private var tripPanel: some View {
         VStack(spacing: 14) {
@@ -359,7 +302,7 @@ private struct StandardNavigationHome: View {
     }
     private var messages: some View {
         VStack(alignment: .leading, spacing: 6) {
-            if !navigation.locationMessage.isEmpty {
+            if !navigation.sendToComma, !navigation.locationMessage.isEmpty {
                 Button(navigation.locationMessage) { navigation.requestLocation() }.font(.caption)
             }
             if navigation.usingComma, !navigation.commaFeedMessage.isEmpty {
@@ -374,6 +317,7 @@ private struct StandardNavigationHome: View {
         }.fixedSize(horizontal: false, vertical: true)
     }
     private var turnSymbol: String {
+        if navigation.usingComma && !navigation.commaFeedReady { return "antenna.radiowaves.left.and.right" }
         let text = (navigation.usingComma ? navigation.commaManeuverType + " " + navigation.commaManeuverModifier : navigation.instruction).lowercased()
         if text.contains("roundabout") { return "arrow.triangle.2.circlepath" }
         if text.contains("u-turn") { return "arrow.uturn.down" }
@@ -752,64 +696,7 @@ private struct DuoNavigationHome: View {
         }.frame(width: 78)
     }
     private var destinationPanel: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            if let place = navigation.destination {
-                HStack(alignment: .top) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(place.name).font(.title2.bold()).lineLimit(2)
-                        Text(place.address).font(.subheadline).foregroundStyle(.secondary).lineLimit(2)
-                    }
-                    Spacer()
-                    Button { navigation.clearPreview() } label: {
-                        Image(systemName: "xmark.circle.fill").font(.title2).foregroundStyle(.secondary)
-                    }.disabled(navigation.busy).accessibilityLabel("Close destination")
-                }
-                HStack(spacing: 16) {
-                    Button {
-                        if let favorite = saved.library.favorite(latitude: place.coordinate.latitude, longitude: place.coordinate.longitude) {
-                            saved.remove(favorite)
-                        } else { saved.save(place, as: .favorite) }
-                    } label: {
-                        Label(saved.library.favorite(latitude: place.coordinate.latitude, longitude: place.coordinate.longitude) == nil ?
-                            "Add Favorite" : "Saved", systemImage: "star.fill")
-                    }.font(.subheadline.weight(.medium))
-                    Menu {
-                        Button("Save as Home") { saved.save(place, as: .home) }
-                        Button("Save as Work") { saved.save(place, as: .work) }
-                    } label: { Image(systemName: "ellipsis.circle").font(.title3) }.accessibilityLabel("Save place options")
-                }
-            }
-            ForEach(Array(navigation.routes.enumerated()), id: \.offset) { index, route in
-                HStack(spacing: 14) {
-                    Button { navigation.chooseRoute(index) } label: {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(minutes(route.expectedTravelTime)).font(.title2.bold())
-                            Text("\(distance(route.distance)) · \(route.name)").font(.subheadline).foregroundStyle(.secondary).lineLimit(2)
-                        }.frame(maxWidth: .infinity, alignment: .leading)
-                    }.buttonStyle(.plain)
-                    Button {
-                        connection.recordAction("Phone Go button tapped")
-                        navigation.chooseRoute(index)
-                        Task { await navigation.start(connection: connection) }
-                    } label: {
-                        Text("Go").font(.title3.bold()).foregroundStyle(.white).padding(.horizontal, 24).padding(.vertical, 13)
-                            .background(StarPilotTheme.guidance, in: Capsule())
-                    }.buttonStyle(.plain).accessibilityLabel("Start route \(index + 1)")
-                }
-                .padding(14)
-                .background(navigation.selectedRoute == index ? StarPilotTheme.accent.opacity(0.08) : Color.secondary.opacity(0.05),
-                    in: RoundedRectangle(cornerRadius: 16))
-                .overlay(RoundedRectangle(cornerRadius: 16).stroke(navigation.selectedRoute == index ? StarPilotTheme.accent.opacity(0.5) : .clear))
-                .disabled(navigation.busy)
-            }
-            if navigation.busy { ProgressView("Getting directions…") }
-            else if navigation.routes.isEmpty {
-                Button("Get directions") { navigation.requestLocation(); Task { await navigation.calculateRoutes(refresh: false) } }
-                    .buttonStyle(.borderedProminent)
-            }
-            Toggle("Send destination to comma", isOn: $navigation.sendToComma).font(.subheadline).disabled(navigation.busy)
-            Text("Preview uses Apple routing. After Go, the app shows comma’s route when connected.").font(.caption).foregroundStyle(.secondary)
-        }
+        NavigationDestinationPanel(navigation: navigation, connection: connection, saved: saved)
     }
     private var tripPanel: some View {
         VStack(spacing: 14) {
@@ -833,7 +720,7 @@ private struct DuoNavigationHome: View {
     }
     private var messages: some View {
         VStack(alignment: .leading, spacing: 6) {
-            if !navigation.locationMessage.isEmpty {
+            if !navigation.sendToComma, !navigation.locationMessage.isEmpty {
                 Button(navigation.locationMessage) { navigation.requestLocation() }.font(.caption)
             }
             if navigation.usingComma, !navigation.commaFeedMessage.isEmpty {
@@ -848,6 +735,7 @@ private struct DuoNavigationHome: View {
         }.fixedSize(horizontal: false, vertical: true)
     }
     private var turnSymbol: String {
+        if navigation.usingComma && !navigation.commaFeedReady { return "antenna.radiowaves.left.and.right" }
         let text = (navigation.usingComma ? navigation.commaManeuverType + " " + navigation.commaManeuverModifier : navigation.instruction).lowercased()
         if text.contains("roundabout") { return "arrow.triangle.2.circlepath" }
         if text.contains("u-turn") { return "arrow.uturn.down" }
@@ -867,6 +755,88 @@ private struct DuoNavigationHome: View {
         Measurement(value: meters, unit: UnitLength.meters).formatted(.measurement(width: .abbreviated, usage: .road))
     }
     private func minutes(_ seconds: Double) -> String { NavigationDuration.text(seconds) }
+}
+
+private struct NavigationDestinationPanel: View {
+    @ObservedObject var navigation: NavigationModel
+    @ObservedObject var connection: CommaConnection
+    @ObservedObject var saved: SavedPlacesStore
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            if let place = navigation.destination {
+                HStack(alignment: .top) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(place.name).font(.title2.bold()).lineLimit(2)
+                        if !place.address.isEmpty {
+                            Text(place.address).font(.subheadline).foregroundStyle(.secondary).lineLimit(2)
+                        }
+                    }
+                    Spacer()
+                    Button { navigation.clearPreview() } label: {
+                        Image(systemName: "xmark.circle.fill").font(.title2).foregroundStyle(.secondary)
+                    }.disabled(navigation.busy).accessibilityLabel("Close destination")
+                }
+                HStack(spacing: 16) {
+                    Button {
+                        if let favorite = saved.library.favorite(latitude: place.coordinate.latitude, longitude: place.coordinate.longitude) {
+                            saved.remove(favorite)
+                        } else { saved.save(place, as: .favorite) }
+                    } label: {
+                        Label(saved.library.favorite(latitude: place.coordinate.latitude, longitude: place.coordinate.longitude) == nil ?
+                            "Add Favorite" : "Saved", systemImage: "star.fill")
+                    }.font(.subheadline.weight(.medium))
+                    Menu {
+                        Button("Save as Home") { saved.save(place, as: .home) }
+                        Button("Save as Work") { saved.save(place, as: .work) }
+                    } label: { Image(systemName: "ellipsis.circle").font(.title3) }.accessibilityLabel("Save place options")
+                }
+            }
+            Picker("Route guidance", selection: Binding(get: { navigation.sendToComma }, set: { useComma in
+                Task { await navigation.selectGuidanceSource(comma: useComma) }
+            })) {
+                Text("Comma").tag(true)
+                Text("iPhone").tag(false)
+            }
+            .pickerStyle(.segmented)
+            .disabled(navigation.busy)
+
+            if navigation.sendToComma {
+                Button {
+                    Task { await navigation.start(connection: connection) }
+                } label: {
+                    Label(navigation.busy ? "Sending destination…" : "Send to comma", systemImage: "arrow.up.right")
+                        .font(.headline).frame(maxWidth: .infinity).padding(.vertical, 5)
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(navigation.busy || !connection.connected)
+                Text(connection.connected ? "Your comma will calculate the route." : "Connect to comma or choose iPhone for directions.")
+                    .font(.footnote).foregroundStyle(.secondary)
+            } else if navigation.busy {
+                ProgressView("Getting directions…")
+            } else if navigation.routes.isEmpty {
+                Button("Get directions") { Task { await navigation.calculateRoutes(refresh: false) } }
+                    .buttonStyle(.borderedProminent)
+            } else {
+                ForEach(Array(navigation.routes.enumerated()), id: \.offset) { index, route in
+                    Button { navigation.chooseRoute(index) } label: {
+                        HStack {
+                            Image(systemName: navigation.selectedRoute == index ? "checkmark.circle.fill" : "circle")
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(NavigationDuration.text(route.expectedTravelTime)).font(.headline)
+                                Text("\(Measurement(value: route.distance, unit: UnitLength.meters).formatted(.measurement(width: .abbreviated, usage: .road))) · \(route.name)")
+                                    .font(.subheadline).foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                        }.contentShape(Rectangle())
+                    }.buttonStyle(.plain)
+                    .accessibilityAddTraits(navigation.selectedRoute == index ? .isSelected : [])
+                }
+                Button("Start on iPhone") { Task { await navigation.start(connection: connection) } }
+                    .buttonStyle(.borderedProminent)
+            }
+        }
+    }
 }
 
 private struct NavigationControlsGlass: ViewModifier {

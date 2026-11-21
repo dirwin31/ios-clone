@@ -66,6 +66,27 @@ final class IntegrationUITests: XCTestCase {
         Thread.sleep(forTimeInterval: 1)
         let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "Sample active route"; shot.lifetime = .keepAlways; add(shot)
     }
+    func testSelectedDestinationWithoutPhoneRoute() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--ui-testing", "-galaxy.app.developerMode", "YES", "-galaxy.app.navigationAlpha", "YES"]
+        app.launch()
+        if app.buttons["expand-app-tabs"].isHittable { app.buttons["expand-app-tabs"].tap() }
+        let tab = app.buttons["main-tab-Navigation"]
+        XCTAssertTrue(tab.waitForExistence(timeout: 10))
+        tab.tap()
+        app.buttons["map-search"].tap()
+        let search = app.searchFields.firstMatch
+        search.tap(); search.typeText("Test")
+        let place = app.buttons["place-search-result"].firstMatch
+        XCTAssertTrue(place.waitForExistence(timeout: 8))
+        place.tap()
+        let send = app.buttons["Send to comma"]
+        XCTAssertTrue(send.waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons["Get directions"].exists)
+        app.segmentedControls.buttons["iPhone"].tap()
+        XCTAssertTrue(app.buttons["Get directions"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons["Start on iPhone"].exists)
+    }
     func testRegularModeAndAlphaOptIn() {
         let app = XCUIApplication()
         app.launchArguments = ["-galaxy.app.developerMode", "NO", "-galaxy.app.navigationAlpha", "NO"]

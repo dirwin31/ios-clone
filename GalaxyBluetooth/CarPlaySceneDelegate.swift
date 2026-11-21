@@ -53,6 +53,18 @@ final class CarPlaySceneDelegate: NSObject, CPTemplateApplicationSceneDelegate, 
     private var window: CPWindow?
     private var mapController: CompanionCarPlayMap?
     private var mapTemplate: CPMapTemplate?
+    private var navigationTabs: CPTabBarTemplate?
+    private var navigationMenu: CPListTemplate?
+    private enum NavigationAction: Equatable {
+        case info, map, start(UUID), directions, phone, place(SavedPlace)
+    }
+    private struct NavigationRow: Equatable {
+        let title: String
+        let detail: String
+        let icon: String
+        let action: NavigationAction
+    }
+    private var navigationRows: [NavigationRow] = []
     private var navigationSession: CPNavigationSession?
     private var trip: CPTrip?
     private var tripDestination = ""
@@ -104,6 +116,7 @@ final class CarPlaySceneDelegate: NSObject, CPTemplateApplicationSceneDelegate, 
         navigating = false
         refreshTelemetry()
         mapController = nil; mapTemplate = nil
+        navigationMenu = nil; navigationTabs = nil; navigationRows = []
         window?.rootViewController = UIViewController()
         catalog = localCatalogue()
         let settings = CPListTemplate(title: localizedCarPlay("Toggles"), sections: [])
@@ -115,28 +128,27 @@ final class CarPlaySceneDelegate: NSObject, CPTemplateApplicationSceneDelegate, 
         let tabs = CPTabBarTemplate(templates: pages)
         tabs.delegate = self
         if alpha {
-            let openMap: @MainActor () -> Void = { [weak self, weak tabs] in
-                guard let self, let tabs else { return }
-                self.openNavigation(returningTo: tabs)
-            }
+            let menu = CPListTemplate(title: localizedCarPlay("Navigation"), sections: [])
+            navigationTabs = tabs
+            navigationMenu = menu
+            refreshNavigationMenu()
             if pages.count < CPTabBarTemplate.maximumTabCount {
-                let map = CPListTemplate(title: localizedCarPlay("Navigation"), sections: [
-                    CPListSection(items: [settingsItem("Open map", icon: "map", action: openMap)])
-                ])
-                map.tabTitle = localizedCarPlay("Navigation")
-                map.tabImage = UIImage(systemName: "map")
-                pages.append(map)
+                menu.tabTitle = localizedCarPlay("Navigation")
+                menu.tabImage = UIImage(systemName: "map")
+                pages.append(menu)
                 tabs.updateTemplates(pages)
             } else {
-                overview.leadingNavigationBarButtons = [CPBarButton(title: localizedCarPlay("Navigation")) { _ in openMap() }]
+                overview.leadingNavigationBarButtons = [CPBarButton(title: localizedCarPlay("Navigation")) { [weak self] _ in
+                    self?.pushTemplate(menu, animated: true, completion: nil)
+                }]
             }
         }
         controller.setRootTemplate(tabs, animated: false, completion: nil)
         showCategories()
     }
 
-    private func openNavigation(returningTo tabs: CPTabBarTemplate) {
-        guard let controller, AppModel.shared.navigationEnabled else { return }
+    private func openNavigation() {
+        guard let controller, window != nil, mapTemplate == nil, AppModel.shared.navigationEnabled else { return }
         let map = CompanionCarPlayMap()
         mapController = map
         window?.rootViewController = map
@@ -145,16 +157,110 @@ final class CarPlaySceneDelegate: NSObject, CPTemplateApplicationSceneDelegate, 
         template.guidanceBackgroundColor = StarPilotTheme.uiAccent
         template.automaticallyHidesNavigationBar = false
         template.leadingNavigationBarButtons = [CPBarButton(title: localizedCarPlay("Back")) { [weak self] _ in
-            guard let self else { return }
-            self.stopGuidance()
-            self.mapTemplate = nil; self.mapController = nil
-            self.window?.rootViewController = UIViewController()
-            self.controller?.setRootTemplate(tabs, animated: false, completion: nil)
+            self?.returnFromMap()
         }]
         mapTemplate = template
         controller.setRootTemplate(template, animated: false) { [weak self] success, _ in
             if success { self?.refreshNavigation() }
+            else { self?.returnFromMap() }
         }
+    }
+
+    private func returnFromMap() {
+        guard let tabs = navigationTabs else { return }
+        stopGuidance()
+        mapTemplate = nil; mapController = nil
+        window?.rootViewController = UIViewController()
+        controller?.setRootTemplate(tabs, animated: false, completion: nil)
+    }
+
+    private func refreshNavigationMenu() {
+        guard let menu = navigationMenu else { return }
+        let services = AppModel.shared.navigationServices
+        let nav = services.navigation
+        var rows: [NavigationRow] = []
+        if let destination = nav.destination {
+            if nav.navigating {
+                let detail = nav.usingComma && !nav.commaFeedReady ? nav.commaFeedMessage :
+                    (nav.instruction.isEmpty ? "Following route" : nav.instruction)
+                rows.append(.init(title: destination.name, detail: detail, icon: "map.fill", action: window == nil ? .info : .map))
+            } else {
+                let detail = nav.busy ? (nav.sendToComma ? "Sending destination…" : "Getting directions…") : destination.address
+                rows.append(.init(title: destination.name, detail: detail, icon: "mappin.circle.fill", action: .info))
+                if !nav.busy {
+                    if nav.sendToComma && !services.connection.connected {
+                        rows.append(.init(title: "Get iPhone directions", detail: "Comma is disconnected", icon: "iphone", action: .phone))
+                    } else if !nav.sendToComma && nav.route == nil {
+                        rows.append(.init(title: "Get directions", detail: "Preview the route on iPhone", icon: "arrow.triangle.turn.up.right.diamond", action: .directions))
+                    } else {
+                        rows.append(.init(title: nav.sendToComma ? "Send to comma" : "Start on iPhone",
+                                          detail: nav.sendToComma ? "Comma calculates the route" : destination.name,
+                                          icon: "location.fill", action: .start(destination.id)))
+                    }
+                }
+            }
+            if !nav.error.isEmpty {
+                rows.append(.init(title: "Navigation update", detail: nav.error, icon: "exclamationmark.circle", action: .info))
+            }
+        }
+        if !nav.navigating && !nav.busy {
+            let saved = services.saved
+            let favorites = saved.library.places
+            let recent = saved.recentDestinations.filter { place in
+                !favorites.contains { $0.matches(latitude: place.latitude, longitude: place.longitude) }
+            }
+            for place in (favorites + recent).prefix(8) {
+                let icon = place.kind == .home ? "house.fill" : place.kind == .work ? "briefcase.fill" :
+                    (favorites.contains(place) ? "star.fill" : "clock")
+                rows.append(.init(title: place.name, detail: place.address, icon: icon, action: .place(place)))
+            }
+            if rows.isEmpty {
+                rows.append(.init(title: "Choose a destination", detail: "Search in Nav on iPhone. Saved and recent places appear here.", icon: "magnifyingglass", action: .info))
+            }
+        }
+        guard rows != navigationRows else { return }
+        navigationRows = rows
+        let items = rows.map { row in
+            let item = CPListItem(text: row.title, detailText: row.detail, image: UIImage(systemName: row.icon))
+            if row.action != .info {
+                item.accessoryType = .disclosureIndicator
+                item.handler = { [weak self, weak menu] _, completion in
+                    defer { completion() }
+                    guard let self, let menu else { return }
+                    self.refreshNavigationMenu()
+                    guard self.navigationRows.contains(row) else { return }
+                    switch row.action {
+                    case .info: break
+                    case .map:
+                        self.openNavigation()
+                    case .start(let destinationID):
+                        Task { @MainActor in
+                            guard nav.destination?.id == destinationID else { return }
+                            await nav.start(connection: services.connection)
+                            self.refreshNavigationMenu()
+                            if nav.navigating, self.window != nil, let tabs = self.navigationTabs,
+                               self.controller?.topTemplate === menu || (self.controller?.topTemplate === tabs && tabs.selectedTemplate === menu) {
+                                self.openNavigation()
+                            }
+                        }
+                    case .directions:
+                        Task { await nav.calculateRoutes(refresh: false) }
+                    case .phone:
+                        Task { await nav.selectGuidanceSource(comma: false) }
+                    case .place(let saved):
+                        let place = services.saved.navigationPlace(saved)
+                        Task {
+                            guard !nav.busy, !nav.navigating else { return }
+                            services.saved.rememberDestination(place)
+                            await nav.select(place)
+                            self.refreshNavigationMenu()
+                        }
+                    }
+                }
+            }
+            return item
+        }
+        menu.updateSections([CPListSection(items: items)])
     }
 
     private func stopGuidance() {
@@ -163,10 +269,21 @@ final class CarPlaySceneDelegate: NSObject, CPTemplateApplicationSceneDelegate, 
     }
 
     private func refreshNavigation() {
+        refreshNavigationMenu()
         guard AppModel.shared.navigationEnabled, let template = mapTemplate else { return }
         let nav = AppModel.shared.navigationServices.navigation
         nav.checkCommaFreshness()
         mapController?.update(nav)
+        let status: String? = !nav.navigating ? "Trip ended" :
+            nav.usingComma && !nav.commaFeedReady ? "Waiting for comma" :
+            (nav.usingComma ? nav.commaPosition == nil : nav.goodLocation == nil) ? "Waiting for GPS" : nil
+        if template.trailingNavigationBarButtons.first?.title != status {
+            template.trailingNavigationBarButtons = status.map { title in
+                [CPBarButton(title: title) { [weak self] _ in
+                    self?.returnFromMap()
+                }]
+            } ?? []
+        }
         guard nav.navigating, let destination = nav.destination,
               nav.usingComma ? nav.commaFeedReady : nav.goodLocation != nil else {
             stopGuidance()
@@ -245,6 +362,7 @@ final class CarPlaySceneDelegate: NSObject, CPTemplateApplicationSceneDelegate, 
         settingsRead?.cancel(); settingsRead = nil
         stopGuidance()
         window?.rootViewController = nil; window = nil; mapController = nil; mapTemplate = nil; alphaMode = nil
+        navigationMenu = nil; navigationTabs = nil; navigationRows = []
         controller = nil
         sessionConfiguration?.delegate = nil; sessionConfiguration = nil
         overview = nil; temperatures = nil; rates = nil; toggles = nil
@@ -1094,6 +1212,8 @@ final class CarPlayDashboardSceneDelegate: NSObject, CPTemplateApplicationDashbo
 private final class CompanionCarPlayMap: UIViewController, MKMapViewDelegate {
     private let map = MKMapView()
     private let position = MKPointAnnotation()
+    private let destinationPin = MKPointAnnotation()
+    private var showingDestination = false
     private var line: MKPolyline?
     private var lastLocation: CLLocation?
     private var lastMovement = Date.distantPast
@@ -1107,14 +1227,28 @@ private final class CompanionCarPlayMap: UIViewController, MKMapViewDelegate {
     }
     func update(_ navigation: NavigationModel) {
         loadViewIfNeeded()
+        if let destination = navigation.destination {
+            let coordinate = destination.coordinate
+            if destinationPin.coordinate.latitude != coordinate.latitude || destinationPin.coordinate.longitude != coordinate.longitude {
+                showingDestination = false
+                destinationPin.coordinate = coordinate
+            }
+            destinationPin.title = destination.name
+            if !map.annotations.contains(where: { $0 === destinationPin }) { map.addAnnotation(destinationPin) }
+        } else {
+            map.removeAnnotation(destinationPin)
+            showingDestination = false
+        }
         let next = navigation.usingComma ? navigation.commaPolyline : navigation.route?.polyline
         if line !== next {
             map.removeOverlays(map.overlays)
+            showingDestination = false
             line = next
             if let next { map.addOverlay(next) }
         }
         let coordinate = navigation.usingComma ? (navigation.commaFeedReady ? navigation.commaPosition : nil) : navigation.goodLocation?.coordinate
         if let coordinate {
+            showingDestination = false
             let now = Date()
             let location = CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude)
             if let previous = lastLocation {
@@ -1137,7 +1271,18 @@ private final class CompanionCarPlayMap: UIViewController, MKMapViewDelegate {
             let heading = navigation.usingComma ? navigation.commaHeading : max(0, navigation.goodLocation?.course ?? 0)
             map.setCamera(MKMapCamera(lookingAtCenter: coordinate, fromDistance: cameraDistance,
                 pitch: 35, heading: heading), animated: hadPosition && !UIAccessibility.isReduceMotionEnabled)
-        } else { map.removeAnnotation(position) }
+        } else {
+            map.removeAnnotation(position)
+            lastLocation = nil; filteredSpeed = 0
+            if !showingDestination, let destination = navigation.destination {
+                if let next {
+                    map.setVisibleMapRect(next.boundingMapRect, edgePadding: UIEdgeInsets(top: 48, left: 36, bottom: 36, right: 36), animated: false)
+                } else {
+                    map.setRegion(MKCoordinateRegion(center: destination.coordinate, latitudinalMeters: 2500, longitudinalMeters: 2500), animated: false)
+                }
+                showingDestination = true
+            }
+        }
     }
     func mapView(_ mapView: MKMapView, rendererFor overlay: MKOverlay) -> MKOverlayRenderer {
         let renderer = MKPolylineRenderer(overlay: overlay)
@@ -1147,6 +1292,12 @@ private final class CompanionCarPlayMap: UIViewController, MKMapViewDelegate {
         return renderer
     }
     func mapView(_ mapView: MKMapView, viewFor annotation: MKAnnotation) -> MKAnnotationView? {
+        if annotation === destinationPin {
+            let pin = MKMarkerAnnotationView(annotation: annotation, reuseIdentifier: nil)
+            pin.markerTintColor = StarPilotTheme.uiAccent
+            pin.glyphImage = UIImage(systemName: "flag.checkered")
+            return pin
+        }
         let marker = MKAnnotationView(annotation: annotation, reuseIdentifier: nil)
         marker.image = UIGraphicsImageRenderer(size: CGSize(width: 36, height: 36)).image { context in
             UIColor.white.setFill()
