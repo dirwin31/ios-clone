@@ -429,7 +429,6 @@ final class NavigationModel: NSObject, ObservableObject, @preconcurrency CLLocat
             offRouteSamples = 0; error = ""
             if !navigating { camera = .rect(routes[0].polyline.boundingMapRect) }
             updateProgress(routes[0], at: origin)
-            if refresh { notice = "Phone route updated." }
         } catch {
             guard revision == token, !Task.isCancelled else { return }
             onEvent?("Route calculation failed: \(LANTransport.failureCode(error))")

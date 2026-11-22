@@ -204,6 +204,7 @@ private struct StandardNavigationHome: View {
                             .fill(.regularMaterial).ignoresSafeArea(edges: .bottom)
                     }
                 }
+                .frame(maxWidth: navigation.navigating ? 430 : nil)
                 .modifier(TripBarGlass(active: navigation.navigating))
                 .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { tripFrame = $0 }
                 .overlay(alignment: .top) { TripBarFollowMarker(markerPerspective: markerPerspective, navigation: navigation) }
@@ -382,24 +383,7 @@ private struct StandardNavigationHome: View {
         NavigationDestinationPanel(chooseStart: { searchPurpose = .start }, navigation: navigation, connection: connection, saved: saved)
     }
     private var tripPanel: some View {
-        VStack(spacing: 14) {
-            HStack(alignment: .firstTextBaseline, spacing: 14) {
-                tripMetric(navigation.usingComma && !navigation.commaFeedReady ? "—" : Date().addingTimeInterval(navigation.remainingTime).formatted(date: .omitted, time: .shortened), label: "arrival")
-                tripMetric(navigation.usingComma && !navigation.commaFeedReady ? "—" : minutes(navigation.remainingTime), label: "remaining")
-                tripMetric(navigation.usingComma && !navigation.commaFeedReady ? "—" : distance(navigation.remainingDistance), label: navigation.usingComma ? "distance" : "estimated")
-                Spacer(minLength: 0)
-                Button(navigation.endingRoute ? "Ending…" : "End") { Task { await navigation.end(connection: connection) } }
-                    .font(.headline).foregroundStyle(.white).padding(.horizontal, 18).padding(.vertical, 13)
-                    .background(StarPilotTheme.guidance, in: Capsule()).disabled(navigation.busy)
-            }
-
-        }
-    }
-    private func tripMetric(_ value: String, label: String) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(value).font(.system(size: 23, weight: .semibold, design: .rounded)).lineLimit(1).minimumScaleFactor(0.65)
-            Text(label).font(.caption).foregroundStyle(.secondary)
-        }.frame(maxWidth: .infinity, alignment: .leading)
+        TripSummaryRow(navigation: navigation, connection: connection, units: distanceUnits) { EmptyView() }
     }
     private var messages: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -414,7 +398,7 @@ private struct StandardNavigationHome: View {
                     Text("If this continues, open ••• → Reset navigation, then choose your destination again.").font(.caption).foregroundStyle(.secondary)
                 }
             }
-            if !saved.message.isEmpty { Text(LocalizedStringKey(saved.message)).font(.caption).foregroundStyle(.secondary) }
+            if !navigation.navigating, !saved.message.isEmpty { Text(LocalizedStringKey(saved.message)).font(.caption).foregroundStyle(.secondary) }
         }.fixedSize(horizontal: false, vertical: true)
     }
     private var turnSymbol: String {
@@ -438,7 +422,6 @@ private struct StandardNavigationHome: View {
     private func distance(_ meters: Double) -> String {
         distanceUnits.text(meters)
     }
-    private func minutes(_ seconds: Double) -> String { NavigationDuration.text(seconds) }
 }
 
 private struct ManeuverDistance: View {
@@ -474,6 +457,43 @@ private struct TripBarFollowMarker: View {
                 }
             }
         }
+    }
+}
+
+private struct TripSummaryRow<Options: View>: View {
+    @ObservedObject var navigation: NavigationModel
+    let connection: CommaConnection
+    let units: NavigationDistanceUnits
+    @ViewBuilder let options: () -> Options
+    @Environment(\.dynamicTypeSize) private var typeSize
+
+    var body: some View {
+        let layout = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
+                                                  : AnyLayout(HStackLayout(alignment: .center, spacing: 8))
+        layout {
+            HStack(alignment: .top, spacing: 6) {
+                metric(Date().addingTimeInterval(navigation.remainingTime).formatted(date: .omitted, time: .shortened), "arrival")
+                metric(NavigationDuration.text(navigation.remainingTime), "remaining")
+                metric(units.text(navigation.remainingDistance), "distance")
+            }
+            HStack(spacing: 0) {
+                Button(navigation.endingRoute ? "Ending…" : "End") { Task { await navigation.end(connection: connection) } }
+                    .font(.headline).foregroundStyle(.white)
+                    .padding(.horizontal, 12).frame(minHeight: 44)
+                    .background(StarPilotTheme.guidance, in: Capsule()).disabled(navigation.busy)
+                options()
+            }.fixedSize(horizontal: true, vertical: false)
+        }
+    }
+
+    private func metric(_ value: String, _ label: LocalizedStringKey) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(navigation.usingComma && !navigation.commaFeedReady ? "—" : value)
+                .font(.headline).monospacedDigit().lineLimit(1).minimumScaleFactor(0.7)
+            Text(label).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .combine)
     }
 }
 
@@ -609,7 +629,7 @@ private struct DuoNavigationHome: View {
                         .id(navigation.destination == nil ? "browse" : "destination")
                     }
                 }
-                .frame(maxWidth: navigation.navigating ? .infinity : 600)
+                .frame(maxWidth: navigation.navigating ? 430 : 600)
 
                 .background {
                     if !navigation.navigating {
@@ -809,25 +829,7 @@ private struct DuoNavigationHome: View {
         NavigationDestinationPanel(chooseStart: { searchPurpose = .start }, navigation: navigation, connection: connection, saved: saved)
     }
     private var tripPanel: some View {
-        VStack(spacing: 14) {
-            HStack(alignment: .firstTextBaseline, spacing: 6) {
-                tripMetric(navigation.usingComma && !navigation.commaFeedReady ? "—" : Date().addingTimeInterval(navigation.remainingTime).formatted(date: .omitted, time: .shortened), label: "arrival")
-                tripMetric(navigation.usingComma && !navigation.commaFeedReady ? "—" : minutes(navigation.remainingTime), label: "remaining")
-                tripMetric(navigation.usingComma && !navigation.commaFeedReady ? "—" : distance(navigation.remainingDistance), label: navigation.usingComma ? "distance" : "estimated")
-                Spacer(minLength: 0)
-                Button(navigation.endingRoute ? "Ending…" : "End") { Task { await navigation.end(connection: connection) } }
-                    .font(.headline).foregroundStyle(.white).padding(.horizontal, 10).padding(.vertical, 12)
-                    .background(StarPilotTheme.guidance, in: Capsule()).disabled(navigation.busy)
-                navigationOptions
-            }
-
-        }
-    }
-    private func tripMetric(_ value: String, label: String) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(value).font(.system(size: 19, weight: .semibold, design: .rounded)).lineLimit(1).minimumScaleFactor(0.65)
-            Text(label).font(.caption2).foregroundStyle(.secondary).lineLimit(1).minimumScaleFactor(0.8)
-        }.frame(maxWidth: .infinity, alignment: .leading)
+        TripSummaryRow(navigation: navigation, connection: connection, units: distanceUnits) { navigationOptions }
     }
     private var messages: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -842,7 +844,7 @@ private struct DuoNavigationHome: View {
                     Text("If this continues, open ••• → Reset navigation, then choose your destination again.").font(.caption).foregroundStyle(.secondary)
                 }
             }
-            if !saved.message.isEmpty { Text(LocalizedStringKey(saved.message)).font(.caption).foregroundStyle(.secondary) }
+            if !navigation.navigating, !saved.message.isEmpty { Text(LocalizedStringKey(saved.message)).font(.caption).foregroundStyle(.secondary) }
         }.fixedSize(horizontal: false, vertical: true)
     }
     private var turnSymbol: String {
@@ -866,7 +868,6 @@ private struct DuoNavigationHome: View {
     private func distance(_ meters: Double) -> String {
         distanceUnits.text(meters)
     }
-    private func minutes(_ seconds: Double) -> String { NavigationDuration.text(seconds) }
 }
 
 private struct NavigationDestinationPanel: View {
