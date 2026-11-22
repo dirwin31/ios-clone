@@ -2,11 +2,11 @@ import SwiftUI
 import MapKit
 
 enum PlaceSearchPurpose: String, Identifiable {
-    case destination, home, work, favorite
+    case destination, start, home, work, favorite
     var id: String { rawValue }
     var savedKind: SavedPlaceKind? {
         switch self {
-        case .destination: nil
+        case .destination, .start: nil
         case .home: .home
         case .work: .work
         case .favorite: .favorite
@@ -24,51 +24,56 @@ struct PlaceSearch: View {
     @Environment(\.dismiss) private var dismiss
     var body: some View {
         NavigationStack {
-            List {
-                if navigation.searching { ProgressView("Searching…") }
-                if query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, !saved.recentDestinations.isEmpty {
-                    Section("Recent Destinations") {
-                        ForEach(saved.recentDestinations) { place in
-                            RecentDestinationRow(place: place) {
-                                onSelect(saved.navigationPlace(place)); dismiss()
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 8) {
+                    if query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        if !saved.recentDestinations.isEmpty {
+                            HStack {
+                                Text("Recent Destinations").font(.headline)
+                                Spacer()
+                                Menu {
+                                    Button("Clear Recent Destinations", role: .destructive) { saved.clearRecentDestinations() }
+                                } label: {
+                                    Image(systemName: "ellipsis.circle").frame(width: 44, height: 44)
+                                }.accessibilityLabel("Recent destination options")
                             }
+                            LazyVGrid(columns: [GridItem(.adaptive(minimum: 145), spacing: 10)], spacing: 10) {
+                                ForEach(saved.recentDestinations) { place in
+                                    Button { onSelect(saved.navigationPlace(place)); dismiss() } label: {
+                                        VStack(alignment: .leading, spacing: 6) {
+                                            Image(systemName: "clock.arrow.circlepath").foregroundStyle(StarPilotTheme.accent)
+                                            Text(place.name).font(.headline).lineLimit(2)
+                                            Text(place.address).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                                        }
+                                        .padding(12).frame(maxWidth: .infinity, minHeight: 104, alignment: .topLeading)
+                                        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 16))
+                                    }.buttonStyle(.plain)
+                                }
+                            }
+                        } else {
+                            ContentUnavailableView("Find a place", systemImage: "magnifyingglass",
+                                                   description: Text("Search by name or address."))
                         }
-                        Button("Clear Recent Destinations", role: .destructive) { saved.clearRecentDestinations() }
-                    }
-                }
-                ForEach(navigation.suggestions, id: \.self) { suggestion in
-                    Button {
-                        Task {
-                            if let place = await navigation.resolve(suggestion) { onSelect(place); dismiss() }
+                    } else {
+                        ForEach(navigation.suggestions, id: \.self) { suggestion in
+                            Button {
+                                Task {
+                                    if let place = await navigation.resolve(suggestion) { onSelect(place); dismiss() }
+                                }
+                            } label: { resultLabel(suggestion.title, address: suggestion.subtitle) }
+                            .disabled(navigation.searching)
+                            .accessibilityIdentifier("place-search-result")
                         }
-                    } label: {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(suggestion.title).font(.headline).foregroundStyle(.primary)
-                            if !suggestion.subtitle.isEmpty {
-                                Text(suggestion.subtitle).font(.caption).foregroundStyle(.secondary)
-                            }
-                        }.padding(.vertical, 6)
+                        ForEach(navigation.results) { place in
+                            Button { onSelect(place); dismiss() } label: { resultLabel(place.name, address: place.address) }
+                                .accessibilityIdentifier("place-search-result")
+                        }
                     }
-                    .disabled(navigation.searching)
-                    .accessibilityIdentifier("place-search-result")
+                    if navigation.searching { ProgressView("Searching…").padding(.vertical, 8) }
+                    if !navigation.searchMessage.isEmpty { Text(LocalizedStringKey(navigation.searchMessage)).foregroundStyle(.secondary) }
                 }
-                ForEach(query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? [] : navigation.results) { place in
-                    Button { onSelect(place); dismiss() } label: {
-                        HStack(spacing: 14) {
-                            Image(systemName: "mappin.circle.fill").font(.title2).foregroundStyle(StarPilotTheme.accent)
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(place.name).font(.headline).foregroundStyle(.primary)
-                                Text(place.address).font(.caption).foregroundStyle(.secondary)
-                            }
-                        }.padding(.vertical, 6)
-                    }.accessibilityIdentifier("place-search-result")
-                }
-                if !navigation.searchMessage.isEmpty { Text(LocalizedStringKey(navigation.searchMessage)).foregroundStyle(.secondary) }
-                if query.isEmpty {
-                    Text(saveAs == .home ? "Search for your home address, then select it to save." :
-                        saveAs == .work ? "Search for your work address, then select it to save." :
-                        "Search for an address, business, or place.").foregroundStyle(.secondary)
-                }
+                .buttonStyle(.plain)
+                .padding(.horizontal, 16).padding(.bottom, 16)
             }
             .navigationTitle(choosingStart ? "Starting point" : saveAs == .home ? "Add Home" : saveAs == .work ? "Add Work" : saveAs == .favorite ? "Add Favorite" : "Search Maps")
             .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search places or addresses")
@@ -77,6 +82,21 @@ struct PlaceSearch: View {
             .onDisappear { navigation.cancelPlaceSearch() }
         }.presentationDetents([.medium, .large])
     }
+
+    private func resultLabel(_ title: String, address: String) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: "mappin").foregroundStyle(StarPilotTheme.accent)
+                .frame(width: 36, height: 36).background(StarPilotTheme.accent.opacity(0.12), in: Circle())
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title).font(.headline)
+                if !address.isEmpty { Text(address).font(.subheadline).foregroundStyle(.secondary) }
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(12).background(.thinMaterial, in: RoundedRectangle(cornerRadius: 16))
+        .contentShape(Rectangle())
+    }
+
 }
 
 struct SavedPlacesView: View {

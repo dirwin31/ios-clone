@@ -206,10 +206,14 @@ private struct StandardNavigationHome: View {
                 .overlay(alignment: .top) { TripBarFollowMarker(markerPerspective: markerPerspective, navigation: navigation) }
                 .shadow(color: .black.opacity(navigation.navigating ? 0.06 : 0.12), radius: 12, y: -2)
                 .padding(navigation.navigating ? 12 : 0)
+                .opacity(searchPurpose == nil ? 1 : 0)
+                .allowsHitTesting(searchPurpose == nil)
+                .accessibilityHidden(searchPurpose != nil)
             })
             .sheet(item: $searchPurpose) { purpose in
-                PlaceSearch(navigation: navigation, saved: saved, saveAs: purpose.savedKind) { place in
-                    if let kind = purpose.savedKind { saved.save(place, as: kind) }
+                PlaceSearch(navigation: navigation, saved: saved, saveAs: purpose.savedKind, choosingStart: purpose == .start) { place in
+                    if purpose == .start { Task { await navigation.preview(from: place) } }
+                    else if let kind = purpose.savedKind { saved.save(place, as: kind) }
                     else { selectDestination(place) }
                 }
             }
@@ -372,7 +376,7 @@ private struct StandardNavigationHome: View {
         }.frame(width: 78)
     }
     private var destinationPanel: some View {
-        NavigationDestinationPanel(navigation: navigation, connection: connection, saved: saved)
+        NavigationDestinationPanel(chooseStart: { searchPurpose = .start }, navigation: navigation, connection: connection, saved: saved)
     }
     private var tripPanel: some View {
         VStack(spacing: 14) {
@@ -614,10 +618,14 @@ private struct DuoNavigationHome: View {
                 .shadow(color: .black.opacity(navigation.navigating ? 0.06 : 0.12), radius: 12, y: -2)
                 .frame(maxWidth: .infinity, alignment: .center)
                 .padding(12)
+                .opacity(searchPurpose == nil ? 1 : 0)
+                .allowsHitTesting(searchPurpose == nil)
+                .accessibilityHidden(searchPurpose != nil)
             })
             .sheet(item: $searchPurpose) { purpose in
-                PlaceSearch(navigation: navigation, saved: saved, saveAs: purpose.savedKind) { place in
-                    if let kind = purpose.savedKind { saved.save(place, as: kind) }
+                PlaceSearch(navigation: navigation, saved: saved, saveAs: purpose.savedKind, choosingStart: purpose == .start) { place in
+                    if purpose == .start { Task { await navigation.preview(from: place) } }
+                    else if let kind = purpose.savedKind { saved.save(place, as: kind) }
                     else { selectDestination(place) }
                 }
             }
@@ -794,7 +802,7 @@ private struct DuoNavigationHome: View {
         }.frame(width: 78)
     }
     private var destinationPanel: some View {
-        NavigationDestinationPanel(navigation: navigation, connection: connection, saved: saved)
+        NavigationDestinationPanel(chooseStart: { searchPurpose = .start }, navigation: navigation, connection: connection, saved: saved)
     }
     private var tripPanel: some View {
         VStack(spacing: 14) {
@@ -859,7 +867,7 @@ private struct DuoNavigationHome: View {
 
 private struct NavigationDestinationPanel: View {
     @AppStorage(NavigationDistanceUnits.key) private var distanceUnits = NavigationDistanceUnits.system
-    @State private var choosingStart = false
+    let chooseStart: () -> Void
     @ObservedObject var navigation: NavigationModel
     @ObservedObject var connection: CommaConnection
     @ObservedObject var saved: SavedPlacesStore
@@ -895,7 +903,7 @@ private struct NavigationDestinationPanel: View {
                 }
             }
             HStack {
-                Button { choosingStart = true } label: {
+                Button { chooseStart() } label: {
                     Label("From: \(navigation.plannedStart?.name ?? "Current location")", systemImage: "flag")
                         .multilineTextAlignment(.leading)
                 }.accessibilityHint("Choose a starting point for a route preview")
@@ -905,11 +913,6 @@ private struct NavigationDestinationPanel: View {
                 }
             }
             .font(.subheadline)
-            .sheet(isPresented: $choosingStart) {
-                PlaceSearch(navigation: navigation, saved: saved, saveAs: nil, choosingStart: true) { place in
-                    Task { await navigation.preview(from: place) }
-                }
-            }
             Picker("Route guidance", selection: Binding(get: { navigation.sendToComma }, set: { useComma in
                 Task { await navigation.selectGuidanceSource(comma: useComma) }
             })) {
