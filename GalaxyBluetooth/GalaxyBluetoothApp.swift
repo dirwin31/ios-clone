@@ -1001,7 +1001,8 @@ struct GalaxyRootView: View {
             .overlay {
                 if let arrivalID, requestedPage == .galaxy, !motionDisabled {
                     GalaxyArrival {
-                        if self.arrivalID == arrivalID { departingPage = nil }
+                        guard self.arrivalID == arrivalID else { return }
+                        withAnimation(.easeInOut(duration: 0.16)) { departingPage = nil }
                     } finished: {
                         if self.arrivalID == arrivalID { self.arrivalID = nil }
                     }
@@ -1223,17 +1224,16 @@ struct CompanionPressStyle: ButtonStyle {
 }
 
 private struct GalaxyArrival: View {
-    let covered: () -> Void
+    let reveal: () -> Void
     let finished: () -> Void
     @State private var position: CGFloat = -1
 
     var body: some View {
         GeometryReader { bounds in
             let size = bounds.size
-            // At the midpoint the opaque middle quarter covers the page swap.
             Image("GalaxyDust").resizable()
-                .frame(width: size.width * 4, height: size.height)
-                .position(x: size.width * (0.5 + 2.5 * position), y: size.height / 2)
+                .frame(width: size.width * 1.4, height: size.height)
+                .position(x: size.width * (0.5 + 1.2 * position), y: size.height / 2)
         }
         .clipped()
         .contentShape(Rectangle())
@@ -1241,7 +1241,7 @@ private struct GalaxyArrival: View {
             withAnimation(.easeIn(duration: 0.24), completionCriteria: .logicallyComplete) {
                 position = 0
             } completion: {
-                covered()
+                reveal()
                 withAnimation(.easeOut(duration: 0.24), completionCriteria: .logicallyComplete) {
                     position = 1
                 } completion: {
