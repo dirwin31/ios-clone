@@ -1049,8 +1049,12 @@ struct GalaxyRootView: View {
             if !usesAdaptiveChrome && !editorFocused && model.tab != .navigation {
                 Group {
                     if page == .galaxy && !galaxyPage.barItems.isEmpty && !galaxyPage.stalled {
-                        GalaxyPill(page: galaxyPage, model: model, vertical: false, select: select)
-                            .padding(.horizontal, 3).modifier(FloatingGalaxyGlass())
+                        HStack(spacing: 0) {
+                            ForEach(galaxyPage.barItems.filter { $0.id == "back" || $0.primary }.sorted { $0.id == "back" && $1.id != "back" }) { item in
+                                GalaxyPillButton(page: galaxyPage, item: item, showsText: true)
+                            }
+                            GalaxyPillMenu(page: galaxyPage, model: model, select: select)
+                        }.padding(.horizontal, 3).modifier(FloatingGalaxyGlass())
                     } else {
                         CompanionNavigationBar(tab: page, developerMode: model.developerMode,
                             navigation: model.navigationServices.navigation, expanded: $appTabsExpanded,
@@ -1207,31 +1211,35 @@ private struct PlanetTabHighlight: View {
     }
 }
 
-private struct GalaxyPill: View {
+private struct GalaxyPillButton: View {
     @ObservedObject var page: GalaxyPageDiagnostics
-    @ObservedObject var model: AppModel
-    let vertical: Bool
-    let select: (CompanionTab) -> Void
+    let item: GalaxyBarItem
+    let showsText: Bool
     @Environment(\.dynamicTypeSize) private var typeSize
 
     var body: some View {
-        let layout = vertical ? AnyLayout(VStackLayout(spacing: 0)) : AnyLayout(HStackLayout(spacing: 0))
-        layout {
-            ForEach(page.barItems.filter { $0.id == "back" || $0.primary }.sorted { $0.id == "back" && $1.id != "back" }) { item in
-                Button { page.activate(item) } label: {
-                    VStack(spacing: 2) {
-                        Image(systemName: item.icon).font(.system(size: 16, weight: .semibold))
-                        if item.primary && !vertical && !typeSize.isAccessibilitySize {
-                            Text(verbatim: item.label).font(.caption2.weight(.medium)).lineLimit(1)
-                        }
-                    }.frame(minWidth: 44, maxWidth: vertical ? 44 : .infinity, minHeight: 44)
-                        .foregroundStyle(item.selected ? StarPilotTheme.accent : Color.primary)
-                        .background(item.selected ? StarPilotTheme.accent.opacity(0.17) : Color.clear, in: Capsule())
-                        .contentShape(Rectangle())
-                }.buttonStyle(.plain).disabled(item.disabled).accessibilityLabel(Text(verbatim: item.label))
-                    .accessibilityIdentifier("galaxy-pill-" + item.id)
-                    .accessibilityAddTraits(item.selected ? .isSelected : [])
-            }
+        Button { page.activate(item) } label: {
+            VStack(spacing: 2) {
+                Image(systemName: item.icon).font(.system(size: 16, weight: .semibold))
+                if item.primary && showsText && !typeSize.isAccessibilitySize {
+                    Text(verbatim: item.label).font(.caption2.weight(.semibold)).lineLimit(1)
+                }
+            }.frame(minWidth: 44, maxWidth: showsText ? .infinity : 44, minHeight: 44)
+                .foregroundStyle(item.selected ? Color.white : Color.primary)
+                .background(item.selected ? Color(red: 0.39, green: 0.23, blue: 0.63) : Color.clear, in: Capsule())
+                .contentShape(Rectangle())
+        }.buttonStyle(.plain).disabled(item.disabled).accessibilityLabel(Text(verbatim: item.label))
+            .accessibilityIdentifier("galaxy-pill-" + item.id)
+            .accessibilityAddTraits(item.selected ? .isSelected : [])
+    }
+}
+
+private struct GalaxyPillMenu: View {
+    @ObservedObject var page: GalaxyPageDiagnostics
+    @ObservedObject var model: AppModel
+    let select: (CompanionTab) -> Void
+
+    var body: some View {
             Menu {
                 Section("Galaxy") {
                     if !page.deviceStatus.isEmpty { Text(verbatim: page.deviceStatus) }
@@ -1247,7 +1255,6 @@ private struct GalaxyPill: View {
                 Image(systemName: "ellipsis.circle").font(.title3)
                     .frame(width: 44, height: 44).contentShape(Rectangle())
             }.accessibilityLabel("Galaxy and app options").accessibilityIdentifier("galaxy-pill-options")
-        }
     }
 }
 
@@ -1702,9 +1709,6 @@ private struct AdaptiveCompanionLayout<Content: View>: View {
     let select: (CompanionTab) -> Void
     @ViewBuilder var content: () -> Content
     @Namespace private var tabSelection
-    private var tabLayout: AnyLayout {
-        verticalEdge == nil ? AnyLayout(HStackLayout(spacing: 0)) : AnyLayout(VStackLayout(spacing: 0))
-    }
     private var tabs: [CompanionTab] {
         model.navigationEnabled ? [.galaxy, .navigation, .connections] : [.galaxy, .connections]
     }
@@ -1712,12 +1716,17 @@ private struct AdaptiveCompanionLayout<Content: View>: View {
         content()
             .environment(\.companionVerticalBar, verticalEdge != nil)
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    if tab == .galaxy && !galaxyPage.barItems.isEmpty && !galaxyPage.stalled && !galaxyPage.landscapeEditor {
-                        GalaxyPill(page: galaxyPage, model: model, vertical: verticalEdge != nil, select: select)
-                            .fixedSize()
-                    } else {
-                      tabLayout {
+                if tab == .galaxy && !galaxyPage.barItems.isEmpty && !galaxyPage.stalled && !galaxyPage.landscapeEditor {
+                    galaxyItem("back")
+                    galaxyItem("home")
+                    galaxyItem("toggles")
+                    galaxyItem("tools")
+                    galaxyItem("routes")
+                    ToolbarItem(placement: .topBarLeading) {
+                        GalaxyPillMenu(page: galaxyPage, model: model, select: select)
+                    }
+                } else {
+                    ToolbarItemGroup(placement: .topBarLeading) {
                         ForEach(tabs) { item in
                             let selected = tab == item || (tab == .logs && item == .connections)
                             Button { select(item) } label: {
@@ -1740,15 +1749,21 @@ private struct AdaptiveCompanionLayout<Content: View>: View {
                             .accessibilityAddTraits(selected ? .isSelected : [])
                         }
                     }
-                    .fixedSize()
-                    .animation(reduceMotion ? nil : .easeInOut(duration: 0.2), value: tab)
-                    }
-                }.axisBehavior(.verticalPreferred)
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     AdaptiveConnectionStatus(model: model, openSettings: { select(.connections) })
                 }.axisBehavior(.verticalPreferred)
             }
             .toolbarVerticalBehavior(.automatic)
+    }
+
+    @ToolbarContentBuilder private func galaxyItem(_ id: String) -> some ToolbarContent {
+        if let item = galaxyPage.barItems.first(where: { $0.id == id }) {
+            ToolbarItem(placement: .topBarLeading) {
+                GalaxyPillButton(page: galaxyPage, item: item, showsText: verticalEdge == nil)
+                    .fixedSize()
+            }
+        }
     }
 }
 

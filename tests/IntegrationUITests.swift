@@ -39,9 +39,13 @@ final class IntegrationUITests: XCTestCase {
             XCUIDevice.shared.orientation = orientation
             let controls = ["back","home","toggles","tools","routes","options"].map { app.buttons["galaxy-pill-" + $0] }
             XCTAssertTrue(controls[0].waitForExistence(timeout: 30), app.debugDescription)
-            for control in controls {
+            for (index, control) in controls.enumerated() {
                 XCTAssertTrue(control.isHittable, control.debugDescription)
                 XCTAssertTrue(app.frame.insetBy(dx: -1, dy: -1).contains(control.frame), control.debugDescription)
+                for earlier in controls.prefix(index) {
+                    XCTAssertFalse(earlier.frame.insetBy(dx: 3, dy: 3).intersects(control.frame.insetBy(dx: 3, dy: 3)),
+                                   "Toolbar buttons overlap: \(earlier.identifier) and \(control.identifier)")
+                }
             }
             controls[3].tap()
             XCTAssertTrue(app.webViews.staticTexts["Tools selected"].waitForExistence(timeout: 8))
