@@ -1113,6 +1113,14 @@ struct GalaxyRootView: View {
                 return
             }
             if ProcessInfo.processInfo.arguments.contains("--preview-galaxy") {
+                if let fixture = ProcessInfo.processInfo.environment["GALAXY_UI_FIXTURE"] {
+                    let directory = FileManager.default.temporaryDirectory.appendingPathComponent("galaxy-layout-preview", isDirectory: true)
+                    do {
+                        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+                        try fixture.write(to: directory.appendingPathComponent("index.html"), atomically: true, encoding: .utf8)
+                        server.useWebRoot(directory)
+                    } catch { return }
+                }
                 model.opened = true; model.tab = .galaxy
                 return
             }
@@ -1221,6 +1229,7 @@ private struct GalaxyPill: View {
                         .background(item.selected ? StarPilotTheme.accent.opacity(0.17) : Color.clear, in: Capsule())
                         .contentShape(Rectangle())
                 }.buttonStyle(.plain).disabled(item.disabled).accessibilityLabel(Text(verbatim: item.label))
+                    .accessibilityIdentifier("galaxy-pill-" + item.id)
                     .accessibilityAddTraits(item.selected ? .isSelected : [])
             }
             Menu {
@@ -1237,7 +1246,7 @@ private struct GalaxyPill: View {
             } label: {
                 Image(systemName: "ellipsis.circle").font(.title3)
                     .frame(width: 44, height: 44).contentShape(Rectangle())
-            }.accessibilityLabel("Galaxy and app options")
+            }.accessibilityLabel("Galaxy and app options").accessibilityIdentifier("galaxy-pill-options")
         }
     }
 }

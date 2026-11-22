@@ -1,6 +1,58 @@
 import XCTest
+import UIKit
 
 final class IntegrationUITests: XCTestCase {
+    func testLandingAndGalaxyPillLayouts() throws {
+        let app = XCUIApplication()
+        XCUIDevice.shared.orientation = .portrait
+        defer { XCUIDevice.shared.orientation = .portrait }
+        func capture(_ name: String) {
+            let shot = XCTAttachment(screenshot: app.screenshot())
+            shot.name = name
+            shot.lifetime = .keepAlways
+            add(shot)
+        }
+        app.launch()
+        XCTAssertTrue(app.staticTexts["Your comma"].waitForExistence(timeout: 15))
+        capture("Landing portrait")
+        XCUIDevice.shared.orientation = .landscapeLeft
+        XCTAssertTrue(app.staticTexts["Your comma"].isHittable)
+        capture("Landing landscape")
+        app.terminate()
+        app.launchArguments = ["--preview-galaxy"]
+        app.launchEnvironment["GALAXY_UI_FIXTURE"] = """
+        <!doctype html><meta name="viewport" content="width=device-width,initial-scale=1">
+        <style>body{font:18px system-ui;margin:0}header,nav{height:55px}main{padding:12px}h1{margin-top:0}</style>
+        <div id="galaxy-app"><div class="gx-app"><header class="gx-appbar">
+        <button class="gx-appbar__back">Back</button><button class="gx-appbar__home">Galaxy</button>
+        <button class="gx-theme-toggle">Theme</button><button class="gx-appbar__menu">Menu</button></header>
+        <main class="gx-content"><h1>Galaxy layout preview</h1><p id="selection">Home selected</p></main>
+        <nav class="blur-nav"><button aria-current="page"><i class="bi-house-fill"></i>Home</button>
+        <button><i class="bi-toggle-on"></i>Toggles</button><button><i class="bi-tools"></i>Tools</button>
+        <button><i class="bi-camera-reels"></i>Routes</button></nav></div></div>
+        <script>document.querySelector('nav').onclick=e=>{const b=e.target.closest('button');if(b){
+        document.querySelector('[aria-current]')?.removeAttribute('aria-current');b.setAttribute('aria-current','page');
+        document.getElementById('selection').textContent=b.textContent+' selected';}};</script>
+        """
+        app.launch()
+        for orientation: UIDeviceOrientation in [.landscapeLeft, .portrait] {
+            XCUIDevice.shared.orientation = orientation
+            let controls = ["back","home","toggles","tools","routes","options"].map { app.buttons["galaxy-pill-" + $0] }
+            XCTAssertTrue(controls[0].waitForExistence(timeout: 30), app.debugDescription)
+            for control in controls {
+                XCTAssertTrue(control.isHittable, control.debugDescription)
+                XCTAssertTrue(app.frame.insetBy(dx: -1, dy: -1).contains(control.frame), control.debugDescription)
+            }
+            controls[3].tap()
+            XCTAssertTrue(app.webViews.staticTexts["Tools selected"].waitForExistence(timeout: 8))
+            controls[1].tap()
+            XCTAssertTrue(app.webViews.staticTexts["Home selected"].waitForExistence(timeout: 8))
+            capture(orientation == .portrait ? "Galaxy pill portrait" : "Galaxy pill landscape")
+        }
+        app.buttons["galaxy-pill-options"].tap()
+        app.buttons["Settings"].firstMatch.tap()
+        XCTAssertTrue(app.staticTexts["Your comma"].waitForExistence(timeout: 8))
+    }
     private func openSettingsSection(_ title: String, containing control: XCUIElement, in app: XCUIApplication) {
         guard !control.exists else { return }
         let header = app.buttons[title]
