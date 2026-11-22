@@ -1113,10 +1113,6 @@ struct GalaxyRootView: View {
                 arrivalID = nil
             }
         }
-        .onChange(of: galaxyPage.routeRevision) { _, _ in
-            guard requestedPage == .galaxy, arrivalEnabled, !motionDisabled, departingPage == nil else { return }
-            arrivalID = UUID()
-        }
         .onChange(of: motionDisabled || !arrivalEnabled) { _, disabled in
             if disabled {
                 departingPage = nil
