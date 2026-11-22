@@ -19,6 +19,9 @@ private struct NavigationMapLayer: View {
             } else {
                 Map(position: $navigation.camera) {
                     UserAnnotation()
+                    if let start = navigation.plannedStart {
+                        Marker(start.name, systemImage: "flag.fill", coordinate: start.coordinate).tint(StarPilotTheme.accent)
+                    }
                     ForEach(Array(navigation.routes.enumerated()), id: \.offset) { index, route in
                         MapPolyline(route.polyline).stroke(index == navigation.selectedRoute ? StarPilotTheme.accent : Color.gray.opacity(0.5),
                             style: StrokeStyle(lineWidth: index == navigation.selectedRoute ? 8 : 5, lineCap: .round))
@@ -732,6 +735,7 @@ private struct DuoNavigationHome: View {
 }
 
 private struct NavigationDestinationPanel: View {
+    @State private var choosingStart = false
     @ObservedObject var navigation: NavigationModel
     @ObservedObject var connection: CommaConnection
     @ObservedObject var saved: SavedPlacesStore
@@ -764,6 +768,22 @@ private struct NavigationDestinationPanel: View {
                         Button("Save as Home") { saved.save(place, as: .home) }
                         Button("Save as Work") { saved.save(place, as: .work) }
                     } label: { Image(systemName: "ellipsis.circle").font(.title3) }.accessibilityLabel("Save place options")
+                }
+            }
+            HStack {
+                Button { choosingStart = true } label: {
+                    Label("From: \(navigation.plannedStart?.name ?? "Current location")", systemImage: "flag")
+                        .multilineTextAlignment(.leading)
+                }.accessibilityHint("Choose a starting point for a route preview")
+                Spacer()
+                if navigation.plannedStart != nil {
+                    Button("Use my location") { Task { await navigation.preview(from: nil) } }
+                }
+            }
+            .font(.subheadline)
+            .sheet(isPresented: $choosingStart) {
+                PlaceSearch(navigation: navigation, saved: saved, saveAs: nil, choosingStart: true) { place in
+                    Task { await navigation.preview(from: place) }
                 }
             }
             Picker("Route guidance", selection: Binding(get: { navigation.sendToComma }, set: { useComma in
@@ -806,8 +826,13 @@ private struct NavigationDestinationPanel: View {
                     }.buttonStyle(.plain)
                     .accessibilityAddTraits(navigation.selectedRoute == index ? .isSelected : [])
                 }
-                Button("Start on iPhone") { Task { await navigation.start(connection: connection) } }
-                    .buttonStyle(.borderedProminent)
+                if navigation.plannedStart == nil {
+                    Button("Start on iPhone") { Task { await navigation.start(connection: connection) } }
+                        .buttonStyle(.borderedProminent)
+                } else {
+                    Text("Preview from your chosen starting point. Use your current location to start guidance.")
+                        .font(.footnote).foregroundStyle(.secondary)
+                }
             }
         }
     }

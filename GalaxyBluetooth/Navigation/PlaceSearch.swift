@@ -17,6 +17,7 @@ struct PlaceSearch: View {
     @ObservedObject var navigation: NavigationModel
     @ObservedObject var saved: SavedPlacesStore
     let saveAs: SavedPlaceKind?
+    var choosingStart = false
     let onSelect: (NavigationPlace) -> Void
     @State private var query = ""
     @Environment(\.dismiss) private var dismiss
@@ -52,7 +53,7 @@ struct PlaceSearch: View {
                         "Search for an address, business, or place.").foregroundStyle(.secondary)
                 }
             }
-            .navigationTitle(saveAs == .home ? "Add Home" : saveAs == .work ? "Add Work" : saveAs == .favorite ? "Add Favorite" : "Search Maps")
+            .navigationTitle(choosingStart ? "Starting point" : saveAs == .home ? "Add Home" : saveAs == .work ? "Add Work" : saveAs == .favorite ? "Add Favorite" : "Search Maps")
             .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search places or addresses")
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } } }
             .task(id: query) {

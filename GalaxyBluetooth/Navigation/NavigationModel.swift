@@ -99,6 +99,7 @@ final class NavigationModel: NSObject, ObservableObject, @preconcurrency CLLocat
     var onEvent: ((String) -> Void)?
     @Published var results: [NavigationPlace] = []
     @Published var destination: NavigationPlace?
+    @Published private(set) var plannedStart: NavigationPlace?
     @Published var routes: [PhoneRoute] = []
     @Published var selectedRoute = 0
     @Published var usingComma = false
@@ -252,6 +253,7 @@ final class NavigationModel: NSObject, ObservableObject, @preconcurrency CLLocat
     func select(_ place: NavigationPlace) async {
         onEvent?("Destination selected; busy: \(busy); navigating: \(navigating)")
         guard !navigating, !busy else { onEvent?("Destination selection blocked by current state"); return }
+        plannedStart = nil
         destination = place; routes = []; selectedRoute = 0; notice = ""; error = ""
         camera = .region(MKCoordinateRegion(center: place.coordinate, latitudinalMeters: 2500, longitudinalMeters: 2500))
         if !sendToComma { await calculateRoutes(refresh: false) }
@@ -265,7 +267,20 @@ final class NavigationModel: NSObject, ObservableObject, @preconcurrency CLLocat
     func selectGuidanceSource(comma: Bool) async {
         guard !busy, !navigating, comma != sendToComma else { return }
         sendToComma = comma; error = ""
+        if comma, plannedStart != nil { plannedStart = nil; routes = []; selectedRoute = 0 }
         if !comma && routes.isEmpty { await calculateRoutes(refresh: false) }
+    }
+    func preview(from place: NavigationPlace?) async {
+        guard !navigating, !commandRunning, destination != nil else { return }
+        revision = UUID()
+        directions?.cancel()
+        recalculating = false
+        busy = false
+        plannedStart = place
+        sendToComma = false
+        routes = []; selectedRoute = 0
+        error = ""; notice = ""; locationMessage = ""
+        await calculateRoutes(refresh: false)
     }
     func calculateRoutes(refresh: Bool) async {
         #if DEBUG
@@ -280,7 +295,8 @@ final class NavigationModel: NSObject, ObservableObject, @preconcurrency CLLocat
         defer {
             if revision == token { recalculating = false; busy = false }
         }
-        if goodLocation == nil {
+        let previewOrigin = plannedStart.map { CLLocation(latitude: $0.coordinate.latitude, longitude: $0.coordinate.longitude) }
+        if previewOrigin == nil && goodLocation == nil {
             error = ""
             locationMessage = "Getting your current location…"
             manager.stopUpdatingLocation()
@@ -292,7 +308,7 @@ final class NavigationModel: NSObject, ObservableObject, @preconcurrency CLLocat
             }
         }
         guard foreground, revision == token, !Task.isCancelled else { return }
-        guard let origin = goodLocation else {
+        guard let origin = previewOrigin ?? goodLocation else {
             if manager.authorizationStatus == .denied || manager.authorizationStatus == .restricted {
                 error = "Enable location for StarPilot Nav in iPhone Settings."
             } else if manager.accuracyAuthorization == .reducedAccuracy {
@@ -339,6 +355,10 @@ final class NavigationModel: NSObject, ObservableObject, @preconcurrency CLLocat
     func start(connection: CommaConnection) async {
         onEvent?("Go tapped; comma: \(sendToComma); connected: \(connection.connected); busy: \(busy); navigating: \(navigating); destination: \(destination != nil); route: \(route != nil)")
         guard !busy, !navigating, let destination else { onEvent?("Go blocked by current UI state"); return }
+        if plannedStart != nil {
+            await preview(from: nil)
+            return
+        }
         let useComma = sendToComma
         guard useComma || route != nil else { error = "Get directions on iPhone before starting this route."; return }
         guard useComma || goodLocation != nil else {
@@ -427,7 +447,7 @@ final class NavigationModel: NSObject, ObservableObject, @preconcurrency CLLocat
         }
         directions?.cancel(); revision = UUID(); recalculating = false
         usingComma = false; positionDisplayGeneration += 1; commaPolyline = nil; cachedCommaPolyline = nil; commaPosition = nil; commaRouteVersion = nil; commaFeedReady = false
-        navigating = false; routes = []; destination = nil; commaDestination = nil; commaIdentity = nil
+        navigating = false; routes = []; plannedStart = nil; destination = nil; commaDestination = nil; commaIdentity = nil
         onEvent?("Navigation ended; phone only: \(phoneOnly)")
         error = ""; instruction = ""; notice = phoneOnly ? "Phone route ended. Comma was left unchanged." : "Route ended."
         camera = .userLocation(fallback: .automatic)
@@ -588,7 +608,7 @@ final class NavigationModel: NSObject, ObservableObject, @preconcurrency CLLocat
         searchRequest?.cancel(); searchRequest = nil
         commandRunning = false; endingRoute = false; busy = false; searching = false; recalculating = false
         navigating = false; usingComma = false
-        results = []; routes = []; destination = nil; selectedRoute = 0
+        results = []; routes = []; plannedStart = nil; destination = nil; selectedRoute = 0
         commaDestination = nil; commaIdentity = nil; cachedCommaPolyline = nil
         positionDisplayGeneration += 1; commaPolyline = nil; commaPosition = nil; commaRouteVersion = nil
         commaFeedReady = false; commaFeedMessage = ""
@@ -602,7 +622,7 @@ final class NavigationModel: NSObject, ObservableObject, @preconcurrency CLLocat
         onEvent?("Destination preview cleared")
         guard !busy, !navigating else { return }
         directions?.cancel(); revision = UUID(); recalculating = false
-        routes = []; destination = nil; error = ""
+        routes = []; plannedStart = nil; destination = nil; error = ""
         camera = .userLocation(fallback: .automatic)
     }
 

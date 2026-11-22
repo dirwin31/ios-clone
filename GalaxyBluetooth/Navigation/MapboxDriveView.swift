@@ -88,13 +88,19 @@ struct MapboxDriveMap: View {
                     }
                     if coordinates.count >= 2 {
                         PolylineAnnotation(lineCoordinates: coordinates)
-                            .lineColor(UIColor.systemCyan).lineWidth(6)
+                            .lineColor(StarPilotTheme.uiAccent).lineWidth(6)
+                    }
+                    if !driving, let start = navigation.plannedStart {
+                        MapViewAnnotation(coordinate: start.coordinate) {
+                            Image(systemName: "flag.circle.fill").font(.title)
+                                .foregroundStyle(.white, StarPilotTheme.accent).accessibilityLabel("Starting point: \(start.name)")
+                        }
                     }
                     if let point = position(at: clock.date) {
                         MapViewAnnotation(coordinate: point) {
                             Image(systemName: driving && navigation.followsUser ? "location.north.fill" : "circle.fill")
                                 .font(.callout.bold()).foregroundStyle(.white)
-                                .frame(width: 32, height: 32).background(.blue, in: Circle())
+                                .frame(width: 32, height: 32).background(StarPilotTheme.accent, in: Circle())
                                 .overlay { Circle().stroke(.white, lineWidth: 2) }
                                 .accessibilityLabel(commaTrip ? "Comma location" : "Your location")
                         }
