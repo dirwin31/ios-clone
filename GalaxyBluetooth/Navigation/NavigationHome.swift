@@ -169,7 +169,7 @@ private struct StandardNavigationHome: View {
                     .accessibilityElement(children: .combine)
                 } else { Spacer() }
                 VStack(spacing: 10) {
-                    mapButton("location.fill", label: "Follow my location") { navigation.followLocation() }
+                    mapButton("scope", label: "Follow my location") { navigation.followLocation() }
                     if navigation.navigating {
                         mapButton("arrow.up.left.and.arrow.down.right", label: "Show full route") { navigation.showOverview() }
                     }
@@ -209,7 +209,6 @@ private struct StandardNavigationHome: View {
                     Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
                     Text("Search Maps").foregroundStyle(.secondary)
                     Spacer()
-                    Image(systemName: "arrow.up.left").foregroundStyle(.tertiary)
                 }.font(.title3).padding(14).background(.secondary.opacity(0.1), in: RoundedRectangle(cornerRadius: 12))
             }.buttonStyle(.plain).accessibilityIdentifier("map-search")
     }
@@ -576,7 +575,7 @@ private struct DuoNavigationHome: View {
                 } else { Spacer() }
                 if !navigation.navigating {
                 VStack(spacing: 10) {
-                    mapButton("location.fill", label: "Follow my location") { navigation.followLocation() }
+                    mapButton("scope", label: "Follow my location") { navigation.followLocation() }
                     if navigation.navigating {
                         mapButton("arrow.up.left.and.arrow.down.right", label: "Show full route") { navigation.showOverview() }
                     }
@@ -606,7 +605,7 @@ private struct DuoNavigationHome: View {
     private var tripControls: some View {
         VStack(spacing: 4) {
             Button { navigation.followLocation() } label: {
-                Image(systemName: "location.fill").font(.title3.weight(.semibold)).frame(width: 44, height: 44)
+                Image(systemName: "scope").font(.title3.weight(.semibold)).frame(width: 44, height: 44)
             }.accessibilityLabel("Follow my location")
             navigationOptions
         }
@@ -631,7 +630,6 @@ private struct DuoNavigationHome: View {
                     Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
                     Text("Search Maps").foregroundStyle(.secondary)
                     Spacer()
-                    Image(systemName: "arrow.up.left").foregroundStyle(.tertiary)
                 }.font(.title3).padding(14).background(.secondary.opacity(0.1), in: RoundedRectangle(cornerRadius: 12))
             }.buttonStyle(.plain).accessibilityIdentifier("map-search")
     }
@@ -815,7 +813,7 @@ private struct NavigationDestinationPanel: View {
                 Button {
                     Task { await navigation.start(connection: connection) }
                 } label: {
-                    Label(navigation.busy ? "Sending destination…" : "Send to comma", systemImage: "arrow.up.right")
+                    Text(navigation.busy ? "Sending destination…" : "Send to comma")
                         .font(.headline).frame(maxWidth: .infinity).padding(.vertical, 5)
                 }
                 .buttonStyle(.borderedProminent)

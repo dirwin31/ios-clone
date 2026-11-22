@@ -35,6 +35,7 @@ struct ConnectionSettingsView: View {
     @State private var confirmForget = false
     @State private var confirmPairingReset = false
     @State private var confirmNavigationAlpha = false
+    @State private var showMapboxDrive = false
     @State private var showPairingHelp = false
     @State private var checked = false
     @State private var openAfterReconnect = false
@@ -96,6 +97,10 @@ struct ConnectionSettingsView: View {
                 .init(color: model.navigationEnabled ? panel.opacity(0.8) : background, location: 1)
             ], startPoint: .top, endPoint: .bottom).ignoresSafeArea()
         }.foregroundStyle(Color.primary).preferredColorScheme(model.navigationEnabled ? nil : .dark)
+            .fullScreenCover(isPresented: $showMapboxDrive) {
+                MapboxDriveView(navigation: model.navigationServices.navigation,
+                                connection: model.navigationServices.connection)
+            }
             .alert("Enable navigation alpha?", isPresented: $confirmNavigationAlpha) {
                 Button("Cancel", role: .cancel) { }
                 Button("Enable alpha") { model.navigationAlpha = true }
@@ -509,6 +514,13 @@ struct ConnectionSettingsView: View {
                     row("location.fill", title: "Navigation alpha testing", subtitle: "Navigation UI and CarPlay maps · experimental") {
                         Toggle("Navigation alpha testing", isOn: Binding(get: { model.navigationAlpha }, set: { if $0 { confirmNavigationAlpha = true } else { model.navigationAlpha = false } })).labelsHidden()
                             .accessibilityIdentifier("navigation-alpha-toggle")
+                    }
+                    separator
+                    row("map", title: "3D Drive", subtitle: model.navigationEnabled ? "Mapbox map and comma route guidance" : "Explore the map · enable Navigation alpha for guidance") {
+                        Button("Open") { showMapboxDrive = true }
+                            .frame(minHeight: 44)
+                            .accessibilityLabel("Open 3D Drive")
+                            .accessibilityIdentifier("settings-open-3d-drive")
                     }
                 }
             }
