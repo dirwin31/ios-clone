@@ -65,6 +65,8 @@ final class CarPlaySceneDelegate: NSObject, CPTemplateApplicationSceneDelegate, 
         let action: NavigationAction
     }
     private var navigationRows: [NavigationRow] = []
+    private var presentedDestination: UUID?
+    private var tabsReady = false
     private var navigationSession: CPNavigationSession?
     private var trip: CPTrip?
     private var tripDestination = ""
@@ -90,6 +92,9 @@ final class CarPlaySceneDelegate: NSObject, CPTemplateApplicationSceneDelegate, 
         model.$navigationAlpha.combineLatest(model.$developerMode)
             .receive(on: RunLoop.main).sink { [weak self] _ in self?.configureMode() }
             .store(in: &subscriptions)
+        model.navigationServices.navigation.$navigating.removeDuplicates()
+            .receive(on: RunLoop.main).sink { [weak self] _ in self?.refreshNavigation() }
+            .store(in: &subscriptions)
         configureMode()
         timer?.invalidate()
         timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
@@ -107,6 +112,8 @@ final class CarPlaySceneDelegate: NSObject, CPTemplateApplicationSceneDelegate, 
         let alpha = model.navigationEnabled
         guard alphaMode != alpha else { return }
         alphaMode = alpha
+        presentedDestination = nil
+        tabsReady = false
         settingsRead?.cancel()
         settingsRead = nil
         stopGuidance()
@@ -143,26 +150,52 @@ final class CarPlaySceneDelegate: NSObject, CPTemplateApplicationSceneDelegate, 
                 }]
             }
         }
-        controller.setRootTemplate(tabs, animated: false, completion: nil)
+        controller.setRootTemplate(tabs, animated: false) { [weak self, weak tabs] success, _ in
+            guard let self, let tabs, self.navigationTabs === tabs else { return }
+            self.tabsReady = success
+            if success { self.refreshNavigation() }
+        }
         showCategories()
     }
 
     private func openNavigation() {
-        guard let controller, window != nil, mapTemplate == nil, AppModel.shared.navigationEnabled else { return }
+        guard tabsReady, let controller, window != nil, mapTemplate == nil, AppModel.shared.navigationEnabled else { return }
         let map = CompanionCarPlayMap()
         mapController = map
         window?.rootViewController = map
         let template = CPMapTemplate()
         template.mapDelegate = self
-        template.guidanceBackgroundColor = StarPilotTheme.uiAccent
-        template.automaticallyHidesNavigationBar = false
-        template.leadingNavigationBarButtons = [CPBarButton(title: localizedCarPlay("Back")) { [weak self] _ in
+        template.automaticallyHidesNavigationBar = true
+        template.hidesButtonsWithNavigationBar = false
+        template.leadingNavigationBarButtons = [CPBarButton(image: UIImage(systemName: "chevron.backward")!) { [weak self] _ in
             self?.returnFromMap()
         }]
+        let routeImage = UIImage(systemName: "point.topleft.down.to.point.bottomright.curvepath") ?? UIImage(systemName: "map")
+        let overview = CPMapButton { [weak map] button in
+            guard let map else { return }
+            map.showingOverview.toggle()
+            button.image = map.showingOverview ? UIImage(systemName: "location.fill") : routeImage
+            map.update(AppModel.shared.navigationServices.navigation)
+        }
+        overview.image = routeImage
+        let zoomButtons = [("plus", 0.7), ("minus", 1 / 0.7)].map { symbol, factor in
+            let button = CPMapButton { [weak map] _ in
+                guard let map else { return }
+                map.showingOverview = false
+                overview.image = routeImage
+                map.zoom(by: factor)
+                map.update(AppModel.shared.navigationServices.navigation)
+            }
+            button.image = UIImage(systemName: symbol)
+            return button
+        }
+        template.mapButtons = [overview] + zoomButtons
+        presentedDestination = AppModel.shared.navigationServices.navigation.destination?.id
         mapTemplate = template
-        controller.setRootTemplate(template, animated: false) { [weak self] success, _ in
-            if success { self?.refreshNavigation() }
-            else { self?.returnFromMap() }
+        controller.setRootTemplate(template, animated: false) { [weak self, weak template] success, _ in
+            guard let self, let template, self.mapTemplate === template else { return }
+            if success { self.refreshNavigation() }
+            else { self.returnFromMap() }
         }
     }
 
@@ -171,7 +204,11 @@ final class CarPlaySceneDelegate: NSObject, CPTemplateApplicationSceneDelegate, 
         stopGuidance()
         mapTemplate = nil; mapController = nil
         window?.rootViewController = UIViewController()
-        controller?.setRootTemplate(tabs, animated: false, completion: nil)
+        tabsReady = false
+        controller?.setRootTemplate(tabs, animated: false) { [weak self, weak tabs] success, _ in
+            guard let self, let tabs, self.navigationTabs === tabs else { return }
+            self.tabsReady = success
+        }
     }
 
     private func refreshNavigationMenu() {
@@ -226,7 +263,7 @@ final class CarPlaySceneDelegate: NSObject, CPTemplateApplicationSceneDelegate, 
                 item.accessoryType = .disclosureIndicator
                 item.handler = { [weak self, weak menu] _, completion in
                     defer { completion() }
-                    guard let self, let menu else { return }
+                    guard let self, let menu, self.navigationMenu === menu else { return }
                     self.refreshNavigationMenu()
                     guard self.navigationRows.contains(row) else { return }
                     switch row.action {
@@ -237,11 +274,7 @@ final class CarPlaySceneDelegate: NSObject, CPTemplateApplicationSceneDelegate, 
                         Task { @MainActor in
                             guard nav.destination?.id == destinationID else { return }
                             await nav.start(connection: services.connection)
-                            self.refreshNavigationMenu()
-                            if nav.navigating, self.window != nil, let tabs = self.navigationTabs,
-                               self.controller?.topTemplate === menu || (self.controller?.topTemplate === tabs && tabs.selectedTemplate === menu) {
-                                self.openNavigation()
-                            }
+                            self.refreshNavigation()
                         }
                     case .directions:
                         Task { await nav.calculateRoutes(refresh: false) }
@@ -270,8 +303,18 @@ final class CarPlaySceneDelegate: NSObject, CPTemplateApplicationSceneDelegate, 
 
     private func refreshNavigation() {
         refreshNavigationMenu()
-        guard AppModel.shared.navigationEnabled, let template = mapTemplate else { return }
+        guard AppModel.shared.navigationEnabled else { return }
         let nav = AppModel.shared.navigationServices.navigation
+        if !nav.navigating {
+            presentedDestination = nil
+        } else if let id = nav.destination?.id {
+            if mapTemplate != nil { presentedDestination = id }
+            else if presentedDestination != id, controller?.presentedTemplate == nil, !navigating, !busy {
+                openNavigation()
+                return
+            }
+        }
+        guard let template = mapTemplate, controller?.rootTemplate === template else { return }
         nav.checkCommaFreshness()
         mapController?.update(nav)
         let status: String? = !nav.navigating ? "Trip ended" :
@@ -303,23 +346,30 @@ final class CarPlaySceneDelegate: NSObject, CPTemplateApplicationSceneDelegate, 
         let distance = max(0, nav.remainingDistance.isFinite ? nav.remainingDistance : 0)
         let duration = max(0, nav.remainingTime.isFinite ? nav.remainingTime : 0)
         template.updateEstimates(travelEstimates(meters: distance, seconds: duration), for: trip)
-        if !nav.instruction.isEmpty {
-            if maneuver?.instructionVariants.first != nav.instruction {
+        let lines = nav.instruction.split(whereSeparator: \.isNewline).map(String.init)
+        if let first = lines.first {
+            let variants = lines.count > 1 ? [lines.joined(separator: " · "), first] : [first]
+            let turn = (nav.usingComma ? nav.commaManeuverType + " " + nav.commaManeuverModifier : nav.instruction).lowercased()
+            let turnDistance = max(0, nav.distanceToTurn.isFinite ? nav.distanceToTurn : 0)
+            let estimates = travelEstimates(meters: turnDistance, seconds: 0)
+            if maneuver?.instructionVariants != variants || maneuver?.userInfo as? String != turn {
                 let next = CPManeuver()
-                next.instructionVariants = [nav.instruction]
-                let turn = (nav.usingComma ? nav.commaManeuverType + " " + nav.commaManeuverModifier : nav.instruction).lowercased()
+                next.userInfo = turn
+                next.instructionVariants = variants
+                next.dashboardInstructionVariants = variants
+                next.initialTravelEstimates = estimates
                 let symbol = turn.contains("roundabout") ? "arrow.triangle.2.circlepath" :
                     turn.contains("u-turn") ? "arrow.uturn.down" :
                     turn.contains("left") ? "arrow.turn.up.left" :
                     turn.contains("right") ? "arrow.turn.up.right" : "arrow.up"
                 next.symbolImage = UIImage(systemName: symbol, withConfiguration: UIImage.SymbolConfiguration(pointSize: 32, weight: .bold))
+                next.dashboardSymbolImage = next.symbolImage
                 if #available(iOS 17.4, *) { navigationSession.add([next]) }
                 maneuver = next
                 navigationSession.upcomingManeuvers = [next]
             }
             if let maneuver {
-                let turnDistance = max(0, nav.distanceToTurn.isFinite ? nav.distanceToTurn : 0)
-                navigationSession.updateEstimates(travelEstimates(meters: turnDistance, seconds: 0), for: maneuver)
+                navigationSession.updateEstimates(estimates, for: maneuver)
             }
         } else {
             navigationSession.upcomingManeuvers = []
@@ -843,7 +893,7 @@ final class CarPlaySceneDelegate: NSObject, CPTemplateApplicationSceneDelegate, 
     private static func switchImage(on: Bool) -> UIImage {
         let size = CGSize(width: 38, height: 22)
         // Keep the accessory canvas fixed so CarPlay preserves the clear margin.
-        let track = CGRect(x: 10, y: 6, width: 18, height: 10)
+        let track = CGRect(x: 2, y: 1, width: 34, height: 20)
         return UIGraphicsImageRenderer(size: size).image { _ in
             (on ? UIColor.systemGreen : UIColor.systemGray).setFill()
             UIBezierPath(roundedRect: track, cornerRadius: track.height / 2).fill()
@@ -857,37 +907,6 @@ final class CarPlaySceneDelegate: NSObject, CPTemplateApplicationSceneDelegate, 
     private static let onImage = switchImage(on: true)
     private static let offImage = switchImage(on: false)
 
-    private func binarySettingItem(label: String, description: String?, icon: String, on: Bool, enabled: Bool,
-                                   showDetails: @escaping @MainActor () -> Void,
-                                   toggle: @escaping @MainActor () -> Void) -> CPListImageRowItem {
-        let details = localizedCarPlay("Details")
-        let change = localizedCarPlay(on ? "Turn off" : "Turn on")
-        let detailImage = UIImage(systemName: icon) ?? UIImage(systemName: "info.circle")!
-        let switchImage = on ? Self.onImage : Self.offImage
-        let title = localizedCarPlay(label)
-        let item: CPListImageRowItem
-        if #available(iOS 26.0, *) {
-            let info = CPListImageRowItemCondensedElement(image: detailImage, imageShape: .roundedRectangle,
-                title: details, subtitle: description.map(localizedCarPlay), accessorySymbolName: nil)
-            let action = CPListImageRowItemCondensedElement(image: switchImage, imageShape: .roundedRectangle,
-                title: change, subtitle: nil, accessorySymbolName: nil)
-            item = CPListImageRowItem(text: title, condensedElements: [info, action], allowsMultipleLines: false)
-        } else if #available(iOS 17.4, *) {
-            item = CPListImageRowItem(text: title, images: [detailImage, switchImage], imageTitles: [details, change])
-        } else {
-            detailImage.accessibilityLabel = details
-            switchImage.accessibilityLabel = change
-            item = CPListImageRowItem(text: title, images: [detailImage, switchImage])
-        }
-        item.isEnabled = enabled
-        item.handler = { _, done in showDetails(); done() }
-        item.listImageRowHandler = { _, index, done in
-            if index == 0 { showDetails() }
-            if index == 1 { toggle() }
-            done()
-        }
-        return item
-    }
 
     private func displayedSettingValue(_ row: [String: Any]) -> String? {
         guard let raw = row["value"], !(raw is NSNull) else { return nil }
@@ -923,18 +942,17 @@ final class CarPlaySceneDelegate: NSObject, CPTemplateApplicationSceneDelegate, 
             let enabled = row["available"] as? Bool == true && (!child.isEmpty || row["action"] as? Bool == true) && !busy
             let description = (row["reason"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
             if binary {
-                return binarySettingItem(label: label, description: description, icon: icon, on: value == "On",
-                                         enabled: enabled, showDetails: { [weak self, weak page] in
-                    guard let self, let page else { return }
-                    guard state.session == self.session else { self.loadSettings(page); return }
-                    self.editSetting(page, index: index, row: row)
-                }, toggle: { [weak self, weak page] in
+                let detail = [value, description].compactMap { $0 }.filter { !$0.isEmpty }
+                    .map(localizedCarPlay).joined(separator: " · ")
+                let item = settingsItem(label, detail: detail, icon: icon, enabled: enabled) { [weak self, weak page] in
                     guard let self, let page else { return }
                     guard state.session == self.session,
                           let latest = state.snapshot["rows"] as? [[String: Any]], latest.indices.contains(index),
                           (latest[index] as NSDictionary).isEqual(row) else { self.loadSettings(page); return }
-                    self.preview(page, index: index, selection: value == "On" ? "Off" : "On")
-                })
+                    self.preview(page, index: index, selection: value == "On" ? "Off" : "On", detailRow: row)
+                }
+                item.setAccessoryImage(value == "On" ? Self.onImage : Self.offImage)
+                return item
             }
             let detail = [child.isEmpty ? displayedSettingValue(row) : nil, description.map(localizedCarPlay)]
                 .compactMap { $0 }
@@ -994,6 +1012,22 @@ final class CarPlaySceneDelegate: NSObject, CPTemplateApplicationSceneDelegate, 
         }
     }
 
+    private func showSettingDetails(_ row: [String: Any]) {
+        let items = descriptionItems(row)
+        guard !items.isEmpty else { return }
+        let page = CPListTemplate(title: row["label"] as? String, sections: [])
+        let capacity = max(1, CPListTemplate.maximumItemCount)
+        drawDetails(page, items: items, capacity: capacity, index: 0)
+        pushTemplate(page, animated: true, completion: nil)
+    }
+
+    private func drawDetails(_ page: CPListTemplate, items: [CPListItem], capacity: Int, index: Int) {
+        page.updateSections([CPListSection(items: Array(items.dropFirst(index * capacity).prefix(capacity)))])
+        paging(page, index: index, count: (items.count + capacity - 1) / capacity) { [weak self, weak page] next in
+            if let page { self?.drawDetails(page, items: items, capacity: capacity, index: next) }
+        }
+    }
+
     private func drawEditor(_ editor: CPListTemplate, state: SettingsEditorState, row: [String: Any]) {
         let parent = state.parent
         let index = state.index
@@ -1021,7 +1055,14 @@ final class CarPlaySceneDelegate: NSObject, CPTemplateApplicationSceneDelegate, 
                 }
             ]
         }
-        let items = descriptionItems(row) + controls
+        var items = controls
+        if let reason = row["reason"] as? String, !reason.isEmpty {
+            let details = settingsItem("Details", detail: localizedCarPlay(reason), icon: "info.circle") { [weak self] in
+                self?.showSettingDetails(row)
+            }
+            details.accessoryType = .disclosureIndicator
+            items.append(details)
+        }
         let capacity = max(1, CPListTemplate.maximumItemCount)
         let count = (items.count + capacity - 1) / capacity
         state.page = min(state.page, count - 1)
@@ -1085,7 +1126,7 @@ final class CarPlaySceneDelegate: NSObject, CPTemplateApplicationSceneDelegate, 
             }
         }
     }
-    private func preview(_ page: CPListTemplate, index: Int, selection: String? = nil) {
+    private func preview(_ page: CPListTemplate, index: Int, selection: String? = nil, detailRow: [String: Any]? = nil) {
         guard !busy, let state = page.userInfo as? SettingsPageState, state.session == session,
               let view = state.snapshot["view"] as? String else { loadSettings(page); return }
         busy = true
@@ -1112,7 +1153,18 @@ final class CarPlaySceneDelegate: NSObject, CPTemplateApplicationSceneDelegate, 
                     }
                 }
                 let cancel = CPAlertAction(title: localizedCarPlay("Cancel"), style: .cancel) { [weak self] _ in self?.controller?.dismissTemplate(animated: true, completion: nil) }
-                self.controller?.presentTemplate(CPAlertTemplate(titleVariants: [pending["question"] as? String ?? "Save this preference?"], actions: [cancel, confirm]), animated: true, completion: nil)
+                let question = pending["question"] as? String ?? "Save this preference?"
+                if let detailRow, let reason = detailRow["reason"] as? String, !reason.isEmpty {
+                    let details = CPAlertAction(title: self.localizedCarPlay("Details"), style: .default) { [weak self] _ in
+                        self?.controller?.dismissTemplate(animated: true) { success, _ in
+                            if success { self?.showSettingDetails(detailRow) }
+                        }
+                    }
+                    self.controller?.presentTemplate(CPActionSheetTemplate(title: question, message: self.localizedCarPlay(reason),
+                        actions: [confirm, details, cancel]), animated: true, completion: nil)
+                } else {
+                    self.controller?.presentTemplate(CPAlertTemplate(titleVariants: [question], actions: [cancel, confirm]), animated: true, completion: nil)
+                }
             } catch { self.notice(error.localizedDescription); self.busy = false; self.loadSettings(page) }
         }
     }
@@ -1192,6 +1244,7 @@ final class CarPlayDashboardSceneDelegate: NSObject, CPTemplateApplicationDashbo
         }
         if mapController == nil {
             let map = CompanionCarPlayMap()
+            map.dashboard = true
             mapController = map
             window.rootViewController = map
         }
@@ -1214,15 +1267,69 @@ private final class CompanionCarPlayMap: UIViewController, MKMapViewDelegate {
     private let position = MKPointAnnotation()
     private let destinationPin = MKPointAnnotation()
     private var showingDestination = false
+    var dashboard = false
+    var showingOverview = false { didSet { showingDestination = false } }
+    private var zoomFactor = 1.0
     private var line: MKPolyline?
     private var lastLocation: CLLocation?
     private var lastMovement = Date.distantPast
     private var filteredSpeed = 0.0
-    private var cameraDistance = 2200.0
+    private var cameraDistance = 900.0
+    func zoom(by factor: Double) {
+        zoomFactor = min(3, max(0.35, zoomFactor * factor))
+    }
+
+    private var visibleMapFrame: CGRect {
+        let safe = map.safeAreaLayoutGuide.layoutFrame
+        let fallback = safe.isEmpty ? map.bounds : safe
+        guard let window = map.window as? CPWindow, !dashboard else { return fallback }
+        let frame = map.convert(window.mapButtonSafeAreaLayoutGuide.layoutFrame, from: window).intersection(fallback)
+        return frame.width >= 64 && frame.height >= 64 ? frame : fallback
+    }
+
+    private func follow(_ coordinate: CLLocationCoordinate2D, heading: Double, animated: Bool) {
+        let frame = visibleMapFrame
+        guard !frame.isEmpty else { return }
+        let distance = cameraDistance * zoomFactor
+        let pitch: CGFloat = dashboard ? 40 : 55
+        // Measure the ground offset in MapKit's pitched projection. Rotating this
+        // offset into the new heading keeps the arrow anchored through turns.
+        let camera = MKMapCamera(lookingAtCenter: coordinate, fromDistance: distance, pitch: pitch, heading: heading)
+        if !animated || abs(map.camera.pitch - pitch) > 5 {
+            map.setCamera(camera, animated: false)
+        }
+        let current = map.camera
+        let cardOnRight = map.effectiveUserInterfaceLayoutDirection == .rightToLeft
+        let alreadyInset = cardOnRight ? map.bounds.maxX - frame.maxX : frame.minX - map.bounds.minX
+        // Some displays include the maneuver card in the system guide; others
+        // report only the dock. Reserve card space only in the latter case.
+        let xFraction: CGFloat = dashboard || alreadyInset > map.bounds.width * 0.28 ? 0.5 : (cardOnRight ? 0.32 : 0.68)
+        let anchor = CGPoint(x: frame.minX + frame.width * xFraction,
+                             y: frame.minY + frame.height * (dashboard ? 0.66 : 0.80))
+        let ground = map.convert(anchor, toCoordinateFrom: map)
+        if CLLocationCoordinate2DIsValid(ground), current.centerCoordinateDistance > 0 {
+            let center = MKMapPoint(current.centerCoordinate)
+            let foot = MKMapPoint(ground)
+            let scale = distance / current.centerCoordinateDistance
+            let angle = (heading - current.heading) * .pi / 180
+            let dx = (center.x - foot.x) * scale
+            let dy = (center.y - foot.y) * scale
+            let car = MKMapPoint(coordinate)
+            let aim = MKMapPoint(x: car.x + dx * cos(angle) - dy * sin(angle),
+                                 y: car.y + dx * sin(angle) + dy * cos(angle))
+            if car.distance(to: aim) < distance * 2, CLLocationCoordinate2DIsValid(aim.coordinate) {
+                camera.centerCoordinate = aim.coordinate
+            }
+        }
+        map.setCamera(camera, animated: animated && !UIAccessibility.isReduceMotionEnabled)
+    }
     override func loadView() {
         view = map
         map.delegate = self
-        map.pointOfInterestFilter = .excludingAll
+        let configuration = MKStandardMapConfiguration(elevationStyle: .realistic)
+        configuration.pointOfInterestFilter = .excludingAll
+        map.preferredConfiguration = configuration
+        map.showsCompass = false
         map.isRotateEnabled = false
     }
     func update(_ navigation: NavigationModel) {
@@ -1244,11 +1351,10 @@ private final class CompanionCarPlayMap: UIViewController, MKMapViewDelegate {
             map.removeOverlays(map.overlays)
             showingDestination = false
             line = next
-            if let next { map.addOverlay(next) }
+            if let next { map.addOverlays([MKMultiPolyline([next]), next], level: .aboveRoads) }
         }
         let coordinate = navigation.usingComma ? (navigation.commaFeedReady ? navigation.commaPosition : nil) : navigation.goodLocation?.coordinate
         if let coordinate {
-            showingDestination = false
             let now = Date()
             let location = CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude)
             if let previous = lastLocation {
@@ -1262,21 +1368,37 @@ private final class CompanionCarPlayMap: UIViewController, MKMapViewDelegate {
                     lastLocation = location; lastMovement = now
                 } else if elapsed > 3 { filteredSpeed *= 0.8 }
             } else { lastLocation = location; lastMovement = now }
-            let target = NavigationMapMotion.cameraDistance(speed: filteredSpeed,
+            let target = 0.50 * NavigationMapMotion.cameraDistance(speed: filteredSpeed,
                 distanceToTurn: navigation.navigating ? navigation.distanceToTurn : 0)
             cameraDistance += (target - cameraDistance) * (target < cameraDistance ? 0.35 : 0.2)
             let hadPosition = map.annotations.contains(where: { $0 === position })
-            position.coordinate = coordinate
+            if hadPosition && !UIAccessibility.isReduceMotionEnabled {
+                UIView.animate(withDuration: 0.8, delay: 0, options: [.beginFromCurrentState, .curveLinear]) {
+                    self.position.coordinate = coordinate
+                }
+            } else { position.coordinate = coordinate }
             if !hadPosition { map.addAnnotation(position) }
-            let heading = navigation.usingComma ? navigation.commaHeading : max(0, navigation.goodLocation?.course ?? 0)
-            map.setCamera(MKMapCamera(lookingAtCenter: coordinate, fromDistance: cameraDistance,
-                pitch: 35, heading: heading), animated: hadPosition && !UIAccessibility.isReduceMotionEnabled)
+            let course = navigation.usingComma ? navigation.commaHeading : navigation.goodLocation?.course ?? -1
+            let heading = course.isFinite && course >= 0 ? course : map.camera.heading
+            if !showingOverview || next == nil {
+                showingDestination = false
+                follow(coordinate, heading: heading, animated: hadPosition)
+            }
+            if let marker = map.view(for: position), showingOverview {
+                marker.transform = CGAffineTransform(rotationAngle: (heading - map.camera.heading) * .pi / 180)
+            } else { map.view(for: position)?.transform = .identity }
         } else {
             map.removeAnnotation(position)
             lastLocation = nil; filteredSpeed = 0
-            if !showingDestination, let destination = navigation.destination {
+        }
+        if coordinate == nil || showingOverview {
+            if !showingDestination, let destination = navigation.destination, !map.bounds.isEmpty {
                 if let next {
-                    map.setVisibleMapRect(next.boundingMapRect, edgePadding: UIEdgeInsets(top: 48, left: 36, bottom: 36, right: 36), animated: false)
+                    let frame = visibleMapFrame
+                    let margin = min(20, min(frame.width, frame.height) / 8)
+                    map.setVisibleMapRect(next.boundingMapRect, edgePadding: UIEdgeInsets(
+                        top: frame.minY + margin, left: frame.minX + margin,
+                        bottom: map.bounds.maxY - frame.maxY + margin, right: map.bounds.maxX - frame.maxX + margin), animated: false)
                 } else {
                     map.setRegion(MKCoordinateRegion(center: destination.coordinate, latitudinalMeters: 2500, longitudinalMeters: 2500), animated: false)
                 }
@@ -1285,10 +1407,16 @@ private final class CompanionCarPlayMap: UIViewController, MKMapViewDelegate {
         }
     }
     func mapView(_ mapView: MKMapView, rendererFor overlay: MKOverlay) -> MKOverlayRenderer {
+        if let casing = overlay as? MKMultiPolyline {
+            let renderer = MKMultiPolylineRenderer(multiPolyline: casing)
+            renderer.strokeColor = UIColor(red: 0.30, green: 0.18, blue: 0.48, alpha: 1)
+            renderer.lineCap = .round; renderer.lineJoin = .round; renderer.lineWidth = 8
+            return renderer
+        }
         let renderer = MKPolylineRenderer(overlay: overlay)
         renderer.strokeColor = StarPilotTheme.uiAccent
         renderer.lineCap = .round; renderer.lineJoin = .round
-        renderer.lineWidth = 7
+        renderer.lineWidth = 6
         return renderer
     }
     func mapView(_ mapView: MKMapView, viewFor annotation: MKAnnotation) -> MKAnnotationView? {
@@ -1299,14 +1427,14 @@ private final class CompanionCarPlayMap: UIViewController, MKMapViewDelegate {
             return pin
         }
         let marker = MKAnnotationView(annotation: annotation, reuseIdentifier: nil)
-        marker.image = UIGraphicsImageRenderer(size: CGSize(width: 36, height: 36)).image { context in
+        marker.image = UIGraphicsImageRenderer(size: CGSize(width: 25, height: 21)).image { context in
             UIColor.white.setFill()
-            context.cgContext.fillEllipse(in: CGRect(x: 0, y: 0, width: 36, height: 36))
+            context.cgContext.fillEllipse(in: CGRect(x: 0, y: 0, width: 25, height: 21))
             StarPilotTheme.uiAccent.setFill()
-            context.cgContext.fillEllipse(in: CGRect(x: 3, y: 3, width: 30, height: 30))
+            context.cgContext.fillEllipse(in: CGRect(x: 1.5, y: 1.5, width: 22, height: 18))
             let arrow = UIBezierPath()
-            arrow.move(to: CGPoint(x: 18, y: 7)); arrow.addLine(to: CGPoint(x: 27, y: 28))
-            arrow.addLine(to: CGPoint(x: 18, y: 23)); arrow.addLine(to: CGPoint(x: 9, y: 28))
+            arrow.move(to: CGPoint(x: 12.5, y: 3)); arrow.addLine(to: CGPoint(x: 19, y: 16))
+            arrow.addLine(to: CGPoint(x: 12.5, y: 13)); arrow.addLine(to: CGPoint(x: 6, y: 16))
             arrow.close(); UIColor.white.setFill(); arrow.fill()
         }
         marker.displayPriority = .required
