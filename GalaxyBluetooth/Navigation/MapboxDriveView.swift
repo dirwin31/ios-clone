@@ -44,6 +44,15 @@ struct NavigationMapSettings: View {
 
 /// Uses the same navigation state and controls as the standard iPhone map.
 struct MapboxDriveMap: View {
+    private static let destinationIcon: UIImage = {
+        let palette = UIImage.SymbolConfiguration(paletteColors: [.white, .systemRed])
+        let symbol = UIImage(systemName: "mappin.circle.fill", withConfiguration: palette)?
+            .withRenderingMode(.alwaysOriginal)
+        let size = CGSize(width: 30, height: 30)
+        return UIGraphicsImageRenderer(size: size).image { _ in
+            symbol?.draw(in: CGRect(origin: .zero, size: size))
+        }
+    }()
     @ObservedObject var navigation: NavigationModel
     let bottomInset: CGFloat
     @Environment(\.colorScheme) private var colorScheme
@@ -87,12 +96,6 @@ struct MapboxDriveMap: View {
             let top = min(driving ? 190.0 : 90.0, geometry.size.height * 0.32)
             TimelineView(.periodic(from: .now, by: 1)) { clock in
                 MapboxMaps.Map(viewport: $viewport) {
-                    if let destination = navigation.destination {
-                        MapViewAnnotation(coordinate: destination.coordinate) {
-                            Image(systemName: "mappin.circle.fill").font(.title)
-                                .foregroundStyle(.white, .red).accessibilityLabel(destination.name)
-                        }
-                    }
                     if let routeShape {
                         GeoJSONSource(id: "galaxy-route").data(.geometry(.lineString(routeShape)))
                         LineLayer(id: "galaxy-selected-route", source: "galaxy-route")
@@ -101,6 +104,14 @@ struct MapboxDriveMap: View {
                             .lineColor(StarPilotTheme.routePurple).lineWidth(7)
                             .lineBorderColor(UIColor(red: 0.27, green: 0.08, blue: 0.43, alpha: 1))
                             .lineBorderWidth(1).lineEmissiveStrength(1)
+                    }
+                    if let destination = navigation.destination {
+                        GeoJSONSource(id: "galaxy-destination")
+                            .data(.feature(destinationFeature(destination)))
+                        StyleImage(id: "galaxy-destination-pin", image: Self.destinationIcon)
+                        SymbolLayer(id: "galaxy-destination-symbol", source: "galaxy-destination")
+                            .slot(.middle).iconImage("galaxy-destination-pin").iconAnchor(.bottom)
+                            .iconAllowOverlap(true).iconIgnorePlacement(true).iconOcclusionOpacity(0)
                     }
                     if !driving, let start = navigation.plannedStart {
                         MapViewAnnotation(coordinate: start.coordinate) {
@@ -166,6 +177,12 @@ struct MapboxDriveMap: View {
             .frame(width: 32, height: 32).background(StarPilotTheme.accent, in: Circle())
             .overlay { Circle().stroke(.white, lineWidth: 2) }
             .accessibilityLabel(commaTrip ? "Comma location" : "Your location")
+    }
+
+    private func destinationFeature(_ destination: NavigationPlace) -> Feature {
+        var feature = Feature(geometry: .point(Point(destination.coordinate)))
+        feature.properties = ["name": .string(destination.name)]
+        return feature
     }
 
     private func follow(top: CGFloat, bottom: CGFloat, layoutChanged: Bool = false) {
