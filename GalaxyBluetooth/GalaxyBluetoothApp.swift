@@ -1,4 +1,5 @@
 import SwiftUI
+import QuartzCore
 import Network
 import MapKit
 import CoreBluetooth
@@ -1227,31 +1228,91 @@ struct CompanionPressStyle: ButtonStyle {
     }
 }
 
-private struct GalaxyArrival: View {
+private struct GalaxyArrival: UIViewRepresentable {
     let reveal: () -> Void
     let finished: () -> Void
-    @State private var position: CGFloat = -1
 
-    var body: some View {
-        GeometryReader { bounds in
-            let size = bounds.size
-            Image("GalaxyDust").resizable()
-                .frame(width: size.width * 1.4, height: size.height)
-                .position(x: size.width * (0.5 + 1.2 * position), y: size.height / 2)
+    func makeUIView(context: Context) -> DustView { DustView() }
+
+    func updateUIView(_ view: DustView, context: Context) {
+        view.reveal = reveal
+        view.finished = finished
+    }
+
+    static func dismantleUIView(_ view: DustView, coordinator: ()) {
+        view.cancel()
+    }
+
+    final class DustView: UIView, CAAnimationDelegate {
+        var reveal: (() -> Void)?
+        var finished: (() -> Void)?
+        private static let duration: CFTimeInterval = 0.48
+        private static let texture = UIImage(named: "GalaxyDust")?.preparingForDisplay()?.cgImage
+        private let dust = CALayer()
+        private var started = false
+        private var revealed = false
+
+        override init(frame: CGRect) {
+            super.init(frame: frame)
+            isOpaque = false
+            isUserInteractionEnabled = false
+            clipsToBounds = true
+            dust.contents = Self.texture
+            layer.addSublayer(dust)
         }
-        .clipped()
-        .contentShape(Rectangle())
-        .onAppear {
-            withAnimation(.easeIn(duration: 0.24), completionCriteria: .logicallyComplete) {
-                position = 0
-            } completion: {
-                reveal()
-                withAnimation(.easeOut(duration: 0.24), completionCriteria: .logicallyComplete) {
-                    position = 1
-                } completion: {
-                    finished()
-                }
+
+        required init?(coder: NSCoder) { nil }
+
+        override func didMoveToWindow() {
+            super.didMoveToWindow()
+            if window != nil { setNeedsLayout() }
+        }
+
+        override func layoutSubviews() {
+            super.layoutSubviews()
+            guard let screen = window?.screen, !bounds.isEmpty else { return }
+            let travel = bounds.width * 1.2
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            dust.bounds = CGRect(origin: .zero, size: CGSize(width: bounds.width * 1.4, height: bounds.height))
+            dust.position = CGPoint(x: bounds.midX + travel, y: bounds.midY)
+            CATransaction.commit()
+            guard !started else { return }
+            started = true
+
+            let sweep = CABasicAnimation(keyPath: "position.x")
+            sweep.fromValue = bounds.midX - travel
+            sweep.toValue = bounds.midX + travel
+            sweep.duration = Self.duration
+            sweep.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            let maximum = Float(min(120, screen.maximumFramesPerSecond))
+            sweep.preferredFrameRateRange = CAFrameRateRange(minimum: min(60, maximum), maximum: maximum, preferred: maximum)
+            sweep.delegate = self
+            dust.add(sweep, forKey: "sweep")
+        }
+
+        func animationDidStart(_ anim: CAAnimation) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + Self.duration / 2) { [weak self] in
+                self?.revealPage()
             }
+        }
+
+        private func revealPage() {
+            guard !revealed else { return }
+            revealed = true
+            reveal?()
+        }
+
+        func animationDidStop(_ anim: CAAnimation, finished completed: Bool) {
+            guard completed else { return }
+            revealPage()
+            finished?()
+        }
+
+        func cancel() {
+            reveal = nil
+            finished = nil
+            dust.removeAllAnimations()
         }
     }
 }
