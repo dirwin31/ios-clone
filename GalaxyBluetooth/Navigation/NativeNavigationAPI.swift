@@ -66,12 +66,32 @@ enum NativeNavigationAPI {
               value.utf8.allSatisfy({ (48...57).contains($0) || (97...102).contains($0) }) else { return nil }
         return value
     }
+    // Destination commands can run before a GPS fix or a drawable route exists.
+    private struct CommandState: Decodable {
+        let revision: String
+        let enabled: Bool
+        let hasKey: Bool
+        let destination: NavigationDestination?
+
+        enum CodingKeys: String, CodingKey { case revision, enabled, hasKey, destination }
+
+        init(from decoder: Decoder) throws {
+            let fields = try decoder.container(keyedBy: CodingKeys.self)
+            revision = try fields.decode(String.self, forKey: .revision)
+            enabled = try fields.decode(Bool.self, forKey: .enabled)
+            hasKey = try fields.decode(Bool.self, forKey: .hasKey)
+            // Require the field; explicit null confirms a cleared destination.
+            destination = try fields.decode(NavigationDestination?.self, forKey: .destination)
+            guard !revision.isEmpty, revision.count <= 128 else { throw NavigationContractError.invalidResponse }
+        }
+    }
+
     @MainActor
     static func command(_ command: NavigationCommand, transport: any GalaxyRequestTransport,
-                        expectedRevision: String? = nil, routeVersion: String? = nil, stillCurrent: () -> Bool) async throws -> Data {
+                        expectedRevision: String? = nil, routeVersion: String? = nil, willSend: () -> Void = {}, stillCurrent: () -> Bool) async throws -> Data {
         let response = try await transport.request(path: try statusPath(version: routeVersion), method: "GET", headers: [:], body: Data())
         guard stillCurrent(), response.status == 200 else { throw BridgeError.message("Couldn’t verify comma’s navigation state.") }
-        let state = try decode(response.bodyData)
+        let state = try JSONDecoder().decode(CommandState.self, from: response.bodyData)
         if case .read = command {
             let destination = try state.destination.map { String(decoding: try JSONEncoder().encode($0), as: UTF8.self) } ?? ""
             return try JSONSerialization.data(withJSONObject: ["destination": destination, "nativeRevision": state.revision])
@@ -88,12 +108,13 @@ enum NativeNavigationAPI {
         case .read: break
         }
         guard stillCurrent() else { throw BridgeError.message("Comma connection changed.") }
+        willSend()
         let result = try await transport.request(path: "/api/navigation/action", method: "POST", headers: ["content-type": "application/json"],
                                                  body: JSONSerialization.data(withJSONObject: payload))
         guard stillCurrent(), result.status == 200 else {
             throw BridgeError.message("Comma did not confirm navigation (HTTP \(result.status)). Check its screen before retrying.")
         }
-        let confirmed = try decode(result.bodyData)
+        let confirmed = try JSONDecoder().decode(CommandState.self, from: result.bodyData)
         switch command {
         case .start(let destination): guard confirmed.destination?.matches(destination) == true else { throw NavigationContractError.invalidResponse }
         case .end: guard confirmed.destination == nil else { throw NavigationContractError.invalidResponse }
@@ -121,6 +142,8 @@ enum NativeNavigationAPI {
             status: guiding ? "active" : state.destination == nil ? "inactive" : "waiting", ageSeconds: guiding ? 3 : nil,
             destination: state.destination, position: position, routeVersion: String(repeating: state.routeKey, count: 4), polyline6: nil,
             instruction: instruction, error: ["disabled": "Enable navigation in Galaxy on comma.", "needsKey": "Configure the map key in Galaxy on comma.",
+                "waitingForLocation": "Destination received. Waiting for GPS on comma.",
+                "routing": "Destination received. Comma is calculating the route.",
                 "routeUnavailable": "Comma couldn’t calculate a route.", "stale": "Waiting for fresh navigation from comma…"][state.status])
         result.routePoints = state.route.map { $0.map { RoutePoint(latitude: $0.latitude, longitude: $0.longitude) } }
         result.positionValidForSeconds = live ? (location?.validForMs ?? 0) / 1000 : 0

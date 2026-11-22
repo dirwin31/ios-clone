@@ -476,9 +476,8 @@ final class NavigationModel: NSObject, ObservableObject, @preconcurrency CLLocat
                 guard connection.deviceIdentity == identity else { throw BridgeError.message("Comma connection changed. Try again.") }
                 let destinationPayload = try NavigationDestination(name: destination.name,
                     latitude: destination.coordinate.latitude, longitude: destination.coordinate.longitude)
-                sending = true
                 onEvent?("Destination send requested (details omitted)")
-                _ = try await connection.navigation(.start(destinationPayload))
+                _ = try await connection.navigation(.start(destinationPayload)) { sending = true }
                 guard generation == commandGeneration else { return }
                 onEvent?("Destination confirmed by comma")
                 commaDestination = destination.coordinate; commaIdentity = identity

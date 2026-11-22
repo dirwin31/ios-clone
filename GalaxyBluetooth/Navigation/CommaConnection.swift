@@ -48,20 +48,21 @@ final class CommaConnection: ObservableObject {
         return identity
     }
     // Navigation commands never use the general settings or params write endpoints.
-    func navigation(_ command: NavigationCommand) async throws -> Data {
+    func navigation(_ command: NavigationCommand, willSend: () -> Void = {}) async throws -> Data {
         guard connected, !setupInProgress else { throw BridgeError.message("Finish connection setup before sending navigation.") }
         if nativeNavigation {
             let before = session
             let data = try await NativeNavigationAPI.command(command, transport: transport,
                 expectedRevision: nativeReadRevision?.session == before ? nativeReadRevision?.revision : nil,
                 routeVersion: nativeRouteVersion?.session == before ? nativeRouteVersion?.version : nil,
-                stillCurrent: { self.session == before })
+                willSend: willSend, stillCurrent: { self.session == before })
             if case .read = command, let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any], let value = object["nativeRevision"] as? String {
                 nativeReadRevision = (before, value)
             } else { nativeReadRevision = nil }
             return data
         }
         let before = session
+        willSend()
         let response = try await transport.request(path: command.path, method: command.method,
             headers: ["content-type": "application/json"], body: try command.body())
         guard before == session else { throw BridgeError.message("Connection changed. Check comma before trying again.") }
