@@ -457,23 +457,18 @@ private struct DuoNavigationHome: View {
                             Spacer(minLength: 0)
                             Button { navigation.notice = "" } label: { Image(systemName: "xmark.circle.fill") }
                                 .accessibilityLabel("Dismiss navigation message")
-                        }.foregroundStyle(StarPilotTheme.accent)
-                            .padding(.horizontal, 20).padding(.bottom, 12)
+                        }.foregroundStyle(.primary)
+                            .padding(.horizontal, 14).padding(.vertical, 8)
                     }
                     if !navigation.navigating {
                         searchBar.padding(.horizontal, 20).padding(.bottom, 12)
                     }
                     if navigation.navigating {
-                        HStack(alignment: .bottom, spacing: 10) {
-                            VStack(alignment: .leading, spacing: 8) {
-                                tripPanel
-                                messages
-                            }
-                            .padding(12)
-                            .frame(maxWidth: .infinity)
-                            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 24))
-                            tripControls
+                        VStack(alignment: .leading, spacing: 6) {
+                            tripPanel
+                            messages
                         }
+                        .padding(12)
                     } else {
                         ScrollView {
                             VStack(alignment: .leading, spacing: 16) {
@@ -494,10 +489,7 @@ private struct DuoNavigationHome: View {
                     }
                 }
                 .background {
-                    if !navigation.navigating {
-                        RoundedRectangle(cornerRadius: 24)
-                            .fill(.regularMaterial)
-                    }
+                    RoundedRectangle(cornerRadius: 24).fill(.regularMaterial)
                 }
                 .shadow(color: .black.opacity(0.12), radius: 16, y: -4)
                 .frame(maxWidth: .infinity, alignment: .center)
@@ -570,6 +562,7 @@ private struct DuoNavigationHome: View {
     private var navigationOptions: some View {
         Menu {
             if navigation.navigating {
+                Button("Follow my location", systemImage: "scope") { navigation.followLocation() }
                 Button("Show full route", systemImage: "arrow.up.left.and.arrow.down.right") {
                     navigation.showOverview()
                 }
@@ -583,16 +576,6 @@ private struct DuoNavigationHome: View {
         } label: {
             Image(systemName: "ellipsis").font(.title3.weight(.semibold)).frame(width: 44, height: 44)
         }.accessibilityLabel("Navigation options")
-    }
-    private var tripControls: some View {
-        VStack(spacing: 4) {
-            Button { navigation.followLocation() } label: {
-                Image(systemName: "scope").font(.title3.weight(.semibold)).frame(width: 44, height: 44)
-            }.accessibilityLabel("Follow my location")
-            navigationOptions
-        }
-        .padding(4)
-        .modifier(NavigationControlsGlass())
     }
     private func mapButton(_ symbol: String, label: String, action: @escaping () -> Void) -> some View {
         Button(action: action) { Image(systemName: symbol).font(.title3.weight(.semibold)).frame(width: 44, height: 44) }
@@ -698,6 +681,7 @@ private struct DuoNavigationHome: View {
                 Button(navigation.endingRoute ? "Ending…" : "End") { Task { await navigation.end(connection: connection) } }
                     .font(.headline).foregroundStyle(.white).padding(.horizontal, 10).padding(.vertical, 12)
                     .background(.red, in: Capsule()).disabled(navigation.busy)
+                navigationOptions
             }
 
         }
@@ -825,16 +809,6 @@ private struct NavigationDestinationPanel: View {
                 Button("Start on iPhone") { Task { await navigation.start(connection: connection) } }
                     .buttonStyle(.borderedProminent)
             }
-        }
-    }
-}
-
-private struct NavigationControlsGlass: ViewModifier {
-    func body(content: Content) -> some View {
-        if #available(iOS 26.0, *) {
-            content.glassEffect(.regular, in: Capsule())
-        } else {
-            content.background(.regularMaterial, in: Capsule())
         }
     }
 }

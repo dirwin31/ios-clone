@@ -383,7 +383,7 @@ final class NavigationModel: NSObject, ObservableObject, @preconcurrency CLLocat
                 self.error = sending ? "Comma did not confirm the destination. Check its screen before retrying. \(error.localizedDescription)" : "No destination sent. \(error.localizedDescription)"
                 return
             }
-        } else { notice = "Phone navigation only." }
+        }
         usingComma = useComma
         positionDisplayGeneration += 1; commaPolyline = nil; cachedCommaPolyline = nil; commaPosition = nil; commaRouteVersion = nil; commaFeedReady = false
         commaFeedMessage = usingComma ? "Waiting for comma’s route…" : ""
