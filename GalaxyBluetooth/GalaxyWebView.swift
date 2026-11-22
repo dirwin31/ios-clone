@@ -272,6 +272,21 @@ private struct GalaxyPage: UIViewRepresentable {
 
             """)
 
+            /* Keep route actions in a scrollable area between the two navigation bars. */
+            @media (max-width: 767px) {
+              .gx-app:has(.gx-route-workspace) {
+                height: 100dvh; min-height: 0;
+              }
+              .gx-app:has(.gx-route-workspace) > .gx-appbar { flex: none; }
+              .gx-content:has(.gx-route-workspace) {
+                min-height: 0; overflow-y: auto; padding-bottom: var(--sp-3);
+              }
+              .gx-app:has(.gx-route-workspace) > .blur-nav {
+                position: relative; left: auto; bottom: auto !important; transform: none;
+                flex: none; margin: 0 auto env(safe-area-inset-bottom, 0px);
+              }
+            }
+
             html.native-galaxy-pill { --bottomnav-height: 0px; --bottomnav-clearance: env(safe-area-inset-bottom, 0px); }
             html.native-galaxy-pill .gx-app > .blur-nav { display: none !important; }
             html.native-galaxy-pill:not(.native-layout-editor) .gx-app > .gx-appbar:not(:has(.gx-searchbox.open)) { display: none !important; }

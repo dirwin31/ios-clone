@@ -11,7 +11,10 @@
       <Testables>
          <TestableReference skipped="NO" parallelizable="NO">
             <BuildableReference BuildableIdentifier="primary" BlueprintIdentifier="CAFE00000000000000000046" BuildableName="GalaxyBluetoothUITests.xctest" BlueprintName="GalaxyBluetoothUITests" ReferencedContainer="container:GalaxyBluetooth.xcodeproj"/>
-            <SelectedTests><Test Identifier="IntegrationUITests/testLandingAndGalaxyPillLayouts()"/></SelectedTests>
+            <SelectedTests>
+               <Test Identifier="IntegrationUITests/testLandingAndGalaxyPillLayouts()"/>
+               <Test Identifier="IntegrationUITests/testGalaxyPillMotion()"/>
+            </SelectedTests>
          </TestableReference>
       </Testables>
    </TestAction>

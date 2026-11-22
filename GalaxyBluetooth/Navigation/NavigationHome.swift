@@ -13,6 +13,7 @@ private struct StandardNavigationHome: View {
     var selectAppTab: (CompanionTab) -> Void
     @State private var searchPurpose: PlaceSearchPurpose?
     @State private var showLibrary = false
+    @State private var showMapboxDrive = false
     @State private var navigationPanelHeight: CGFloat = 0
     @State private var expanded = false
     @State private var appTabsExpanded = true
@@ -124,6 +125,9 @@ private struct StandardNavigationHome: View {
                     else { selectDestination(place) }
                 }
             }
+            .fullScreenCover(isPresented: $showMapboxDrive) {
+                MapboxDriveView(navigation: navigation, connection: connection)
+            }
             .sheet(isPresented: $showLibrary) {
                 SavedPlacesView(saved: saved) { place in
                     showLibrary = false
@@ -175,6 +179,7 @@ private struct StandardNavigationHome: View {
     }
     private var navigationOptions: some View {
         Menu {
+            Button("3D Drive", systemImage: "map") { showMapboxDrive = true }
             Button("Submit report", systemImage: "bubble.left.and.exclamationmark.bubble.right") {
                 submitReport()
             }
@@ -401,6 +406,7 @@ private struct DuoNavigationHome: View {
     var selectAppTab: (CompanionTab) -> Void
     @State private var searchPurpose: PlaceSearchPurpose?
     @State private var showLibrary = false
+    @State private var showMapboxDrive = false
     @State private var navigationPanelHeight: CGFloat = 0
     @State private var expanded = false
     @State private var appTabsExpanded = true
@@ -519,6 +525,9 @@ private struct DuoNavigationHome: View {
                     else { selectDestination(place) }
                 }
             }
+            .fullScreenCover(isPresented: $showMapboxDrive) {
+                MapboxDriveView(navigation: navigation, connection: connection)
+            }
             .sheet(isPresented: $showLibrary) {
                 SavedPlacesView(saved: saved) { place in
                     showLibrary = false
@@ -578,6 +587,7 @@ private struct DuoNavigationHome: View {
     }
     private var navigationOptions: some View {
         Menu {
+            Button("3D Drive", systemImage: "map") { showMapboxDrive = true }
             if navigation.navigating {
                 Button("Show full route", systemImage: "arrow.up.left.and.arrow.down.right") {
                     navigation.showOverview()

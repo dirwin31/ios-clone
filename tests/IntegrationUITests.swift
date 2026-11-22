@@ -23,22 +23,7 @@ final class IntegrationUITests: XCTestCase {
         XCTAssertTrue(app.frame.intersects(heading.frame))
         capture("Landing landscape")
         app.terminate()
-        app.launchArguments = ["--preview-galaxy"]
-        app.launchEnvironment["GALAXY_UI_FIXTURE"] = """
-        <!doctype html><meta name="viewport" content="width=device-width,initial-scale=1">
-        <style>body{font:18px system-ui;margin:0}header,nav{height:55px}main{padding:12px}h1{margin-top:0}</style>
-        <div id="galaxy-app"><div class="gx-app"><header class="gx-appbar">
-        <button class="gx-appbar__back">Back</button><button class="gx-appbar__home">Galaxy</button>
-        <button class="gx-theme-toggle">Theme</button><button class="gx-appbar__menu">Menu</button></header>
-        <main class="gx-content"><h1>Galaxy layout preview</h1><p id="selection">Home selected</p></main>
-        <nav class="blur-nav"><button aria-current="page"><i class="bi-house-fill"></i>Home</button>
-        <button><i class="bi-toggle-on"></i>Toggles</button><button><i class="bi-tools"></i>Tools</button>
-        <button><i class="bi-camera-reels"></i>Routes</button></nav></div></div>
-        <script>document.querySelector('nav').onclick=e=>{const b=e.target.closest('button');if(b){
-        document.querySelector('[aria-current]')?.removeAttribute('aria-current');b.setAttribute('aria-current','page');
-        document.getElementById('selection').textContent=b.textContent+' selected';}};</script>
-        """
-        app.launch()
+        launchGalaxyFixture(app)
         for orientation: UIDeviceOrientation in [.landscapeLeft, .portrait] {
             XCUIDevice.shared.orientation = orientation
             Thread.sleep(forTimeInterval: 0.8)
@@ -62,6 +47,49 @@ final class IntegrationUITests: XCTestCase {
         app.buttons["Settings"].firstMatch.tap()
         XCTAssertTrue(app.staticTexts["Your comma"].waitForExistence(timeout: 8))
     }
+    private func launchGalaxyFixture(_ app: XCUIApplication, motionEnabled: Bool = true) {
+        app.launchArguments = ["--preview-galaxy", "-galaxy.galacticalAnimations", motionEnabled ? "YES" : "NO"]
+        app.launchEnvironment["GALAXY_UI_FIXTURE"] = """
+        <!doctype html><meta name="viewport" content="width=device-width,initial-scale=1">
+        <style>body{font:18px system-ui;margin:0}header,nav{height:55px}main{padding:12px}h1{margin-top:0}</style>
+        <div id="galaxy-app"><div class="gx-app"><header class="gx-appbar">
+        <button class="gx-appbar__back">Back</button><button class="gx-appbar__home">Galaxy</button>
+        <button class="gx-theme-toggle">Theme</button><button class="gx-appbar__menu">Menu</button></header>
+        <main class="gx-content"><h1>Galaxy layout preview</h1><p id="selection">Home selected</p></main>
+        <nav class="blur-nav"><button aria-current="page"><i class="bi-house-fill"></i>Home</button>
+        <button><i class="bi-toggle-on"></i>Toggles</button><button><i class="bi-tools"></i>Tools</button>
+        <button><i class="bi-camera-reels"></i>Routes</button></nav></div></div>
+        <script>document.querySelector('nav').onclick=e=>{const b=e.target.closest('button');if(b){
+        document.querySelector('[aria-current]')?.removeAttribute('aria-current');b.setAttribute('aria-current','page');
+        document.getElementById('selection').textContent=b.textContent+' selected';}};</script>
+        """
+        app.launch()
+    }
+
+    func testGalaxyPillMotion() {
+        let app = XCUIApplication()
+        XCUIDevice.shared.orientation = .portrait
+        launchGalaxyFixture(app)
+        let tools = app.buttons["galaxy-pill-tools"]
+        let home = app.buttons["galaxy-pill-home"]
+        XCTAssertTrue(tools.waitForExistence(timeout: 30))
+        if #available(iOS 26.0, *) {
+            let options = XCTMeasureOptions()
+            options.iterationCount = 3
+            measure(metrics: [XCTHitchMetric(application: app)], options: options) {
+                tools.tap()
+                home.tap()
+            }
+        }
+        XCTAssertTrue(app.webViews.staticTexts["Home selected"].waitForExistence(timeout: 8))
+        app.terminate()
+        launchGalaxyFixture(app, motionEnabled: false)
+        XCTAssertTrue(tools.waitForExistence(timeout: 30))
+        tools.tap()
+        XCTAssertTrue(app.webViews.staticTexts["Tools selected"].waitForExistence(timeout: 8))
+        XCTAssertTrue(tools.isSelected)
+    }
+
     private func openSettingsSection(_ title: String, containing control: XCUIElement, in app: XCUIApplication) {
         guard !control.exists else { return }
         let header = app.buttons[title]

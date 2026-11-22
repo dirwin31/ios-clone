@@ -24,6 +24,8 @@ struct ConnectionSettingsView: View {
     @AppStorage("galaxy.galacticalAnimations") private var galacticalAnimations = true
     @AppStorage("galaxy.app.followGalaxyLanguage") private var followGalaxyLanguage = true
     @AppStorage("galaxy.location.hideIndicator") private var hideLocationIndicator = false
+    @Namespace private var modeSelection
+    @Environment(\.reduceGalacticalMotion) private var reduceMotion
     @State private var showOrder = false
     @State private var showTunnel = false
     @State private var advanced = false
@@ -244,11 +246,16 @@ struct ConnectionSettingsView: View {
                             .font(.system(size: 13, weight: .medium))
                             .frame(maxWidth: .infinity, minHeight: 44)
                             .foregroundStyle(model.mode == mode ? Color.white : Color.primary)
-                            .background(model.mode == mode ? accent : Color.clear, in: Capsule())
-                    }.buttonStyle(.plain)
+                            .background {
+                                if model.mode == mode {
+                                    Capsule().fill(accent).matchedGeometryEffect(id: "mode", in: modeSelection)
+                                }
+                            }
+                    }.buttonStyle(CompanionPressStyle())
                         .accessibilityAddTraits(model.mode == mode ? .isSelected : [])
                 }
-            }.padding(3).background(accent.opacity(0.07), in: Capsule())
+            }.animation(reduceMotion ? nil : CompanionMotion.selection, value: model.mode)
+                .padding(3).background(accent.opacity(0.07), in: Capsule())
                 .accessibilityLabel("Connection mode").disabled(pairing)
             if model.mode == .automatic {
                 HStack {
@@ -288,15 +295,16 @@ struct ConnectionSettingsView: View {
                 }
             } label: {
                 HStack(spacing: 7) {
-                    if pairing { PairingSignal() }
-                    else if (connecting && !needsRecoveryAction) || (connected && !model.opened) { ProgressView().controlSize(.small) }
+                    if pairing || (connecting && !needsRecoveryAction) || (connected && !model.opened) {
+                        ProgressView().controlSize(.small).accessibilityHidden(true)
+                    }
                     Text(LocalizedStringKey(pairing ? model.connectionMessage : primaryTitle))
                         .lineLimit(2).minimumScaleFactor(0.85).multilineTextAlignment(.center)
                 }.font(.headline).padding(.horizontal, 18)
                     .frame(maxWidth: .infinity, minHeight: 50)
                     .background(LinearGradient(colors: [Color(red: 0.73, green: 0.55, blue: 1), accent], startPoint: .leading, endPoint: .trailing), in: Capsule())
                     .foregroundStyle(Color(red: 0.12, green: 0.06, blue: 0.19))
-            }.buttonStyle(.plain).disabled(pairing || model.selectingDiscoveredComma || (connecting && !needsRecoveryAction) || (connected && !model.opened))
+            }.buttonStyle(CompanionPressStyle()).disabled(pairing || model.selectingDiscoveredComma || (connecting && !needsRecoveryAction) || (connected && !model.opened))
             if !pairing {
                 if model.pairingKey.isEmpty && !model.hasLANPairingSetup {
                     Text("Allow Local Network and Bluetooth when iPhone asks. We’ll find comma on your Wi-Fi or hotspot first.").font(.system(size: 11)).foregroundStyle(muted)
@@ -422,7 +430,7 @@ struct ConnectionSettingsView: View {
                         }
                         .padding(.bottom, device.address == "172.31.254.1" ? 7 : 0)
                         .contentShape(RoundedRectangle(cornerRadius: 16))
-                }.buttonStyle(.plain).disabled(model.selectingDiscoveredComma)
+                }.buttonStyle(CompanionPressStyle()).disabled(model.selectingDiscoveredComma)
                     .accessibilityLabel("Connect to \(device.name), \(device.address)")
             }
             HStack(spacing: 8) {
@@ -467,7 +475,7 @@ struct ConnectionSettingsView: View {
             }
             separator
             preferenceSection("Appearance & language", expanded: $galaxyExpanded) {
-                toggleRow("sparkles", title: "Galactical Animations", subtitle: "Animate the connection orbit, page transitions, and tab selection", isOn: $galacticalAnimations)
+                toggleRow("sparkles", title: "Galactical Animations", subtitle: "Animate button presses, tab selection, and connection changes", isOn: $galacticalAnimations)
                 separator
                 row("rectangle.on.rectangle", title: "Galaxy screens", subtitle: pairing ? "Waiting for pairing" : checking ? "Checking version…" : assets.status == "Galaxy matches comma." ? "Up to date · just checked" : assets.status.contains("screens have changed") ? "Update available · connect over Wi-Fi or Tunnel" : assets.readyRoot != nil ? "Saved from your comma" : "Not downloaded · needs Local Wi-Fi or Tunnel") {
                     Button {
@@ -592,61 +600,16 @@ struct ConnectionSettingsView: View {
     }
 }
 
-private struct PairingSignal: View {
-    @Environment(\.reduceGalacticalMotion) private var reduceMotion
-    @State private var pulse = false
-    var body: some View {
-        HStack(alignment: .bottom, spacing: 2) {
-            ForEach(0..<3) { index in
-                Capsule().frame(width: 3, height: CGFloat(5 + index * 4))
-                    .opacity(reduceMotion || pulse ? 1 : 0.25)
-                    .animation(reduceMotion ? nil : .easeInOut(duration: 0.7).repeatForever(autoreverses: true).delay(Double(index) * 0.15), value: pulse)
-            }
-        }.frame(height: 15).onAppear { pulse = true }.accessibilityHidden(true)
-    }
-}
-
 private struct ConnectionOrbit: View {
     let route: String
     let pairing: Bool
     @Environment(\.reduceGalacticalMotion) private var reduceMotion
-    @Environment(\.scenePhase) private var scenePhase
-    @State private var sweepStart = Date()
-    @State private var launchAngle = -380.0
-    @State private var landed = false
     private let purple = Color(red: 0.68, green: 0.48, blue: 0.96)
-    private var destinationAngle: Double {
-        targetAngle(for: route)
-    }
-    private func targetAngle(for route: String) -> Double {
-        if route == "Bluetooth" { return 110 }
-        if route == "Local Wi-Fi" { return 155 }
-        return route == "Tunnel" ? -25 : -90
-    }
     var body: some View {
         ZStack {
             Ellipse().stroke(purple.opacity(0.5), lineWidth: 1).frame(width: 232, height: 64).rotationEffect(.degrees(12)).position(x: 132, y: 48)
             Ellipse().stroke(purple.opacity(0.35), style: StrokeStyle(lineWidth: 1, dash: [2, 4]))
                 .frame(width: 258, height: 76).rotationEffect(.degrees(-9)).position(x: 132, y: 48)
-            if !reduceMotion {
-                TimelineView(.animation(minimumInterval: 1.0 / 30, paused: scenePhase != .active || landed)) { timeline in
-                    Canvas { context, _ in
-                        let elapsed = max(0, timeline.date.timeIntervalSince(sweepStart))
-                        let progress = min(elapsed / Self.flightDuration, 1)
-                        let head = cometAngle(elapsed: elapsed, target: destinationAngle, connected: !route.isEmpty)
-                        let intensity = 0.55 + 0.45 * sin(.pi * progress)
-                        for index in 0..<22 {
-                            let fraction = Double(index) / 21
-                            let tail = route.isEmpty ? 54 : 54 * (1 - progress)
-                            let point = orbitPoint(head - tail * (1 - fraction) * intensity)
-                            let radius = 0.6 + 1.6 * fraction
-                            let dot = CGRect(x: point.x - radius, y: point.y - radius, width: 2 * radius, height: 2 * radius)
-                            context.fill(Path(ellipseIn: dot), with: .color((index == 21 ? Color.white : purple).opacity(fraction * intensity)))
-                        }
-                    }
-                }
-                .allowsHitTesting(false)
-            }
             Image("StarPilotMark").resizable().scaledToFit()
                 .clipShape(RoundedRectangle(cornerRadius: 14))
                 .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color.white.opacity(0.6)))
@@ -655,26 +618,6 @@ private struct ConnectionOrbit: View {
             node("ConnectionBluetooth", angle: 110, active: route == "Bluetooth" || pairing)
             node("ConnectionNetwork", angle: -25, active: route == "Tunnel")
         }.frame(width: 264, height: 88).accessibilityHidden(true)
-            .task(id: route) {
-                landed = false
-                guard !route.isEmpty else { return }
-                do { try await Task.sleep(for: .seconds(Self.flightDuration + 0.08)) } catch { return }
-                landed = true
-            }
-            .onChange(of: route) { old, _ in
-                let oldTarget = targetAngle(for: old)
-                let now = Date()
-                launchAngle = cometAngle(elapsed: max(0, now.timeIntervalSince(sweepStart)), target: oldTarget, connected: !old.isEmpty)
-                sweepStart = now
-            }
-    }
-    static let flightDuration = 0.85
-    private func cometAngle(elapsed: Double, target: Double, connected: Bool) -> Double {
-        let progress = min(elapsed / Self.flightDuration, 1)
-        let gap = (target - launchAngle).truncatingRemainder(dividingBy: 360)
-        let travel = gap + (gap <= 0 ? 360 : 0)
-        return launchAngle + travel * (1 - pow(1 - progress, 3))
-            + (connected ? 0 : 20 * max(0, elapsed - Self.flightDuration))
     }
     private func orbitPoint(_ angle: Double) -> CGPoint {
         let theta = angle * .pi / 180, rotation = 12.0 * .pi / 180
@@ -687,13 +630,13 @@ private struct ConnectionOrbit: View {
             .frame(width: 30, height: 30).background(Color(red: 0.09, green: 0.075, blue: 0.15), in: Circle())
             .overlay(Circle().stroke(Color.white.opacity(active ? 0.75 : 0.4)))
             .overlay {
-                if active && landed && !route.isEmpty {
+                if active && !route.isEmpty {
                     Circle().stroke(purple.opacity(0.8), lineWidth: 1.5).padding(-3)
                 }
             }
             .shadow(color: purple.opacity(active ? 0.65 : 0), radius: 7)
             .scaleEffect(active ? 1.1 : 1)
-            .animation(reduceMotion ? nil : .spring(duration: 0.4, bounce: 0.15), value: active)
+            .animation(reduceMotion ? nil : CompanionMotion.selection, value: active)
             .position(orbitPoint(angle))
     }
 }

@@ -3,6 +3,20 @@ import Combine
 import Security
 import CryptoKit
 
+private func galaxyMediaHeaders(_ response: HTTPURLResponse) -> [String: String] {
+    var headers: [String: String] = [:]
+    for name in ["content-type", "content-range", "accept-ranges", "content-disposition",
+                 "x-replay-epoch", "x-replay-next-sequence"] {
+        headers[name] = response.value(forHTTPHeaderField: name)
+    }
+    return headers
+}
+
+private func galaxyReadTimeout(method: String, path: String) -> TimeInterval {
+    // Preparing the first recording range on comma can take up to 30 seconds.
+    method == "GET" && path.hasPrefix("/api/recordings/media/") ? 45 : 8
+}
+
 /// Each request has an isolated, bounded buffer.
 final class BoundedHTTP: NSObject, URLSessionDataDelegate, @unchecked Sendable {
     private let lock = NSLock()
@@ -306,7 +320,7 @@ final class LANTransport: ObservableObject, GalaxyRequestTransport {
             request.httpMethod = method
             request.httpBody = body.isEmpty ? nil : body
             request.timeoutInterval = LocalRequest.isPackageUpload(method: method, target: path) ? LocalRequest.packageUploadTimeout
-                : (method == "POST" && path == LANPairing.windowPath ? 35 : method == "POST" && path == "/api/navigation/action" ? 25 : 8)
+                : (method == "POST" && path == LANPairing.windowPath ? 35 : method == "POST" && path == "/api/navigation/action" ? 25 : galaxyReadTimeout(method: method, path: path))
             for (name, value) in headers where ["accept", "range", "content-type"].contains(name.lowercased()) {
                 request.setValue(value, forHTTPHeaderField: name)
             }
@@ -355,14 +369,8 @@ final class LANTransport: ObservableObject, GalaxyRequestTransport {
     }
 
     private func bridgeResponse(_ data: Data, _ response: HTTPURLResponse) -> BridgeResponse {
-        var responseHeaders: [String: String] = [:]
-        for (key, value) in response.allHeaderFields {
-            if let name = key as? String, ["content-type", "content-range", "accept-ranges", "content-disposition"].contains(name.lowercased()) {
-                responseHeaders[name.lowercased()] = String(describing: value)
-            }
-        }
         return BridgeResponse(id: UUID().uuidString, session: generation, counter: 0, status: response.statusCode,
-                              headers: responseHeaders, body: data.base64EncodedString())
+                              headers: galaxyMediaHeaders(response), body: data.base64EncodedString())
     }
 }
 
@@ -703,7 +711,7 @@ final class TunnelTransport: ObservableObject, GalaxyRequestTransport {
         request.httpMethod = method; request.httpBody = body.isEmpty ? nil : body
         // comma may follow short links and geocode before answering a shared place.
         request.timeoutInterval = LocalRequest.isPackageUpload(method: method, target: path) ? LocalRequest.packageUploadTimeout
-            : method == "POST" && path == "/api/navigation/action" ? 25 : 8
+            : method == "POST" && path == "/api/navigation/action" ? 25 : galaxyReadTimeout(method: method, path: path)
         request.setValue("galaxy_session=" + credential.cookie, forHTTPHeaderField: "Cookie")
         for (name, value) in headers where ["accept", "range", "content-type"].contains(name.lowercased()) { request.setValue(value, forHTTPHeaderField: name) }
         if !["GET", "HEAD"].contains(method) {
@@ -737,11 +745,8 @@ final class TunnelTransport: ObservableObject, GalaxyRequestTransport {
             invalidate("Unexpected Tunnel response (HTTP \(response.statusCode))")
             throw URLError(.badServerResponse)
         }
-        var filtered: [String: String] = [:]
-        for (key, value) in response.allHeaderFields {
-            if let key = key as? String, ["content-type", "content-range", "accept-ranges", "content-disposition"].contains(key.lowercased()) { filtered[key.lowercased()] = String(describing: value) }
-        }
-        return BridgeResponse(id: UUID().uuidString, session: generation, counter: 0, status: response.statusCode, headers: filtered, body: data.base64EncodedString())
+        return BridgeResponse(id: UUID().uuidString, session: generation, counter: 0, status: response.statusCode,
+                              headers: galaxyMediaHeaders(response), body: data.base64EncodedString())
     }
     func request(path: String, method: String, headers: [String: String], body: Data) async throws -> BridgeResponse {
         guard SecretGoodGalaxy.validTarget(path), ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"].contains(method),

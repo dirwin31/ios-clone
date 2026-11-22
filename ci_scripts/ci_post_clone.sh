@@ -59,6 +59,7 @@ swiftc -module-cache-path "$test_dir/module-cache" -swift-version 5 -parse-as-li
 
 if command -v node >/dev/null 2>&1; then
   node tests/ToggleSearchRegression.mjs
+  node tests/RouteFootageRegression.mjs
 else
   echo "Node unavailable: run tests/ToggleSearchRegression.mjs locally for JavaScript search checks."
 fi

@@ -76,6 +76,7 @@ D15C00000000000000000901 = {isa = PBXBuildFile; fileRef = D15C000000000000000009
 		9F51D8D745A80C4F3F7455CA /* NavigationContract.swift in Sources */ = {isa = PBXBuildFile; fileRef = F962EF42C081AC9DB676EE93; };
 		80049B7930CCB4368B92E86E /* NavigationHome.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1842FB43E7B0D2259DDFC3D3; };
 		6A11402700052D4172BD3940 /* NavigationMapView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA299A31EC81AEC0236FFF09; };
+		AB3100000000000000000001 /* MapboxDriveView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB3100000000000000000002; };
 		4994D0716059596B93F04DB7 /* NavigationModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = ECDD51524FB27A32FE6286D0; };
 		24EED77FB94A76A9CEAB95FA /* NavigationServices.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6E45C5C9C0E3BB85F24EC135; };
 		CE0869EFD87FE76E6A08F5C1 /* PlaceSearch.swift in Sources */ = {isa = PBXBuildFile; fileRef = 87016C010CD9EEEBEF2028D7; };
@@ -126,6 +127,7 @@ D15C00000000000000000902 = {isa = PBXFileReference; lastKnownFileType = sourceco
 		F962EF42C081AC9DB676EE93 /* NavigationContract.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Navigation/NavigationContract.swift; sourceTree = "<group>"; };
 		1842FB43E7B0D2259DDFC3D3 /* NavigationHome.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Navigation/NavigationHome.swift; sourceTree = "<group>"; };
 		FA299A31EC81AEC0236FFF09 /* NavigationMapView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Navigation/NavigationMapView.swift; sourceTree = "<group>"; };
+		AB3100000000000000000002 /* MapboxDriveView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Navigation/MapboxDriveView.swift; sourceTree = "<group>"; };
 		ECDD51524FB27A32FE6286D0 /* NavigationModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Navigation/NavigationModel.swift; sourceTree = "<group>"; };
 		6E45C5C9C0E3BB85F24EC135 /* NavigationServices.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Navigation/NavigationServices.swift; sourceTree = "<group>"; };
 		87016C010CD9EEEBEF2028D7 /* PlaceSearch.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Navigation/PlaceSearch.swift; sourceTree = "<group>"; };
@@ -135,11 +137,15 @@ D15C00000000000000000902 = {isa = PBXFileReference; lastKnownFileType = sourceco
 		D15C00000000000000000032 /* SentryPush.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SentryPush.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
+AB3100000000000000000003 = {isa = XCRemoteSwiftPackageReference; repositoryURL = "https://github.com/mapbox/mapbox-maps-ios.git"; requirement = {kind = exactVersion; version = 11.16.0; }; };
+AB3100000000000000000004 = {isa = XCSwiftPackageProductDependency; package = AB3100000000000000000003; productName = MapboxMaps; };
+AB3100000000000000000005 = {isa = PBXBuildFile; productRef = AB3100000000000000000004; };
 /* Begin PBXFrameworksBuildPhase section */
 		E2AA269EB967A8853A258BFA /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+                AB3100000000000000000005,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -171,6 +177,7 @@ D15C00000000000000000902 = {isa = PBXFileReference; lastKnownFileType = sourceco
                 6E45C5C9C0E3BB85F24EC135 /* NavigationServices.swift */,
                 ECDD51524FB27A32FE6286D0 /* NavigationModel.swift */,
                 FA299A31EC81AEC0236FFF09 /* NavigationMapView.swift */,
+                AB3100000000000000000002 /* MapboxDriveView.swift */,
                 1842FB43E7B0D2259DDFC3D3 /* NavigationHome.swift */,
                 F962EF42C081AC9DB676EE93 /* NavigationContract.swift */,
                 A57FF1BA7ED448BEB17F20FF /* NativeNavigationAPI.swift */,
@@ -235,6 +242,7 @@ D15C00000000000000000902 /* DiscordReports.swift */,
 				5A4E00000000000000000021,
 			);
 			name = GalaxyBluetooth;
+			packageProductDependencies = (AB3100000000000000000004);
 			productName = GalaxyBluetooth;
 			productReference = A172CEDCAE47474B615C54D5 /* GalaxyBluetooth.app */;
 			productType = "com.apple.product-type.application";
@@ -262,6 +270,7 @@ D15C00000000000000000902 /* DiscordReports.swift */,
 			mainGroup = C69913C7EE4DFDD011BE172F;
 			productRefGroup = 0A3E27B8CA818264D75C8D81 /* Products */;
 			projectDirPath = "";
+			packageReferences = (AB3100000000000000000003);
 			projectRoot = "";
 			targets = (
                 CAFE00000000000000000046,
@@ -305,6 +314,7 @@ D15C00000000000000000902 /* DiscordReports.swift */,
                 24EED77FB94A76A9CEAB95FA /* NavigationServices.swift in Sources */,
                 4994D0716059596B93F04DB7 /* NavigationModel.swift in Sources */,
                 6A11402700052D4172BD3940 /* NavigationMapView.swift in Sources */,
+                AB3100000000000000000001 /* MapboxDriveView.swift in Sources */,
                 80049B7930CCB4368B92E86E /* NavigationHome.swift in Sources */,
                 9F51D8D745A80C4F3F7455CA /* NavigationContract.swift in Sources */,
                 C1EBCEDE2699F4C92C082243 /* NativeNavigationAPI.swift in Sources */,

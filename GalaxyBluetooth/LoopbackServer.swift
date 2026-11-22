@@ -171,6 +171,92 @@ final class LoopbackServer: ObservableObject {
         return response
     }
 
+    static let nativeCameraPlaybackScript = #"""
+    // WebKit's video element cannot attach the app's local request header.
+    if (window.__galaxyNative && CameraViewer.template?.includes(':src="url"')) {
+      const players = new WeakMap()
+      const chunkSize = 2 * 1024 * 1024
+      const segmentLimit = 512 * 1024 * 1024
+
+      async function fetchRecording(source, signal) {
+        const url = new URL(source, document.baseURI)
+        if (url.origin !== location.origin || !url.pathname.startsWith('/api/recordings/media/')) {
+          throw new Error('Unexpected recording URL')
+        }
+        const parts = []
+        let offset = 0
+        let total
+        do {
+          const end = Math.min(offset + chunkSize, total ?? segmentLimit) - 1
+          const response = await fetch(url, {
+            headers: {Range: 'bytes=' + offset + '-' + end}, signal, redirect: 'error', cache: 'no-store',
+          })
+          if (response.headers.get('Content-Type')?.split(';')[0].trim().toLowerCase() !== 'video/mp4') {
+            throw new Error('Expected a recording')
+          }
+          const range = response.headers.get('Content-Range')
+          const part = await response.blob()
+          if (signal.aborted) throw new DOMException('Cancelled', 'AbortError')
+          if (response.status === 200 && offset === 0 && !range && part.size > 0 && part.size <= 8 * 1024 * 1024) {
+            return part
+          }
+          const match = /^bytes (\d+)-(\d+)\/(\d+)$/.exec(range ?? '')
+          if (response.status !== 206 || !match) throw new Error('Expected a recording range')
+          const [, start, last, size] = match.map(Number)
+          if (!Number.isSafeInteger(size) || size <= 0 || size > segmentLimit || (total !== undefined && total !== size) ||
+              start !== offset || last !== Math.min(end, size - 1) || part.size !== last - start + 1) {
+            throw new Error('Incomplete recording range')
+          }
+          total = size
+          parts.push(part)
+          offset = last + 1
+        } while (offset < total)
+        return new Blob(parts, {type: 'video/mp4'})
+      }
+
+      function release(video) {
+        const state = players.get(video)
+        if (!state) return
+        players.delete(video)
+        state.controller.abort()
+        state.notice.remove()
+        if (state.objectURL) {
+          video.removeAttribute('src')
+          video.load()
+          URL.revokeObjectURL(state.objectURL)
+        }
+      }
+
+      async function open(video, {value}) {
+        release(video)
+        if (!value) return
+        const notice = document.createElement('div')
+        notice.setAttribute('role', 'status')
+        notice.textContent = 'Loading camera footage…'
+        video.after(notice)
+        const state = {controller: new AbortController(), notice, objectURL: null}
+        players.set(video, state)
+        try {
+          const recording = await fetchRecording(value, state.controller.signal)
+          if (players.get(video) !== state) return
+          state.objectURL = URL.createObjectURL(recording)
+          video.src = state.objectURL
+        } catch {
+          if (players.get(video) === state) video.dispatchEvent(new Event('error'))
+        } finally {
+          notice.remove()
+        }
+      }
+
+      CameraViewer.directives = {...CameraViewer.directives, recordingSrc: {
+        mounted: open,
+        updated(video, binding) { if (binding.value !== binding.oldValue) open(video, binding) },
+        beforeUnmount: release,
+      }}
+      CameraViewer.template = CameraViewer.template.replace(':src="url"', 'v-recording-src="url"')
+    }
+    """#
+
     static let nativeSearchScript = #"""
     // Native Bluetooth search adapter v1. The verified upstream assets stay unchanged on disk.
     if (window.__galaxyNative) {
@@ -316,6 +402,10 @@ final class LoopbackServer: ObservableObject {
             data = Data(Self.nativeReadDeadlines(source, asset: assetPath).utf8)
         }
         let pathExtension = (assetPath as NSString).pathExtension
+        if assetPath == "js/camera-viewer.js", let source = String(data: data, encoding: .utf8),
+           source.contains("export const CameraViewer") {
+            data.append(Data(("\n" + Self.nativeCameraPlaybackScript).utf8))
+        }
         if assetPath == "js/toggle-search.js", let source = String(data: data, encoding: .utf8),
            source.contains("export class SettingsSearchIndex"), source.contains("export const ToggleSearch") {
             data.append(Data(("\n" + Self.nativeSearchScript).utf8))

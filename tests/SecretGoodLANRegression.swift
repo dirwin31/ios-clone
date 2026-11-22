@@ -21,7 +21,10 @@ import Foundation
             headers["Set-Cookie"] = "galaxy_session=token\(current); HttpOnly; SameSite=Strict; Path=/; Max-Age=1800"
         } else {
             precondition(request.value(forHTTPHeaderField: "Cookie")?.hasPrefix("galaxy_session=token") == true)
-            if path == "/data/runtime.json" {
+            if path == "/api/replay/media" {
+                headers = ["Content-Type": "video/mp4", "X-Replay-Epoch": "4", "X-Replay-Next-Sequence": "15", "Set-Cookie": "private"]
+                return (Data([0, 1]), HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: headers)!)
+            } else if path == "/data/runtime.json" {
                 json = ["schemaVersion": 1, "monitor": "local", "instance": corruptIdentity ? "fedcba9876543210" : "0123456789abcdef"]
             } else if path == "/api/galaxy/status" {
                 json = ["paired": tunnelURL != nil, "url": tunnelURL ?? ""]
@@ -49,6 +52,11 @@ import Foundation
         lan.bind(to: "0123456789abcdef")
         let verified = await lan.probe()
         precondition(verified && server.sessions == 1)
+        let replay = try await lan.request(path: "/api/replay/media?epoch=4&sequence=14", method: "GET", headers: [:], body: Data())
+        precondition(replay.headers == ["content-type": "video/mp4", "x-replay-epoch": "4", "x-replay-next-sequence": "15"])
+        precondition(replay.bodyData == Data([0, 1]))
+        _ = try await lan.request(path: "/api/recordings/media/segment/fcamera", method: "GET", headers: ["Range": "bytes=0-99"], body: Data())
+        precondition(server.calls.last?.timeoutInterval == 45 && server.calls.last?.value(forHTTPHeaderField: "Range") == "bytes=0-99")
         _ = try await lan.request(path: LANPairing.windowPath, method: "POST", headers: [:], body: LANPairing.windowBody)
         precondition(server.calls.last?.timeoutInterval == 35, "Pairing must cover comma’s 25-second daemon window plus preparation")
         server.calls.removeAll()

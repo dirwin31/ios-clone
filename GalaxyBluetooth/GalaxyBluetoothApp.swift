@@ -947,6 +947,8 @@ struct GalaxyRootView: View {
     @ObservedObject private var navigation: NavigationModel
     @State private var hasVisitedGalaxy = false
     @State private var appTabsExpanded = true
+    @Namespace private var galaxySelection
+    private var motionDisabled: Bool { reduceMotion || !galacticalAnimations || scenePhase != .active }
     @AppStorage("galaxy.galacticalAnimations") private var galacticalAnimations = true
     private var page: CompanionTab { model.tab == .galaxy && !model.opened ? .connections : model.tab }
     @Environment(\.colorScheme) private var systemColorScheme
@@ -985,7 +987,7 @@ struct GalaxyRootView: View {
         self.model = model; navigation = model.navigationServices.navigation; bluetooth = model.bluetooth; lan = model.lan; assets = model.assets; server = model.server; discovery = model.discovery; galaxyPage = model.galaxyPage
     }
     var body: some View {
-        chrome.environment(\.reduceGalacticalMotion, reduceMotion || !galacticalAnimations)
+        chrome.environment(\.reduceGalacticalMotion, motionDisabled)
     }
     @ViewBuilder private var chrome: some View {
         if #available(iOS 27.1, *), DuoLayout.isEnabled {
@@ -1038,12 +1040,6 @@ struct GalaxyRootView: View {
                     ConnectionSettingsView(model: model, returningFromGalaxy: hasVisitedGalaxy, select: select, submitReport: presentReport)
                 }
             }.frame(maxWidth: .infinity, maxHeight: .infinity)
-            .keyframeAnimator(initialValue: 1.0, trigger: page) { screen, opacity in
-                screen.opacity(galacticalAnimations && !reduceMotion && scenePhase == .active ? opacity : 1)
-            } keyframes: { _ in
-                MoveKeyframe(0.96)
-                CubicKeyframe(1.0, duration: 0.16)
-            }
         }
         .safeAreaInset(edge: .top, spacing: 0) {
             if !usesAdaptiveChrome && !editorFocused && model.tab != .navigation {
@@ -1051,10 +1047,12 @@ struct GalaxyRootView: View {
                     if page == .galaxy && !galaxyPage.barItems.isEmpty && !galaxyPage.stalled {
                         HStack(spacing: 0) {
                             ForEach(galaxyPage.barItems.filter { $0.id == "back" || $0.primary }.sorted { $0.id == "back" && $1.id != "back" }) { item in
-                                GalaxyPillButton(page: galaxyPage, item: item, showsText: true)
+                                GalaxyPillButton(page: galaxyPage, item: item, showsText: true, selection: galaxySelection)
                             }
                             GalaxyPillMenu(page: galaxyPage, model: model, select: select)
-                        }.padding(.horizontal, 3).modifier(FloatingGalaxyGlass())
+                        }
+                        .animation(motionDisabled ? nil : CompanionMotion.selection, value: galaxyPage.barItems.first(where: \.selected)?.id)
+                        .padding(.horizontal, 3).modifier(FloatingGalaxyGlass())
                     } else {
                         CompanionNavigationBar(tab: page, developerMode: model.developerMode,
                             navigation: model.navigationServices.navigation, expanded: $appTabsExpanded,
@@ -1170,44 +1168,31 @@ extension EnvironmentValues {
     }
 }
 
-private struct PlanetTabHighlight: View {
-    let tab: CompanionTab
+enum CompanionMotion {
+    static let selection = Animation.spring(duration: 0.29, bounce: 0.08)
+}
+
+struct CompanionPressStyle: ButtonStyle {
     @Environment(\.reduceGalacticalMotion) private var reduceMotion
-    @State private var risen = false
+    @Environment(\.isEnabled) private var enabled
 
-    private var atmosphere: Color {
-        switch tab {
-        case .navigation: .teal
-        case .connections, .logs, .diagnostics: .indigo
-        case .galaxy, .live: .purple
-        }
+    func makeBody(configuration: Configuration) -> some View {
+        let pressed = enabled && configuration.isPressed
+        configuration.label
+            .scaleEffect(pressed && !reduceMotion ? 0.955 : 1)
+            .opacity(pressed ? 0.82 : 1)
+            .animation(reduceMotion ? nil : (pressed ? .easeOut(duration: 0.08) : CompanionMotion.selection),
+                       value: pressed)
+            .contentShape(Rectangle())
     }
+}
 
+private struct TabSelectionCapsule: View {
     var body: some View {
-        GeometryReader { geometry in
-            let size = geometry.size
-            let diameter = max(size.width * 1.35, size.height * 2.2)
-            ZStack {
-                LinearGradient(colors: [atmosphere, Color(red: 0.14, green: 0.09, blue: 0.30)],
-                               startPoint: .topLeading, endPoint: .bottomTrailing)
-                Circle()
-                    .fill(RadialGradient(stops: [
-                        .init(color: .clear, location: 0.64),
-                        .init(color: atmosphere.opacity(0.55), location: 0.89),
-                        .init(color: .white.opacity(0.78), location: 0.96),
-                        .init(color: atmosphere.opacity(0), location: 1)
-                    ], center: .center, startRadius: 0, endRadius: diameter / 2))
-                    .frame(width: diameter, height: diameter)
-                    .position(x: size.width * (risen || reduceMotion ? 0.68 : 0.10),
-                              y: diameter / 2 + size.height * (risen || reduceMotion ? 0.28 : 0.75))
-                    .animation(reduceMotion ? nil : .easeOut(duration: 0.48), value: risen)
-            }
-            .frame(width: size.width, height: size.height)
-            .clipShape(Capsule())
-        }
-        .allowsHitTesting(false)
-        .accessibilityHidden(true)
-        .onAppear { risen = true }
+        Capsule().fill(Color(red: 0.39, green: 0.23, blue: 0.63))
+            .overlay(Capsule().strokeBorder(.white.opacity(0.19), lineWidth: 0.75))
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
     }
 }
 
@@ -1215,20 +1200,32 @@ private struct GalaxyPillButton: View {
     @ObservedObject var page: GalaxyPageDiagnostics
     let item: GalaxyBarItem
     let showsText: Bool
+    var selection: Namespace.ID? = nil
+    @Environment(\.reduceGalacticalMotion) private var reduceMotion
     @Environment(\.dynamicTypeSize) private var typeSize
 
     var body: some View {
         Button { page.activate(item) } label: {
             VStack(spacing: 2) {
                 Image(systemName: item.icon).font(.system(size: 16, weight: .semibold))
+                    .scaleEffect(item.selected && !reduceMotion ? 1.09 : 1)
+                    .animation(reduceMotion ? nil : CompanionMotion.selection, value: item.selected)
                 if item.primary && showsText && !typeSize.isAccessibilitySize {
                     Text(verbatim: item.label).font(.caption2.weight(.semibold)).lineLimit(1)
                 }
             }.frame(minWidth: 44, maxWidth: showsText ? .infinity : 44, minHeight: 44)
                 .foregroundStyle(item.selected ? Color.white : Color.primary)
-                .background(item.selected ? Color(red: 0.39, green: 0.23, blue: 0.63) : Color.clear, in: Capsule())
+                .background {
+                    if item.selected {
+                        if let selection {
+                            TabSelectionCapsule().matchedGeometryEffect(id: "galaxy-selection", in: selection)
+                        } else {
+                            TabSelectionCapsule()
+                        }
+                    }
+                }
                 .contentShape(Rectangle())
-        }.buttonStyle(.plain).disabled(item.disabled).accessibilityLabel(Text(verbatim: item.label))
+        }.buttonStyle(CompanionPressStyle()).disabled(item.disabled).accessibilityLabel(Text(verbatim: item.label))
             .accessibilityIdentifier("galaxy-pill-" + item.id)
             .accessibilityAddTraits(item.selected ? .isSelected : [])
     }
@@ -1285,19 +1282,19 @@ struct CompanionNavigationBar: View {
                                 .foregroundStyle((tab == item || (tab == .logs && item == .connections)) ? Color.white : Color.primary.opacity(0.7))
                                 .background {
                                     if tab == item || (tab == .logs && item == .connections) {
-                                        PlanetTabHighlight(tab: item)
+                                        TabSelectionCapsule()
                                             .matchedGeometryEffect(id: "activeTab", in: selection)
                                     }
                                 }
-                        }.buttonStyle(.plain).accessibilityIdentifier("main-tab-" + item.rawValue)
+                        }.buttonStyle(CompanionPressStyle()).accessibilityIdentifier("main-tab-" + item.rawValue)
                             .accessibilityAddTraits((tab == item || (tab == .logs && item == .connections)) ? .isSelected : [])
                     }
 
-                }.animation(reduceMotion ? nil : .spring(duration: 0.38, bounce: 0.12), value: tab)
+                }.animation(reduceMotion ? nil : CompanionMotion.selection, value: tab)
                     .padding(3)
                     .padding(.trailing, statusModel == nil ? 0 : 32)
                     .frame(width: geometry.size.width)
-                    .scaleEffect(x: expanded ? 1 : 0.18, y: expanded ? 1 : 0.65, anchor: .leading)
+                    .offset(x: expanded || reduceMotion ? 0 : -8)
                     .opacity(expanded ? 1 : 0)
                     .allowsHitTesting(expanded).accessibilityHidden(!expanded)
                 Button { setExpanded(true) } label: {
@@ -1333,7 +1330,7 @@ struct CompanionNavigationBar: View {
     }
     private var compactWidth: CGFloat { compactIconOnly ? 56 : 168 }
     private func setExpanded(_ value: Bool) {
-        withAnimation(reduceMotion ? nil : .spring(response: 0.42, dampingFraction: 0.82)) { expanded = value }
+        withAnimation(reduceMotion ? nil : CompanionMotion.selection) { expanded = value }
     }
 }
 
@@ -1736,14 +1733,14 @@ private struct AdaptiveCompanionLayout<Content: View>: View {
                                     .frame(width: 44, height: 44)
                                     .background {
                                         if selected {
-                                            PlanetTabHighlight(tab: item)
+                                            TabSelectionCapsule()
                                                 .padding(4)
                                                 .matchedGeometryEffect(id: "selectedTab", in: tabSelection)
                                         }
                                     }
                                     .contentShape(Rectangle())
                             }
-                            .buttonStyle(.plain)
+                            .buttonStyle(CompanionPressStyle())
                             .accessibilityLabel(Text(LocalizedStringKey(item.rawValue)))
                             .accessibilityIdentifier("main-tab-" + item.rawValue)
                             .accessibilityAddTraits(selected ? .isSelected : [])

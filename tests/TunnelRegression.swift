@@ -30,6 +30,10 @@ import Foundation
     var htmlEverywhere = false
     func load(_ request: URLRequest, _ limit: Int) async throws -> (Data, HTTPURLResponse) {
         requests.append(request)
+        if request.url!.path.hasSuffix("/api/replay/media") {
+            let headers = ["Content-Type": "video/mp4", "X-Replay-Epoch": "7", "X-Replay-Next-Sequence": "9", "Set-Cookie": "private"]
+            return (Data([1, 2]), HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: headers)!)
+        }
         if let errorBody, status >= 500 {
             return (errorBody, HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: ["Content-Type": "application/json", "CF-Ray": "0123456789abcdef-YYZ", "Retry-After": "30", "Set-Cookie": "secret-cookie"])!)
         }
@@ -66,6 +70,11 @@ import Foundation
         try tunnel.configure(TunnelCredential(url: url, cookie: "opaque-token", deviceID: server.identity))
         tunnel.expectedDeviceID = server.identity
         let verified = await tunnel.probe(); precondition(verified)
+        let replay = try await tunnel.request(path: "/api/replay/media?epoch=7&sequence=8", method: "GET", headers: [:], body: Data())
+        precondition(replay.headers == ["content-type": "video/mp4", "x-replay-epoch": "7", "x-replay-next-sequence": "9"])
+        precondition(replay.bodyData == Data([1, 2]))
+        _ = try await tunnel.request(path: "/api/recordings/media/segment/fcamera", method: "GET", headers: ["Range": "bytes=0-99"], body: Data())
+        precondition(server.requests.last?.timeoutInterval == 45 && server.requests.last?.value(forHTTPHeaderField: "Range") == "bytes=0-99")
         _ = try await tunnel.request(path: "/api/settings/confirm", method: "POST", headers: ["Authorization": "must-not-forward", "Cookie": "attacker"], body: Data("{}".utf8))
         let request = server.requests.last!
         precondition(request.url!.absoluteString == url + "/api/settings/confirm")
