@@ -358,7 +358,8 @@ D15C00000000000000000901 /* DiscordReports.swift in Sources */,
 		488864B3D19480A82F7F1786 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				"ARCHS[sdk=iphonesimulator*]" = "$(NATIVE_ARCH_ACTUAL)";
+				"ONLY_ACTIVE_ARCH[sdk=iphonesimulator*]" = YES;
+				"EXCLUDED_ARCHS[sdk=iphonesimulator*]" = x86_64;
 				CLANG_ENABLE_MODULES = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				SDKROOT = iphoneos;
