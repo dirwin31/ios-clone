@@ -85,6 +85,7 @@ final class BluetoothTransport: NSObject, ObservableObject, GalaxyRequestTranspo
     private var key: SymmetricKey?
     private var keyText = ""
     private var session = ""
+    var connectedDeviceID: UUID? { connected ? peripheral?.identifier : nil }
     var sessionIdentifier: String { session }
     private(set) var catalogSHA256: String?
     private var supportsReadStream = false

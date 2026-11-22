@@ -10,6 +10,11 @@ import CryptoKit
         let pending = ShareGroup.Pending(id: "share-one", text: "Place", date: Date(), identity: "comma-one")
         precondition(pending.belongs(to: "comma-one"))
         precondition(!pending.belongs(to: "comma-two") && !pending.belongs(to: nil))
+        let queuedPlace = ShareGroup.Place(name: "Library", latitude: 43.54, longitude: -80.25, bluetoothID: UUID())
+        var picked = pending
+        picked.place = queuedPlace
+        let restored = try! JSONDecoder().decode(ShareGroup.Pending.self, from: JSONEncoder().encode(picked))
+        precondition(restored == picked, "The chosen coordinates and paired device must survive app restart")
         let oldPending = ShareGroup.Pending(id: "old", text: "Place", date: Date(), identity: nil)
         precondition(!oldPending.belongs(to: "comma-one"), "Legacy unbound destinations must not be delivered")
         precondition(ShareClient.lanEndpoint("192.168.10.85")?.absoluteString == "http://192.168.10.85:8082")

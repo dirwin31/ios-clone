@@ -9,8 +9,15 @@ enum ShareGroup {
     static let maxAge: TimeInterval = 12 * 3600
 
     struct Tunnel: Codable, Equatable { let url: String; let cookie: String }
+    struct Place: Codable, Equatable {
+        let name: String
+        let latitude: Double
+        let longitude: Double
+        let bluetoothID: UUID?
+    }
     struct Pending: Codable, Equatable {
         let id: String; let text: String; let date: Date; let identity: String?
+        var place: Place? = nil
         func belongs(to device: String?) -> Bool {
             guard let identity, !identity.isEmpty else { return false }
             return identity == device
@@ -53,9 +60,9 @@ enum ShareGroup {
 
     /// One waiting share; a newer one replaces it.
     @discardableResult
-    static func queue(_ text: String, identity: String?, requestID: String, now: Date = Date()) -> Bool {
-        guard isCurrent(requestID), let identity, !identity.isEmpty, identity == settings.identity,
-              let data = try? JSONEncoder().encode(Pending(id: requestID, text: text, date: now, identity: identity)) else { return false }
+    static func queue(_ text: String, identity: String?, requestID: String, now: Date = Date(), place: Place? = nil) -> Bool {
+        guard isCurrent(requestID), let identity, !identity.isEmpty, identity == settings.identity || place?.bluetoothID.map({ "ble:" + $0.uuidString }) == identity,
+              let data = try? JSONEncoder().encode(Pending(id: requestID, text: text, date: now, identity: identity, place: place)) else { return false }
         defaults?.set(data, forKey: keys.pending)
         CFNotificationCenterPostNotification(CFNotificationCenterGetDarwinNotifyCenter(), CFNotificationName(pendingNotification as CFString), nil, nil, true)
         return true

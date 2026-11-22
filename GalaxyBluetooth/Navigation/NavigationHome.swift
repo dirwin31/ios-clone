@@ -185,6 +185,7 @@ private struct StandardNavigationHome: View {
                     } else {
                         PlacePanelScroll(level: $panelLevel) {
                             VStack(alignment: .leading, spacing: 16) {
+                                QueuedPlaceStatus()
                                 if navigation.destination != nil { destinationPanel }
                                 else { browsePanel }
                                 messages
@@ -619,6 +620,7 @@ private struct DuoNavigationHome: View {
                     } else {
                         PlacePanelScroll(level: $panelLevel) {
                             VStack(alignment: .leading, spacing: 16) {
+                                QueuedPlaceStatus()
                                 if navigation.destination != nil { destinationPanel }
                                 else { browsePanel(width: min(600, geometry.size.width - 24) - 40) }
                                 messages
@@ -872,8 +874,22 @@ private struct DuoNavigationHome: View {
     }
 }
 
+private struct QueuedPlaceStatus: View {
+    @ObservedObject private var inbox = ShareInbox.shared
+    var body: some View {
+        if let pending = inbox.waiting, let place = pending.place {
+            HStack {
+                Label("Queued for comma: \(place.name)", systemImage: "clock")
+                Spacer()
+                Button("Cancel") { inbox.cancelQueuedPlace(pending.id) }
+            }.font(.subheadline)
+        }
+    }
+}
+
 private struct NavigationDestinationPanel: View {
     @AppStorage(NavigationDistanceUnits.key) private var distanceUnits = NavigationDistanceUnits.system
+    @ObservedObject private var inbox = ShareInbox.shared
     let chooseStart: () -> Void
     @ObservedObject var navigation: NavigationModel
     @ObservedObject var connection: CommaConnection
@@ -930,15 +946,22 @@ private struct NavigationDestinationPanel: View {
             .disabled(navigation.busy)
 
             if navigation.sendToComma {
+                let queued = inbox.waiting?.place
+                let samePlace = queued != nil && queued?.latitude == navigation.destination?.coordinate.latitude
+                    && queued?.longitude == navigation.destination?.coordinate.longitude
                 Button {
-                    Task { await navigation.start(connection: connection) }
+                    if connection.connected {
+                        if let pending = inbox.waiting { inbox.cancelQueuedPlace(pending.id) }
+                        Task { await navigation.start(connection: connection) }
+                    } else if let place = navigation.destination { inbox.queuePlace(place) }
                 } label: {
-                    Text(navigation.busy ? "Sending destination…" : "Send to comma")
+                    Text(navigation.busy ? "Sending destination…" : samePlace ? "Queued for comma" :
+                            connection.connected ? "Send to comma" : queued == nil ? "Send when connected" : "Replace queued destination")
                         .font(.headline).frame(maxWidth: .infinity).padding(.vertical, 5)
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(navigation.busy || !connection.connected)
-                Text(connection.connected ? "Your comma will calculate the route." : "Connect to comma or choose iPhone for directions.")
+                .disabled(navigation.busy || samePlace)
+                Text(connection.connected ? "Your comma will calculate the route." : "Galaxy will send the destination when your comma connects.")
                     .font(.footnote).foregroundStyle(.secondary)
             } else if navigation.busy {
                 ProgressView("Getting directions…")
