@@ -4,6 +4,7 @@ import MapKit
 private struct NavigationMapLayer: View {
     @ObservedObject var navigation: NavigationModel
     let markerPerspective: DriveMarkerPerspective
+    let safeTop: CGFloat
     let headerBottom: CGFloat
     let tripFrame: CGRect
     @AppStorage(NavigationMapPreference.enabledKey) private var useMapbox = true
@@ -12,7 +13,8 @@ private struct NavigationMapLayer: View {
     var body: some View {
         Group {
             if useMapbox && token.hasPrefix("pk.") {
-                MapboxDriveMap(navigation: navigation, token: token, markerPerspective: markerPerspective, tripFrame: tripFrame, headerBottom: headerBottom)
+                MapboxDriveMap(navigation: navigation, token: token, markerPerspective: markerPerspective, tripFrame: tripFrame, headerBottom: headerBottom, phoneSafeTop: safeTop)
+                    .ignoresSafeArea(.container, edges: navigation.navigating ? .top : [])
                     .id(token)
             } else if navigation.navigating && navigation.usingComma {
                 CommaFollowingMap(navigation: navigation, bottomInset: tripFrame.height)
@@ -145,7 +147,8 @@ private struct StandardNavigationHome: View {
     }
     var body: some View {
         GeometryReader { geometry in
-            NavigationMapLayer(navigation: navigation, markerPerspective: markerPerspective, headerBottom: headerBottom, tripFrame: tripFrame)
+            NavigationMapLayer(navigation: navigation, markerPerspective: markerPerspective,
+                               safeTop: geometry.frame(in: .global).minY + geometry.safeAreaInsets.top, headerBottom: headerBottom, tripFrame: tripFrame)
             .overlay(alignment: .top) {
                 mapHeader.padding(12)
                     .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).maxY } action: { headerBottom = $0 }
@@ -554,7 +557,8 @@ private struct DuoNavigationHome: View {
     }
     var body: some View {
         GeometryReader { geometry in
-            NavigationMapLayer(navigation: navigation, markerPerspective: markerPerspective, headerBottom: headerBottom, tripFrame: tripFrame)
+            NavigationMapLayer(navigation: navigation, markerPerspective: markerPerspective,
+                               safeTop: geometry.frame(in: .global).minY + geometry.safeAreaInsets.top, headerBottom: headerBottom, tripFrame: tripFrame)
             .modifier(NavigationMapBackground())
             .overlay(alignment: .top) {
                 mapHeader.padding(12)

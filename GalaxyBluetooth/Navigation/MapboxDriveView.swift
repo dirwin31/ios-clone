@@ -130,6 +130,7 @@ struct MapboxDriveMap: View {
     @Environment(\.layoutDirection) private var layoutDirection
     let markerPerspective: DriveMarkerPerspective
     let carDisplay: CarDisplayMapOptions?
+    let phoneSafeTop: CGFloat
     let headerBottom: CGFloat
     let tripFrame: CGRect
     @Environment(\.colorScheme) private var colorScheme
@@ -147,10 +148,11 @@ struct MapboxDriveMap: View {
     private var following: Bool { carDisplay.map { !$0.overview } ?? navigation.followsUser }
     private var anchored: Bool { driving && following && cameraFix != nil }
 
-    init(navigation: NavigationModel, token: String, markerPerspective: DriveMarkerPerspective, tripFrame: CGRect, headerBottom: CGFloat = 0, carDisplay: CarDisplayMapOptions? = nil) {
+    init(navigation: NavigationModel, token: String, markerPerspective: DriveMarkerPerspective, tripFrame: CGRect, headerBottom: CGFloat = 0, phoneSafeTop: CGFloat = 0, carDisplay: CarDisplayMapOptions? = nil) {
         self.navigation = navigation
         self.markerPerspective = markerPerspective
         self.carDisplay = carDisplay
+        self.phoneSafeTop = phoneSafeTop
         self.headerBottom = headerBottom
         self.tripFrame = tripFrame
         if MapboxOptions.accessToken != token { MapboxOptions.accessToken = token }
@@ -240,7 +242,7 @@ struct MapboxDriveMap: View {
                                     showPlaceLabels: showPlaces,
                                     densityPointOfInterestLabels: labels == .automatic && driving ? 1 : 3))
                 .usesSafeAreaInsetsAsPadding(!anchored)
-                .ornamentOptions(mapOrnaments(headerInset: headerInset, panel: panel))
+                .ornamentOptions(mapOrnaments(headerInset: headerInset, scaleInset: 2 - max(0, phoneSafeTop - bounds.minY), panel: panel))
                 .onCameraChanged { event in
                     if driving && following { markerPerspective.update(Double(event.cameraState.pitch)) }
                 }
@@ -296,7 +298,7 @@ struct MapboxDriveMap: View {
         }
     }
 
-    private func mapOrnaments(headerInset: CGFloat, panel: CGFloat) -> OrnamentOptions {
+    private func mapOrnaments(headerInset: CGFloat, scaleInset: CGFloat, panel: CGFloat) -> OrnamentOptions {
         var options = OrnamentOptions()
         if let carDisplay {
             options.scaleBar.visibility = .hidden
@@ -309,7 +311,9 @@ struct MapboxDriveMap: View {
             options.logo.position = edge
             options.logo.margins = CGPoint(x: inset + 28, y: y)
         } else {
-            options.scaleBar.margins = CGPoint(x: 12, y: headerInset)
+            // Scale margins are relative to the native map's safe area. Use the
+            // strip above the maneuver card without changing its layout.
+            options.scaleBar.margins = CGPoint(x: 12, y: driving ? scaleInset : headerInset)
             options.compass.margins = CGPoint(x: 12, y: headerInset)
             options.logo.margins = CGPoint(x: 8, y: panel + 6)
             options.attributionButton.margins = CGPoint(x: 8, y: panel + 6)
