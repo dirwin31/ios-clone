@@ -370,6 +370,7 @@ D15C00000000000000000901 /* DiscordReports.swift in Sources */,
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				APS_ENVIRONMENT = development;
+				LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/Frameworks");
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = GalaxyBluetooth/CarPlay.entitlements;
 				CODE_SIGN_STYLE = Automatic;
@@ -391,6 +392,7 @@ D15C00000000000000000901 /* DiscordReports.swift in Sources */,
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				APS_ENVIRONMENT = production;
+				LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/Frameworks");
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = GalaxyBluetooth/CarPlay.entitlements;
 				CODE_SIGN_STYLE = Automatic;
