@@ -52,6 +52,11 @@ struct MapboxDriveMap: View {
     @State private var coordinates: [CLLocationCoordinate2D] = []
     @State private var lastCommaFix: CLLocation?
     @State private var commaSpeed = 0.0
+    @State private var cameraFix: CLLocation?
+    @State private var cameraBearing = 0.0
+    @State private var cameraZoom = 16.8
+
+    private var anchored: Bool { driving && navigation.followsUser && cameraFix != nil }
 
     init(navigation: NavigationModel, token: String, bottomInset: CGFloat) {
         self.navigation = navigation
@@ -98,22 +103,26 @@ struct MapboxDriveMap: View {
                                 .foregroundStyle(.white, StarPilotTheme.accent).accessibilityLabel("Starting point: \(start.name)")
                         }
                     }
-                    if let point = position(at: clock.date) {
+                    if !anchored, let point = position(at: clock.date) {
                         MapViewAnnotation(coordinate: point) {
-                            Image(systemName: driving && navigation.followsUser ? "location.north.fill" : "circle.fill")
-                                .font(.callout.bold()).foregroundStyle(.white)
-                                .frame(width: 32, height: 32).background(StarPilotTheme.accent, in: Circle())
-                                .overlay { Circle().stroke(.white, lineWidth: 2) }
-                                .accessibilityLabel(commaTrip ? "Comma location" : "Your location")
+                            positionMarker(following: false)
                         }
                     }
                 }
                 .mapStyle(.standard(lightPreset: colorScheme == .dark ? .night : .day))
+                .usesSafeAreaInsetsAsPadding(!anchored)
                 .ornamentOptions(.init(logo: .init(margins: .init(x: 8, y: panel + 6)),
                                        attributionButton: .init(margins: .init(x: 8, y: panel + 6))))
                 .onMapLoadingError {
                     if $0.type == .style {
                         navigation.notice = "Mapbox couldn’t load. Check your internet connection and public token in Navigation map settings."
+                    }
+                }
+                .overlay {
+                    if anchored, position(at: clock.date) != nil {
+                        positionMarker(following: true)
+                            .padding(.top, top).padding(.bottom, panel)
+                            .allowsHitTesting(false)
                     }
                 }
             }
@@ -125,34 +134,63 @@ struct MapboxDriveMap: View {
                 } ?? []
                 if !driving && navigation.destination != nil { preview(top: top, bottom: panel) }
                 else if navigation.followsUser && position(at: .now) != nil { follow(top: top, bottom: panel) }
-                else if navigation.followsUser || !coordinates.isEmpty { overview(top: top, bottom: panel) }
+                else if navigation.followsUser { overview(top: top, bottom: panel) }
             }
             .onChange(of: navigation.destination?.id) { _, _ in preview(top: top, bottom: panel) }
-            .onChange(of: driving) { _, _ in follow(top: top, bottom: panel) }
+            .onChange(of: driving) { _, _ in cameraFix = nil; follow(top: top, bottom: panel) }
             .onChange(of: navigation.overviewRevision) { _, _ in overview(top: top, bottom: panel) }
-            .onChange(of: navigation.followsUser) { _, _ in follow(top: top, bottom: panel) }
+            .onChange(of: navigation.followsUser) { _, _ in cameraFix = nil; follow(top: top, bottom: panel) }
             .onChange(of: commaTrip ? navigation.commaPositionSampleDate : navigation.location?.timestamp) { _, _ in
                 if commaTrip { updateCommaSpeed() }
                 if driving || navigation.destination == nil { follow(top: top, bottom: panel) }
             }
-            .onChange(of: navigation.positionDisplayGeneration) { _, _ in lastCommaFix = nil; commaSpeed = 0 }
-            .onChange(of: navigation.commaFeedReady) { _, _ in follow(top: top, bottom: panel) }
-            .onChange(of: panel) { _, _ in follow(top: top, bottom: panel) }
+            .onChange(of: navigation.positionDisplayGeneration) { _, _ in lastCommaFix = nil; commaSpeed = 0; cameraFix = nil }
+            .onChange(of: navigation.commaFeedReady) { _, ready in
+                if !ready && commaTrip { cameraFix = nil }
+                follow(top: top, bottom: panel)
+            }
+            .onChange(of: panel) { _, _ in follow(top: top, bottom: panel, layoutChanged: true) }
+            .onChange(of: top) { _, _ in follow(top: top, bottom: panel, layoutChanged: true) }
         }
     }
 
-    private func follow(top: CGFloat, bottom: CGFloat) {
-        guard navigation.followsUser, let point = position(at: .now) else { return }
+    private func positionMarker(following: Bool) -> some View {
+        Image(systemName: following ? "location.north.fill" : "circle.fill")
+            .font(.callout.bold()).foregroundStyle(.white)
+            .frame(width: 32, height: 32).background(StarPilotTheme.accent, in: Circle())
+            .overlay { Circle().stroke(.white, lineWidth: 2) }
+            .accessibilityLabel(commaTrip ? "Comma location" : "Your location")
+    }
+
+    private func follow(top: CGFloat, bottom: CGFloat, layoutChanged: Bool = false) {
+        guard navigation.followsUser, driving || navigation.destination == nil,
+              let point = position(at: .now), let stamp = commaTrip
+                ? navigation.commaPositionSampleDate : navigation.location?.timestamp else { return }
+        let previous = cameraFix
+        let dt = previous.map { stamp.timeIntervalSince($0.timestamp) } ?? 0
+        guard previous == nil || dt > 0 || layoutChanged else { return }
+        let fix = CLLocation(coordinate: point, altitude: 0, horizontalAccuracy: -1, verticalAccuracy: -1, timestamp: stamp)
+        let displacement = previous.map { fix.distance(from: $0) } ?? 0
+        let continuous = previous != nil && dt >= 0 && dt <= 4 && displacement < 250
         let speed = commaTrip ? commaSpeed : navigation.goodLocation?.speed ?? 0
         let distance = NavigationMapMotion.cameraDistance(speed: speed, distanceToTurn: navigation.distanceToTurn)
         // Restrict the guide camera to street-level detail while keeping lookahead on faster roads.
         let zoom = driving ? 17.6 - 0.8 * log2(distance / 1200) : 16.8
-        let camera = Viewport.camera(center: point, zoom: CGFloat(zoom),
-                                     bearing: commaTrip ? navigation.commaHeading : max(0, navigation.location?.course ?? 0),
+        let measuredBearing = commaTrip ? navigation.commaHeading : navigation.location?.course ?? -1
+        let validBearing = measuredBearing.isFinite && (0..<360).contains(measuredBearing)
+        let moving = speed >= 1.2 || displacement >= 6
+        if validBearing && (!continuous || moving) {
+            cameraBearing = NavigationMapMotion.heading(from: cameraBearing, to: measuredBearing,
+                fraction: continuous ? 1 - exp(-dt / 0.5) : 1)
+        }
+        cameraZoom += (zoom - cameraZoom) * (continuous ? 1 - exp(-dt / 2) : 1)
+        let center = continuous && !moving ? previous?.coordinate ?? point : point
+        cameraFix = CLLocation(coordinate: center, altitude: 0, horizontalAccuracy: -1, verticalAccuracy: -1, timestamp: stamp)
+        let camera = Viewport.camera(center: center, zoom: CGFloat(cameraZoom), bearing: cameraBearing,
                                      pitch: driving ? 60 : 48)
             .padding(.init(top: top, leading: 0, bottom: bottom, trailing: 0))
-        if reduceMotion { viewport = camera }
-        else { withViewportAnimation(.easeInOut(duration: 0.35)) { viewport = camera } }
+        if reduceMotion || !continuous || layoutChanged { viewport = camera }
+        else { withViewportAnimation(.linear(duration: min(2.5, max(0.1, dt)))) { viewport = camera } }
     }
 
     private func updateCommaSpeed() {
