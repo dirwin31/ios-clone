@@ -471,22 +471,43 @@ private struct TripSummaryRow<Options: View>: View {
     @ScaledMetric(relativeTo: .title2) private var valueSize: CGFloat = 23
 
     var body: some View {
-        let layout = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
-                                                  : AnyLayout(HStackLayout(alignment: .center, spacing: 4))
-        layout {
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                metric(Date().addingTimeInterval(navigation.remainingTime).formatted(date: .omitted, time: .shortened), "arrival")
-                metric(NavigationDuration.text(navigation.remainingTime), "remaining")
-                metric(units.text(navigation.remainingDistance), "distance")
-            }.frame(maxWidth: .infinity, alignment: .leading)
-            HStack(spacing: 0) {
-                Button(navigation.endingRoute ? "Ending…" : "End") { Task { await navigation.end(connection: connection) } }
-                    .font(.subheadline.weight(.semibold)).foregroundStyle(.white)
-                    .padding(.horizontal, 8).frame(minWidth: 44, minHeight: 44)
-                    .background(StarPilotTheme.guidance, in: Capsule()).disabled(navigation.busy)
-                options()
-            }.fixedSize(horizontal: true, vertical: false)
+        ViewThatFits(in: .horizontal) {
+            if !typeSize.isAccessibilitySize {
+                HStack(spacing: 20) {
+                    metrics
+                    Spacer(minLength: 0)
+                    actions
+                }
+            }
+            VStack(alignment: .leading, spacing: 12) {
+                ViewThatFits(in: .horizontal) {
+                    metrics
+                    VStack(alignment: .leading, spacing: 10) { metricItems }
+                }
+                actions.frame(maxWidth: .infinity, alignment: .trailing)
+            }
         }
+    }
+
+    private var metrics: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 18) { metricItems }
+            .fixedSize(horizontal: true, vertical: false)
+    }
+
+    @ViewBuilder private var metricItems: some View {
+        metric(Date().addingTimeInterval(navigation.remainingTime).formatted(date: .omitted, time: .shortened), "arrival")
+        metric(NavigationDuration.text(navigation.remainingTime), "remaining")
+        metric(units.text(navigation.remainingDistance), "distance")
+    }
+
+    private var actions: some View {
+        HStack(spacing: 4) {
+            Button(navigation.endingRoute ? "Ending…" : "End") { Task { await navigation.end(connection: connection) } }
+                .font(.subheadline.weight(.semibold)).foregroundStyle(.white)
+                .padding(.horizontal, 12).frame(minWidth: 44, minHeight: 44)
+                .background(StarPilotTheme.guidance, in: Capsule()).disabled(navigation.busy)
+            options()
+        }.fixedSize(horizontal: true, vertical: false)
     }
 
     private func metric(_ value: String, _ label: LocalizedStringKey) -> some View {
@@ -508,13 +529,13 @@ private struct TripBarGlass: ViewModifier {
         if !active {
             content
         } else if reduceTransparency {
-            content.background(Color(uiColor: .secondarySystemBackground), in: Capsule())
+            content.background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 30, style: .continuous))
         } else if #available(iOS 26.0, *) {
             content
-                .background(.ultraThinMaterial, in: Capsule())
-                .glassEffect(.clear, in: Capsule())
+                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 30, style: .continuous))
+                .glassEffect(.clear, in: RoundedRectangle(cornerRadius: 30, style: .continuous))
         } else {
-            content.background(.ultraThinMaterial, in: Capsule())
+            content.background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 30, style: .continuous))
         }
     }
 }
