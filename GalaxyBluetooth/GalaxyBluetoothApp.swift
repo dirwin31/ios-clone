@@ -983,7 +983,6 @@ struct GalaxyRootView: View {
     @State private var hasVisitedGalaxy = false
     @State private var appTabsExpanded = true
     @State private var showingAppTabsInGalaxy = false
-    @Namespace private var galaxySelection
     @AppStorage(AppPreference.arrival) private var arrivalEnabled = true
     @State private var arrivalID: UUID?
     @State private var departingPage: CompanionTab?
@@ -1087,12 +1086,14 @@ struct GalaxyRootView: View {
                     if showsGalaxyPill {
                         HStack(spacing: 0) {
                             AppTabsButton(action: showAppTabs)
+                                .buttonStyle(.plain)
+                                .font(.system(size: 16, weight: .semibold))
+                                .foregroundStyle(.secondary)
                             ForEach(galaxyPage.barItems.filter { $0.id == "back" || $0.primary }.sorted { $0.id == "back" && $1.id != "back" }) { item in
-                                GalaxyPillButton(page: galaxyPage, item: item, showsText: true, selection: galaxySelection)
+                                GalaxyPillButton(page: galaxyPage, item: item)
                             }
-                            GalaxyPillMenu(page: galaxyPage, model: model, select: select)
+                            GalaxyPillMenu(page: galaxyPage, model: model, compact: true, select: select)
                         }
-                        .animation(motionDisabled ? nil : CompanionMotion.selection, value: galaxyPage.barItems.first(where: \.selected)?.id)
                         .padding(.horizontal, 3).modifier(FloatingGalaxyGlass())
                     } else {
                         CompanionNavigationBar(tab: page, developerMode: model.developerMode,
@@ -1452,29 +1453,22 @@ private struct GalaxyPillButton: View {
     @ObservedObject var page: GalaxyPageDiagnostics
     let item: GalaxyBarItem
     @AppStorage(AppPreference.toolbarLabels) private var toolbarLabels = true
-    let showsText: Bool
-    var selection: Namespace.ID? = nil
-    @Environment(\.reduceGalacticalMotion) private var reduceMotion
     @Environment(\.dynamicTypeSize) private var typeSize
 
     var body: some View {
         Button { page.activate(item) } label: {
             VStack(spacing: 2) {
                 Image(systemName: item.icon).font(.system(size: 16, weight: .semibold))
-                    .scaleEffect(item.selected && !reduceMotion ? 1.09 : 1)
-                    .animation(reduceMotion ? nil : CompanionMotion.selection, value: item.selected)
-                if item.primary && toolbarLabels && showsText && !typeSize.isAccessibilitySize {
+                if item.primary && toolbarLabels && !typeSize.isAccessibilitySize {
                     Text(verbatim: item.label).font(.caption2.weight(.semibold)).lineLimit(1)
                 }
-            }.frame(minWidth: 44, maxWidth: showsText ? .infinity : 44, minHeight: 44)
-                .foregroundStyle(item.selected ? Color.white : Color.primary)
+            }.frame(minWidth: 44, maxWidth: item.primary ? .infinity : 44, minHeight: 44)
+                .foregroundStyle(item.selected ? Color.white : (item.primary ? Color.primary : Color.secondary))
                 .background {
                     if item.selected {
-                        if let selection {
-                            TabSelectionCapsule().matchedGeometryEffect(id: "galaxy-selection", in: selection)
-                        } else {
-                            TabSelectionCapsule()
-                        }
+                        TabSelectionCapsule()
+                            .padding(.horizontal, 2)
+                            .padding(.vertical, 4)
                     }
                 }
                 .contentShape(Rectangle())
@@ -1499,9 +1493,12 @@ private struct GalaxyPillMenu: UIViewRepresentable {
     let select: (CompanionTab) -> Void
     @Environment(\.locale) private var locale
 
-    init(page: GalaxyPageDiagnostics, model: AppModel, select: @escaping (CompanionTab) -> Void) {
+    let compact: Bool
+
+    init(page: GalaxyPageDiagnostics, model: AppModel, compact: Bool = false, select: @escaping (CompanionTab) -> Void) {
         self.page = page
         self.model = model
+        self.compact = compact
         self.select = select
     }
 
@@ -1514,7 +1511,10 @@ private struct GalaxyPillMenu: UIViewRepresentable {
 
     func makeUIView(context: Context) -> UIButton {
         let button = UIButton(type: .system)
-        button.setImage(UIImage(systemName: "ellipsis.circle", withConfiguration: UIImage.SymbolConfiguration(textStyle: .title3)), for: .normal)
+        let symbol = compact ? "ellipsis" : "ellipsis.circle"
+        let configuration = compact ? UIImage.SymbolConfiguration(pointSize: 16, weight: .semibold) : UIImage.SymbolConfiguration(textStyle: .title3)
+        button.setImage(UIImage(systemName: symbol, withConfiguration: configuration), for: .normal)
+        if compact { button.tintColor = .secondaryLabel }
         button.showsMenuAsPrimaryAction = true
         button.accessibilityIdentifier = "galaxy-pill-options"
         // Resolve the rows once per opening so live telemetry cannot rebuild a
