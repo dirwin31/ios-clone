@@ -50,6 +50,16 @@ __PRODUCTION_METHODS__
         precondition(lines.joined().filter { !$0.isWhitespace } == description.filter { !$0.isWhitespace })
         precondition(probe.descriptionLines(NSAttributedString(string: ""), width: 120).isEmpty)
         let settings = NavigationProbe.SettingsPageState("lane")
+        var offset = NavigationProbe.NumericAdjustment(["value": "0.0", "minimum": -0.3, "maximum": 0.3, "step": 0.1])!
+        for _ in 0..<5 { offset.move(1) }
+        precondition(offset.value == 0.3)
+        offset.move(-1)
+        precondition(offset.value == 0.2)
+        for _ in 0..<7 { offset.move(-1) }
+        precondition(offset.value == -0.3)
+        offset.move(1)
+        offset.move(-1)
+        precondition(offset.value == -0.3)
         func update(_ number: Int, _ toggle: String, _ token: String) -> Bool {
             settings.update(["view": token, "rows": [["value": number], ["value": toggle]]], session: "comma")
         }

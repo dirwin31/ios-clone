@@ -16,5 +16,5 @@ def declaration(prefix):
   return source[start:end].replace("private ", "", 1)
 
 stub = Path("tests/CarPlayNavigationRegression.swift").read_text()
-members = ("func pushTemplate(", "func popTemplate(", "final class SettingsPageState", "func displayedSettingValue(", "func descriptionLines(")
+members = ("func pushTemplate(", "func popTemplate(", "final class SettingsPageState", "struct NumericAdjustment", "func displayedSettingValue(", "func descriptionLines(")
 Path(sys.argv[1]).write_text(stub.replace("__PRODUCTION_METHODS__", "\n".join(map(declaration, members))))

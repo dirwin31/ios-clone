@@ -743,11 +743,42 @@ final class CarPlaySceneDelegate: NSObject, CPTemplateApplicationSceneDelegate, 
             return changed
         }
     }
+    private struct NumericAdjustment {
+        let minimum: Double
+        let maximum: Double
+        let step: Double
+        var value: Double
+
+        init?(_ row: [String: Any]) {
+            guard let value = Double(String(describing: row["value"] ?? "")), value.isFinite,
+                  let minimum = (row["minimum"] as? NSNumber)?.doubleValue, minimum.isFinite,
+                  let maximum = (row["maximum"] as? NSNumber)?.doubleValue, maximum.isFinite,
+                  minimum <= value, value <= maximum,
+                  let step = (row["step"] as? NSNumber)?.doubleValue, step.isFinite, step > 0,
+                  (row["choices"] as? [String] ?? []).isEmpty,
+                  row["confirm"] as? Bool != true,
+                  (row["repairValue"] as? String ?? "").isEmpty else { return nil }
+            self.minimum = minimum
+            self.maximum = maximum
+            self.step = step
+            self.value = value
+        }
+
+        mutating func move(_ direction: Int) {
+            let last = floor((maximum - minimum) / step + 1e-9)
+            let index = min(last, max(0, ((value - minimum) / step).rounded() + Double(direction)))
+            value = min(maximum, max(minimum, ((minimum + index * step) * 1e8).rounded() / 1e8))
+        }
+    }
+
     private final class SettingsEditorState {
         let parent: CPListTemplate
         let index: Int
         let label: String
         var page = 0
+        var adjustment: NumericAdjustment?
+        var lastTap = TimeInterval.zero
+        weak var valueItem: CPListItem?
         init(parent: CPListTemplate, index: Int, label: String) {
             self.parent = parent
             self.index = index
@@ -1044,8 +1075,12 @@ final class CarPlaySceneDelegate: NSObject, CPTemplateApplicationSceneDelegate, 
         } else if ((row["step"] as? NSNumber)?.doubleValue ?? 0) > 0 {
             controls = [(-1, "Decrease", "minus.circle"), (1, "Increase", "plus.circle")].map { direction, title, icon in
                 settingsItem(title, icon: icon, enabled: row["available"] as? Bool == true && row["action"] as? Bool == true) { [weak self, weak editor, weak parent] in
-                    guard let self, let editor, let parent, !self.busy else { return }
-                    self.applyStep(direction, editor: editor, parent: parent, index: index, row: row)
+                    guard let self, let editor, let parent, self.controller?.topTemplate === editor else { return }
+                    if let number = NumericAdjustment(row) {
+                        self.adjustNumber(direction, number: number, editor: editor, edit: state, row: row)
+                    } else if !self.busy {
+                        self.applyStep(direction, editor: editor, parent: parent, index: index, row: row)
+                    }
                 }
             }
         } else {
@@ -1055,7 +1090,16 @@ final class CarPlaySceneDelegate: NSObject, CPTemplateApplicationSceneDelegate, 
                 }
             ]
         }
+        var displayed = row
+        if let number = state.adjustment { displayed["value"] = NSNumber(value: number.value).stringValue }
+        let value = displayedSettingValue(displayed)
         var items = controls
+        state.valueItem = nil
+        if NumericAdjustment(row) != nil, let value {
+            let item = CPListItem(text: value, detailText: nil)
+            state.valueItem = item
+            items.insert(item, at: 0)
+        }
         if let reason = row["reason"] as? String, !reason.isEmpty {
             let details = settingsItem("Details", detail: localizedCarPlay(reason), icon: "info.circle") { [weak self] in
                 self?.showSettingDetails(row)
@@ -1067,11 +1111,92 @@ final class CarPlaySceneDelegate: NSObject, CPTemplateApplicationSceneDelegate, 
         let count = (items.count + capacity - 1) / capacity
         state.page = min(state.page, count - 1)
         let visible = Array(items.dropFirst(state.page * capacity).prefix(capacity))
-        editor.updateSections([CPListSection(items: visible, header: displayedSettingValue(row), sectionIndexTitle: nil)])
+        editor.updateSections([CPListSection(items: visible, header: state.valueItem == nil ? value : nil, sectionIndexTitle: nil)])
         paging(editor, index: state.page, count: count) { [weak self, weak editor] next in
             guard let editor else { return }
             state.page = next
             self?.drawEditor(editor, state: state, row: row)
+        }
+    }
+
+    private func adjustNumber(_ direction: Int, number: NumericAdjustment, editor: CPListTemplate,
+                              edit: SettingsEditorState, row: [String: Any]) {
+        guard let page = edit.parent.userInfo as? SettingsPageState, page.session == session,
+              let rows = page.snapshot["rows"] as? [[String: Any]], rows.indices.contains(edit.index),
+              rows[edit.index]["label"] as? String == edit.label,
+              rows[edit.index]["available"] as? Bool == true, rows[edit.index]["action"] as? Bool == true,
+              !busy || edit.adjustment != nil else { return }
+        var target = edit.adjustment ?? number
+        let previous = target.value
+        target.move(direction)
+        guard target.value != previous else { return }
+        let firstTap = edit.adjustment == nil
+        edit.adjustment = target
+        edit.lastTap = ProcessInfo.processInfo.systemUptime
+        var displayed = row
+        displayed["value"] = NSNumber(value: target.value).stringValue
+        edit.valueItem?.setText(displayedSettingValue(displayed))
+        guard firstTap else { return }
+        settingsRead?.cancel()
+        settingsRead = nil
+        busy = true
+        let originalSession = session
+        let attachedController = controller
+        work = Task {
+            do {
+                while let adjustment = edit.adjustment {
+                    try Task.checkCancellation()
+                    guard originalSession == session, controller === attachedController,
+                          let rows = page.snapshot["rows"] as? [[String: Any]], rows.indices.contains(edit.index),
+                          rows[edit.index]["label"] as? String == edit.label,
+                          rows[edit.index]["available"] as? Bool == true, rows[edit.index]["action"] as? Bool == true,
+                          let saved = NumericAdjustment(rows[edit.index]), saved.step == adjustment.step,
+                          saved.minimum == adjustment.minimum, saved.maximum == adjustment.maximum,
+                          let view = page.snapshot["view"] as? String else {
+                        throw BridgeError.message("Settings changed. Check the current value.")
+                    }
+                    if saved.value == adjustment.value {
+                        edit.adjustment = nil
+                        drawSettings(edit.parent)
+                        if controller?.topTemplate === editor { drawEditor(editor, state: edit, row: rows[edit.index]) }
+                        break
+                    }
+                    let delay = edit.lastTap + 0.4 - ProcessInfo.processInfo.systemUptime
+                    if delay > 0 {
+                        try await Task.sleep(nanoseconds: UInt64(ceil(delay * 1e9)))
+                        continue
+                    }
+                    let pending = try await request("/api/settings/preview", payload: ["view": view, "row": edit.index, "value": adjustment.value])
+                    guard let intent = pending["intent"] as? String else { throw BridgeError.message("Refresh settings and try again.") }
+                    if edit.adjustment?.value != adjustment.value { continue }
+                    let result = try await request("/api/settings/confirm", payload: ["intent": intent, "confirmed": true])
+                    guard result["saved"] as? Bool == true else {
+                        throw BridgeError.message("Save could not be confirmed. Check the current value.")
+                    }
+                    let snapshot = try await settingsSnapshot(page)
+                    _ = page.update(snapshot, session: originalSession)
+                    guard let fresh = snapshot["rows"] as? [[String: Any]], fresh.indices.contains(edit.index),
+                          fresh[edit.index]["label"] as? String == edit.label,
+                          NumericAdjustment(fresh[edit.index])?.value == adjustment.value else {
+                        throw BridgeError.message("Settings changed. Check the current value.")
+                    }
+                }
+                busy = false
+            } catch {
+                edit.adjustment = nil
+                guard !Task.isCancelled, controller === attachedController else { return }
+                busy = false
+                let message = error.localizedDescription
+                if controller?.topTemplate === editor {
+                    popTemplate(animated: true) { _, _ in
+                        self.loadSettings(edit.parent)
+                        self.notice(message)
+                    }
+                } else {
+                    loadSettings(edit.parent)
+                    notice(message)
+                }
+            }
         }
     }
 
