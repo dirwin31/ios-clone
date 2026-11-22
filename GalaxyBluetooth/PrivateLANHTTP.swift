@@ -1,5 +1,6 @@
 import Foundation
 import Network
+import Darwin
 
 /// A local-only HTTP client for the one configured comma endpoint.
 @MainActor
@@ -35,7 +36,46 @@ final class PrivateLANHTTP {
         // eligible rather than requiring Wi-Fi specifically.
         let parameters = NWParameters.tcp
         parameters.prohibitedInterfaceTypes = [.cellular]
+        if let source = Self.directLANSource(for: host) {
+            parameters.requiredLocalEndpoint = .hostPort(host: NWEndpoint.Host(source), port: .any)
+        }
         connection = NWConnection(host: NWEndpoint.Host(host), port: 8082, using: parameters)
+    }
+
+    // A hotspot host can have cellular as its default path and a tunnel that
+    // claims the comma's address. Bind the socket to the directly attached LAN.
+    private static func directLANSource(for host: String) -> String? {
+        var peer = in_addr()
+        guard inet_pton(AF_INET, host, &peer) == 1 else { return nil }
+        var interfaces: UnsafeMutablePointer<ifaddrs>?
+        guard getifaddrs(&interfaces) == 0 else { return nil }
+        defer { freeifaddrs(interfaces) }
+        var current = interfaces
+        var longestPrefix = 0
+        var bestSource: String?
+        while let entry = current?.pointee {
+            current = entry.ifa_next
+            let flags = entry.ifa_flags
+            guard flags & UInt32(IFF_UP | IFF_BROADCAST) == UInt32(IFF_UP | IFF_BROADCAST),
+                  flags & UInt32(IFF_LOOPBACK | IFF_POINTOPOINT) == 0,
+                  let address = entry.ifa_addr, address.pointee.sa_family == sa_family_t(AF_INET),
+                  let netmask = entry.ifa_netmask else { continue }
+            var local = UnsafeRawPointer(address).assumingMemoryBound(to: sockaddr_in.self).pointee.sin_addr
+            let mask = UnsafeRawPointer(netmask).assumingMemoryBound(to: sockaddr_in.self).pointee.sin_addr.s_addr
+            let prefix = mask.nonzeroBitCount
+            guard prefix > 0, prefix >= longestPrefix, peer.s_addr != local.s_addr,
+                  (peer.s_addr & mask) == (local.s_addr & mask) else { continue }
+            var buffer = [CChar](repeating: 0, count: Int(INET_ADDRSTRLEN))
+            guard inet_ntop(AF_INET, &local, &buffer, socklen_t(buffer.count)) != nil else { continue }
+            let source = String(cString: buffer)
+            if prefix > longestPrefix {
+                longestPrefix = prefix
+                bestSource = source
+            } else if source != bestSource {
+                bestSource = nil
+            }
+        }
+        return bestSource
     }
     static func load(_ request: URLRequest, limit: Int) async throws -> (Data, HTTPURLResponse) {
         guard let url = request.url, url.scheme == "http", url.port == 8082, let host = url.host,

@@ -15,7 +15,7 @@ final class LANDiscovery: NSObject, ObservableObject, @preconcurrency NetService
     @Published private(set) var status = "Find comma on the same Wi-Fi or hotspot, without Bluetooth."
     var onEvent: ((String) -> Void)?
     var onDevicesChanged: (() -> Void)?
-    private var attempt = 0
+    private(set) var attempt = 0
     private var startedAt: Date?
     private var elapsed: TimeInterval = 0
     private var found = 0, resolved = 0, resolutionFailures = 0, rejected = 0

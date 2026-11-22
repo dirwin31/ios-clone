@@ -320,6 +320,7 @@ final class AppModel: ObservableObject {
     private var addressCheckSession = ""
     private var localAddressNetwork = ""
     private var initialDiscoveryStarted = false
+    private var firstSetupAttempt: (search: Int, address: String, time: TimeInterval)?
     var connectionControllerDiagnostics: String {
         "Connection controller: requested=\(wantsConnection); phone active=\(phoneActive); CarPlay active=\(carPlayActive); monitor running=\(monitorTask != nil); setup busy=\(connectionSetupBusy); selecting device=\(selectingDiscoveredComma)\n"
         + "Connection tasks: first setup=\(firstConnection != nil); automatic LAN=\(automaticLAN != nil); LAN probe=\(lanProbeTask != nil); Tunnel probe=\(tunnelProbeTask != nil); pairing=\(pairingTask != nil)\n"
@@ -681,6 +682,7 @@ final class AppModel: ObservableObject {
         guard !selectingDiscoveredComma, mode != .bluetooth else { return false }
         if userSelected { pairingResetNeeded = false }
         selectingDiscoveredComma = true
+        firstSetupAttempt = (discovery.attempt, device.address, ProcessInfo.processInfo.systemUptime)
         automaticLAN?.cancel()
         lanProbeTask?.cancel()
         discovery.stop()
@@ -807,6 +809,14 @@ final class AppModel: ObservableObject {
             }
             guard firstConnection == nil, discovery.devices.count == 1 else { return }
             let candidate = discovery.devices[0]
+            if let previous = firstSetupAttempt, previous.search == discovery.attempt,
+               previous.address == candidate.address {
+                // Give a temporarily unreachable peer time to recover and resolve
+                // a fresh address before automatically checking it again.
+                if ProcessInfo.processInfo.systemUptime - previous.time >= 60 { discovery.start() }
+                return
+            }
+            let search = discovery.attempt
             firstConnection = Task { @MainActor in
                 defer { self.firstConnection = nil }
                 // Allow other advertisements to arrive before choosing an unpaired device.
@@ -814,7 +824,9 @@ final class AppModel: ObservableObject {
                 guard self.phoneActive, self.wantsConnection, self.mode != .bluetooth,
                       !self.connectionSetupBusy, self.lan.expectedDeviceID == nil,
                       self.pairingKey.isEmpty, self.discovery.devices.count == 1,
-                      self.discovery.devices[0].id == candidate.id else { return }
+                      !self.selectingDiscoveredComma, self.discovery.attempt == search,
+                      self.discovery.devices[0].id == candidate.id,
+                      self.discovery.devices[0].address == candidate.address else { return }
                 self.connectionLog.record("First setup: verifying the only discovered comma")
                 self.openAfterFirstConnection = true
                 if !(await self.selectDiscoveredComma(candidate, userSelected: false)) { self.openAfterFirstConnection = false }
