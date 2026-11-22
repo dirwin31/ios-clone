@@ -247,21 +247,19 @@ private struct GalaxyPage: UIViewRepresentable {
           editorCSS.textContent = `
             \(DuoLayout.isEnabled ? """
             /* Blend only the decorative backdrop; never fade the Galaxy controls. */
-            :root { --native-galaxy-edge: rgb(3.5% 3.5% 7.8%); }
-            :root[data-theme="light"] { --native-galaxy-edge: rgb(94% 91% 99%); }
             html, body { background: transparent !important; }
             /* Keep controls above the system home indicator when the page extends to the bottom edge. */
             .blur-nav { bottom: env(safe-area-inset-bottom, 0px) !important; }
             #galaxy-bg {
-              mask-image: linear-gradient(to bottom, black, black calc(100% - 48px), transparent),
+              mask-image: linear-gradient(to bottom, transparent, black 64px, black calc(100% - 48px), transparent),
                           linear-gradient(to right, black calc(100% - 96px), transparent);
               mask-composite: intersect;
             }
 
             """ : """
             /* Blend only the decorative backdrop; never fade the Galaxy controls. */
-            :root { --native-galaxy-edge: rgb(3.5% 3.5% 7.8%); }
-            :root[data-theme="light"] { --native-galaxy-edge: rgb(94% 91% 99%); }
+            :root { --native-galaxy-edge: rgb(2.6% 2.2% 5.8%); }
+            :root[data-theme="light"] { --native-galaxy-edge: rgb(89.5% 85.5% 94.5%); }
             html, body { background: var(--native-galaxy-edge) !important; }
             /* Keep controls above the system home indicator when the page extends to the bottom edge. */
             .blur-nav { bottom: env(safe-area-inset-bottom, 0px) !important; }
@@ -551,7 +549,7 @@ private struct GalaxyPage: UIViewRepresentable {
         webView.navigationDelegate = context.coordinator
         webView.uiDelegate = context.coordinator
         webView.isOpaque = false
-        webView.backgroundColor = DuoLayout.isEnabled ? .clear : UIColor(red: 0.035, green: 0.035, blue: 0.078, alpha: 1)
+        webView.backgroundColor = DuoLayout.isEnabled ? .clear : StarPilotTheme.toolbarColor(dark: true)
         if DuoLayout.isEnabled { webView.scrollView.backgroundColor = .clear }
         webView.scrollView.contentInsetAdjustmentBehavior = .never
         webView.load(URLRequest(url: url))
@@ -648,7 +646,7 @@ private struct GalaxyPage: UIViewRepresentable {
             case "theme":
                 if message.frameInfo.isMainFrame, let dark = body["dark"] as? Bool {
                     diagnostics.darkAppearance = dark
-                    let background = DuoLayout.isEnabled ? UIColor.clear : (dark ? UIColor(red: 0.035, green: 0.035, blue: 0.078, alpha: 1) : UIColor(red: 0.94, green: 0.91, blue: 0.99, alpha: 1))
+                    let background = DuoLayout.isEnabled ? UIColor.clear : StarPilotTheme.toolbarColor(dark: dark)
                     message.webView?.backgroundColor = background
                     message.webView?.scrollView.backgroundColor = background
                 }

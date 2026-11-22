@@ -953,27 +953,16 @@ struct GalaxyRootView: View {
     private var page: CompanionTab { model.tab == .galaxy && !model.opened ? .connections : model.tab }
     @Environment(\.colorScheme) private var systemColorScheme
     private var chromeBackground: LinearGradient {
-        if !DuoLayout.isEnabled {
         let dark = (galaxyColorScheme ?? systemColorScheme) == .dark
-        if model.tab == .galaxy {
-            let edge = dark ? Color(red: 0.035, green: 0.035, blue: 0.078) : Color(red: 0.94, green: 0.91, blue: 0.99)
-            return LinearGradient(colors: [edge, edge], startPoint: .top, endPoint: .bottom)
+        let edge = Color(uiColor: StarPilotTheme.toolbarColor(dark: dark))
+        if page == .galaxy {
+            let farEdge = DuoLayout.isEnabled
+                ? (dark ? Color(red: 0.085, green: 0.09, blue: 0.14) : Color(red: 0.88, green: 0.91, blue: 0.96))
+                : edge
+            return LinearGradient(colors: [edge, farEdge], startPoint: .top, endPoint: .bottom)
         }
-        return LinearGradient(colors: dark
-            ? [Color(red: 0.035, green: 0.035, blue: 0.078), Color(red: 0.13, green: 0.07, blue: 0.22)]
-            : [Color(red: 0.94, green: 0.91, blue: 0.99), Color(red: 0.87, green: 0.81, blue: 0.96)],
-            startPoint: .topLeading, endPoint: .bottomTrailing)
-        }
-        let dark = (galaxyColorScheme ?? systemColorScheme) == .dark
-        if model.tab == .galaxy {
-            let edge = dark ? Color(red: 0.10, green: 0.09, blue: 0.15) : Color(red: 0.94, green: 0.91, blue: 0.99)
-            let lowerEdge = dark ? Color(red: 0.12, green: 0.14, blue: 0.20) : Color(red: 0.88, green: 0.94, blue: 0.98)
-            return LinearGradient(colors: [edge, lowerEdge], startPoint: .top, endPoint: .bottom)
-        }
-        return LinearGradient(colors: dark
-            ? [Color(red: 0.10, green: 0.09, blue: 0.15), Color(red: 0.17, green: 0.12, blue: 0.24)]
-            : [Color(red: 0.94, green: 0.91, blue: 0.99), Color(red: 0.87, green: 0.81, blue: 0.96)],
-            startPoint: .topLeading, endPoint: .bottomTrailing)
+        let farEdge = dark ? Color(red: 0.13, green: 0.07, blue: 0.22) : Color(red: 0.87, green: 0.81, blue: 0.96)
+        return LinearGradient(colors: [edge, farEdge], startPoint: .topLeading, endPoint: .bottomTrailing)
     }
     private var galaxyColorScheme: ColorScheme? {
         guard model.tab == .galaxy, let dark = galaxyPage.darkAppearance else { return nil }
@@ -1015,7 +1004,7 @@ struct GalaxyRootView: View {
                         .overlay(alignment: .top) {
                             if !DuoLayout.isEnabled && !editorFocused && galaxyPage.barItems.isEmpty {
                                 let dark = (galaxyColorScheme ?? systemColorScheme) == .dark
-                                let edge = dark ? Color(red: 0.035, green: 0.035, blue: 0.078) : Color(red: 0.94, green: 0.91, blue: 0.99)
+                                let edge = Color(uiColor: StarPilotTheme.toolbarColor(dark: dark))
                                 LinearGradient(colors: [edge, edge.opacity(0)], startPoint: .top, endPoint: .bottom)
                                     .frame(height: 16).allowsHitTesting(false).accessibilityHidden(true)
                             }
@@ -1063,8 +1052,7 @@ struct GalaxyRootView: View {
         }
         .background {
             if DuoLayout.isEnabled && model.tab == .navigation { Color.clear }
-            else if model.navigationEnabled { chromeBackground.ignoresSafeArea() }
-            else { Color(uiColor: .systemBackground).ignoresSafeArea() }
+            else { chromeBackground.ignoresSafeArea() }
         }
         .preferredColorScheme(galaxyColorScheme)
         .ignoresSafeArea(.container, edges: editorFocused ? .all : [])

@@ -90,8 +90,11 @@ struct ConnectionSettingsView: View {
         ScrollView {
             settingsPage(wide: wide)
         }.scrollBounceBehavior(.basedOnSize).background {
-            if model.navigationEnabled { LinearGradient(colors: [background, panel.opacity(0.8)], startPoint: .topLeading, endPoint: .bottomTrailing).ignoresSafeArea() }
-            else { background.ignoresSafeArea() }
+            LinearGradient(stops: [
+                .init(color: Color(uiColor: StarPilotTheme.toolbarColor(dark: colorScheme == .dark)), location: 0),
+                .init(color: background, location: 0.22),
+                .init(color: model.navigationEnabled ? panel.opacity(0.8) : background, location: 1)
+            ], startPoint: .top, endPoint: .bottom).ignoresSafeArea()
         }.foregroundStyle(Color.primary).preferredColorScheme(model.navigationEnabled ? nil : .dark)
             .alert("Enable navigation alpha?", isPresented: $confirmNavigationAlpha) {
                 Button("Cancel", role: .cancel) { }
