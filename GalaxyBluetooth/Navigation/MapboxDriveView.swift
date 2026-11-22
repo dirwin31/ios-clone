@@ -50,13 +50,15 @@ struct MapboxDriveMap: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var viewport: Viewport
     @State private var coordinates: [CLLocationCoordinate2D] = []
+    @State private var lastCommaFix: CLLocation?
+    @State private var commaSpeed = 0.0
 
     init(navigation: NavigationModel, token: String, bottomInset: CGFloat) {
         self.navigation = navigation
         self.bottomInset = bottomInset
         if MapboxOptions.accessToken != token { MapboxOptions.accessToken = token }
         let center = navigation.usingComma ? navigation.commaPosition : navigation.location?.coordinate
-        _viewport = State(initialValue: .camera(center: center, zoom: center == nil ? 1 : 15, pitch: 55))
+        _viewport = State(initialValue: .camera(center: center, zoom: center == nil ? 1 : 16.8, pitch: 55))
     }
 
     private var driving: Bool { navigation.navigating }
@@ -130,8 +132,10 @@ struct MapboxDriveMap: View {
             .onChange(of: navigation.overviewRevision) { _, _ in overview(top: top, bottom: panel) }
             .onChange(of: navigation.followsUser) { _, _ in follow(top: top, bottom: panel) }
             .onChange(of: commaTrip ? navigation.commaPositionSampleDate : navigation.location?.timestamp) { _, _ in
+                if commaTrip { updateCommaSpeed() }
                 if driving || navigation.destination == nil { follow(top: top, bottom: panel) }
             }
+            .onChange(of: navigation.positionDisplayGeneration) { _, _ in lastCommaFix = nil; commaSpeed = 0 }
             .onChange(of: navigation.commaFeedReady) { _, _ in follow(top: top, bottom: panel) }
             .onChange(of: panel) { _, _ in follow(top: top, bottom: panel) }
         }
@@ -139,12 +143,28 @@ struct MapboxDriveMap: View {
 
     private func follow(top: CGFloat, bottom: CGFloat) {
         guard navigation.followsUser, let point = position(at: .now) else { return }
-        let camera = Viewport.camera(center: point, zoom: driving ? 16 : 15,
+        let speed = commaTrip ? commaSpeed : navigation.goodLocation?.speed ?? 0
+        let distance = NavigationMapMotion.cameraDistance(speed: speed, distanceToTurn: navigation.distanceToTurn)
+        // Restrict the guide camera to street-level detail while keeping lookahead on faster roads.
+        let zoom = driving ? 17.6 - 0.8 * log2(distance / 1200) : 16.8
+        let camera = Viewport.camera(center: point, zoom: CGFloat(zoom),
                                      bearing: commaTrip ? navigation.commaHeading : max(0, navigation.location?.course ?? 0),
                                      pitch: driving ? 60 : 48)
             .padding(.init(top: top, leading: 0, bottom: bottom, trailing: 0))
         if reduceMotion { viewport = camera }
         else { withViewportAnimation(.easeInOut(duration: 0.35)) { viewport = camera } }
+    }
+
+    private func updateCommaSpeed() {
+        guard let point = position(at: .now) else { lastCommaFix = nil; commaSpeed = 0; return }
+        let fix = CLLocation(coordinate: point, altitude: 0, horizontalAccuracy: -1, verticalAccuracy: -1,
+                             timestamp: navigation.commaPositionSampleDate)
+        defer { lastCommaFix = fix }
+        guard let previous = lastCommaFix else { return }
+        let dt = fix.timestamp.timeIntervalSince(previous.timestamp)
+        guard dt > 0, dt <= 5 else { commaSpeed = 0; return }
+        let measured = fix.distance(from: previous) / dt
+        if measured <= 55 { commaSpeed += (measured - commaSpeed) * (1 - exp(-dt / 3)) }
     }
 
     private func overview(top: CGFloat, bottom: CGFloat) {
@@ -157,7 +177,7 @@ struct MapboxDriveMap: View {
         guard !driving else { return }
         if coordinates.count >= 2 { overview(top: top, bottom: bottom) }
         else if let destination = navigation.destination {
-            viewport = .camera(center: destination.coordinate, zoom: 15, pitch: 45)
+            viewport = .camera(center: destination.coordinate, zoom: 16.8, pitch: 50)
         } else { follow(top: top, bottom: bottom) }
     }
 }
