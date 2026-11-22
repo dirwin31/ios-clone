@@ -1,5 +1,6 @@
 import SwiftUI
 import QuartzCore
+import CoreImage
 import Network
 import MapKit
 import CoreBluetooth
@@ -1251,7 +1252,12 @@ private struct GalaxyArrival: UIViewRepresentable {
         var reveal: (() -> Void)?
         var finished: (() -> Void)?
         private static let duration: CFTimeInterval = 0.48
-        private static let texture = UIImage(named: "GalaxyDust")?.preparingForDisplay()?.cgImage
+        private static let texture: CGImage? = {
+            guard let original = UIImage(named: "GalaxyDust")?.cgImage else { return nil }
+            let mist = CIImage(cgImage: original).applyingFilter("CIColorControls",
+                                                                parameters: [kCIInputSaturationKey: 0.28])
+            return CIContext().createCGImage(mist, from: mist.extent) ?? original
+        }()
         private let dust = CALayer()
         private let cloud = CAGradientLayer()
         private let stars = CALayer()
@@ -1266,12 +1272,12 @@ private struct GalaxyArrival: UIViewRepresentable {
             isUserInteractionEnabled = false
             clipsToBounds = true
             // Color only the feathered seam between the two pages.
-            let violet = UIColor(red: 0.35, green: 0.19, blue: 0.55, alpha: 0.72)
-            let indigo = UIColor(red: 0.29, green: 0.22, blue: 0.52, alpha: 0.88)
+            let haze = UIColor(red: 0.42, green: 0.45, blue: 0.51, alpha: 0.60)
+            let core = UIColor(red: 0.32, green: 0.35, blue: 0.41, alpha: 0.84)
             cloud.startPoint = CGPoint(x: 0, y: 0.5)
             cloud.endPoint = CGPoint(x: 1, y: 0.5)
-            cloud.colors = [violet.withAlphaComponent(0).cgColor, violet.cgColor, indigo.cgColor,
-                            violet.cgColor, violet.withAlphaComponent(0).cgColor]
+            cloud.colors = [haze.withAlphaComponent(0).cgColor, haze.cgColor, core.cgColor,
+                            haze.cgColor, haze.withAlphaComponent(0).cgColor]
             cloud.locations = [0, 0.14, 0.5, 0.86, 1]
             dust.addSublayer(cloud)
             stars.contents = Self.texture
@@ -1291,10 +1297,13 @@ private struct GalaxyArrival: UIViewRepresentable {
             super.layoutSubviews()
             guard let window, !bounds.isEmpty else { return }
             let bandWidth = bounds.width * 0.46
-            let travel = (bounds.width + bandWidth) / 2
+            let slant = CGAffineTransform(a: 1, b: 0, c: -0.65, d: 1, tx: 0, ty: 0)
+            let diagonalSpan = abs(slant.c) * bounds.height
+            let travel = (bounds.width + bandWidth + diagonalSpan) / 2
             CATransaction.begin()
             CATransaction.setDisableActions(true)
             dust.bounds = CGRect(origin: .zero, size: CGSize(width: bandWidth, height: bounds.height))
+            dust.setAffineTransform(slant)
             cloud.frame = dust.bounds
             stars.frame = dust.bounds
             dust.position = CGPoint(x: bounds.midX + travel, y: bounds.midY)
@@ -1320,8 +1329,9 @@ private struct GalaxyArrival: UIViewRepresentable {
 
                 let mask = CALayer()
                 mask.anchorPoint = CGPoint(x: 0, y: 0.5)
-                mask.bounds = CGRect(x: 0, y: 0, width: bounds.width + bandWidth, height: bounds.height)
+                mask.bounds = CGRect(x: 0, y: 0, width: 2 * travel, height: bounds.height)
                 mask.position = CGPoint(x: bounds.midX + travel, y: bounds.midY)
+                mask.setAffineTransform(slant)
                 mask.backgroundColor = UIColor.white.cgColor
                 snapshot.layer.mask = mask
                 mask.add(sweep, forKey: "reveal")
