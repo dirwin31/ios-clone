@@ -49,7 +49,7 @@ struct MapboxDriveMap: View {
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var viewport: Viewport
-    @State private var coordinates: [CLLocationCoordinate2D] = []
+    @State private var routeShape: LineString?
     @State private var lastCommaFix: CLLocation?
     @State private var commaSpeed = 0.0
     @State private var cameraFix: CLLocation?
@@ -93,9 +93,13 @@ struct MapboxDriveMap: View {
                                 .foregroundStyle(.white, .red).accessibilityLabel(destination.name)
                         }
                     }
-                    if coordinates.count >= 2 {
-                        PolylineAnnotation(lineCoordinates: coordinates)
-                            .lineColor(StarPilotTheme.uiAccent).lineWidth(6)
+                    if let routeShape {
+                        GeoJSONSource(id: "galaxy-route").data(.geometry(.lineString(routeShape)))
+                        LineLayer(id: "galaxy-selected-route", source: "galaxy-route")
+                            .slot(.top).lineCap(.round).lineJoin(.round)
+                            .lineColor(StarPilotTheme.routePurple).lineWidth(7)
+                            .lineBorderColor(UIColor(red: 0.27, green: 0.08, blue: 0.43, alpha: 1))
+                            .lineBorderWidth(1).lineEmissiveStrength(1)
                     }
                     if !driving, let start = navigation.plannedStart {
                         MapViewAnnotation(coordinate: start.coordinate) {
@@ -128,10 +132,11 @@ struct MapboxDriveMap: View {
             }
             .onChange(of: viewport.isIdle) { _, idle in if idle { navigation.followsUser = false } }
             .onChange(of: route.map { ObjectIdentifier($0) }, initial: true) { _, _ in
-                coordinates = route.map { line in
+                routeShape = route.flatMap { line in
+                    guard line.pointCount >= 2 else { return nil }
                     let points = line.points()
-                    return (0..<line.pointCount).map { points[$0].coordinate }
-                } ?? []
+                    return LineString((0..<line.pointCount).map { points[$0].coordinate })
+                }
                 if !driving && navigation.destination != nil { preview(top: top, bottom: panel) }
                 else if navigation.followsUser && position(at: .now) != nil { follow(top: top, bottom: panel) }
                 else if navigation.followsUser { overview(top: top, bottom: panel) }
@@ -206,14 +211,14 @@ struct MapboxDriveMap: View {
     }
 
     private func overview(top: CGFloat, bottom: CGFloat) {
-        guard coordinates.count >= 2 else { return }
-        viewport = .overview(geometry: LineString(coordinates),
+        guard let routeShape else { return }
+        viewport = .overview(geometry: routeShape,
                              geometryPadding: .init(top: top + 8, leading: 24, bottom: bottom + 16, trailing: 24))
     }
 
     private func preview(top: CGFloat, bottom: CGFloat) {
         guard !driving else { return }
-        if coordinates.count >= 2 { overview(top: top, bottom: bottom) }
+        if routeShape != nil { overview(top: top, bottom: bottom) }
         else if let destination = navigation.destination {
             viewport = .camera(center: destination.coordinate, zoom: 16.8, pitch: 50)
         } else { follow(top: top, bottom: bottom) }

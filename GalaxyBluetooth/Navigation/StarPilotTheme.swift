@@ -2,6 +2,7 @@ import SwiftUI
 import UIKit
 
 enum StarPilotTheme {
+    static let routePurple = UIColor(red: 0.66, green: 0.24, blue: 0.99, alpha: 1)
     // Shared by the native toolbar and the edge of the embedded Galaxy page.
     static func toolbarColor(dark: Bool) -> UIColor {
         dark ? UIColor(red: 0.026, green: 0.022, blue: 0.058, alpha: 1)

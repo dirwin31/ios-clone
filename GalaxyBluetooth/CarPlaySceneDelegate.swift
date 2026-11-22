@@ -1539,7 +1539,7 @@ private final class CompanionCarPlayMap: UIViewController, MKMapViewDelegate {
             return renderer
         }
         let renderer = MKPolylineRenderer(overlay: overlay)
-        renderer.strokeColor = StarPilotTheme.uiAccent
+        renderer.strokeColor = StarPilotTheme.routePurple
         renderer.lineCap = .round; renderer.lineJoin = .round
         renderer.lineWidth = 6
         return renderer

@@ -23,7 +23,7 @@ private struct NavigationMapLayer: View {
                         Marker(start.name, systemImage: "flag.fill", coordinate: start.coordinate).tint(StarPilotTheme.accent)
                     }
                     ForEach(Array(navigation.routes.enumerated()), id: \.offset) { index, route in
-                        MapPolyline(route.polyline).stroke(index == navigation.selectedRoute ? StarPilotTheme.accent : Color.gray.opacity(0.5),
+                        MapPolyline(route.polyline).stroke(index == navigation.selectedRoute ? Color(uiColor: StarPilotTheme.routePurple) : Color.gray.opacity(0.5),
                             style: StrokeStyle(lineWidth: index == navigation.selectedRoute ? 8 : 5, lineCap: .round))
                     }
                     if let destination = navigation.destination {
@@ -40,6 +40,80 @@ private struct NavigationMapLayer: View {
     }
 }
 
+private enum PlacePanelLevel {
+    case collapsed, standard, expanded
+
+    func dragGesture(level: Binding<Self>, offset: GestureState<CGFloat>) -> some Gesture {
+        DragGesture(minimumDistance: 8, coordinateSpace: .global)
+            .updating(offset) { value, state, _ in
+                if abs(value.translation.height) > abs(value.translation.width) { state = value.translation.height }
+            }
+            .onEnded { value in
+                let dy = value.translation.height
+                guard abs(dy) >= 12, abs(dy) > abs(value.translation.width) else { return }
+                let next: Self
+                if dy > 0 { next = .collapsed }
+                else { next = level.wrappedValue == .collapsed ? .standard : .expanded }
+                withAnimation(.snappy) { level.wrappedValue = next }
+            }
+    }
+}
+
+private struct PlacePanelContentTop: PreferenceKey {
+    static var defaultValue: CGFloat { 0 }
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
+}
+
+private struct PlacePanelScroll<Content: View>: View {
+    @Binding var level: PlacePanelLevel
+    @State private var contentTop: CGFloat = 0
+    @State private var beganAtTop: Bool?
+    @Namespace private var scrollSpace
+    @ViewBuilder let content: () -> Content
+
+    var body: some View {
+        ScrollView {
+            content().background {
+                GeometryReader { geometry in
+                    Color.clear.preference(key: PlacePanelContentTop.self,
+                                           value: geometry.frame(in: .named(scrollSpace)).minY)
+                }
+            }
+        }
+        .coordinateSpace(name: scrollSpace)
+        .onPreferenceChange(PlacePanelContentTop.self) { contentTop = $0 }
+        .simultaneousGesture(DragGesture(minimumDistance: 8, coordinateSpace: .global)
+            .onChanged { _ in if beganAtTop == nil { beganAtTop = contentTop >= -1 } }
+            .onEnded { value in
+                defer { beganAtTop = nil }
+                let dy = value.translation.height
+                if beganAtTop == true, dy > 36, dy > abs(value.translation.width) {
+                    withAnimation(.snappy) { level = .collapsed }
+                }
+            })
+    }
+}
+
+private struct PlacePanelHandle: View {
+    @Binding var level: PlacePanelLevel
+    let drag: GestureState<CGFloat>
+
+    var body: some View {
+        Capsule().fill(.secondary.opacity(0.45)).frame(width: 36, height: 5)
+            .frame(maxWidth: .infinity).frame(height: 44).contentShape(Rectangle())
+            .gesture(level.dragGesture(level: $level, offset: drag).exclusively(before: TapGesture().onEnded {
+                withAnimation(.snappy) { level = level == .collapsed ? .standard : .collapsed }
+            }))
+            .accessibilityElement()
+            .accessibilityAddTraits(.isButton)
+            .accessibilityLabel(level == .collapsed ? "Expand place panel" : "Collapse place panel")
+            .accessibilityIdentifier("place-panel-handle")
+            .accessibilityAction {
+                withAnimation(.snappy) { level = level == .collapsed ? .standard : .collapsed }
+            }
+    }
+}
+
 private struct StandardNavigationHome: View {
     @ObservedObject var connection: CommaConnection
     @ObservedObject var navigation: NavigationModel
@@ -53,7 +127,9 @@ private struct StandardNavigationHome: View {
     @State private var searchPurpose: PlaceSearchPurpose?
     @State private var showLibrary = false
     @State private var navigationPanelHeight: CGFloat = 0
-    @State private var expanded = false
+    @State private var panelLevel: PlacePanelLevel = .standard
+    @GestureState private var panelDrag: CGFloat = 0
+    private var expanded: Bool { panelLevel == .expanded }
     @State private var appTabsExpanded = true
     init(connection: CommaConnection, navigation: NavigationModel, saved: SavedPlacesStore, selectAppTab: @escaping (CompanionTab) -> Void, submitReport: @escaping () -> Void, openSettings: @escaping () -> Void) {
         self.submitReport = submitReport
@@ -69,18 +145,7 @@ private struct StandardNavigationHome: View {
             .modifier(PlacePanelLayout(overlaid: navigation.navigating && navigation.usingComma) {
                 VStack(spacing: 0) {
                     if !navigation.navigating {
-                    Button {
-                        withAnimation(.snappy) { expanded.toggle() }
-                    } label: {
-                        Capsule().fill(.secondary.opacity(0.35)).frame(width: 36, height: 5)
-                            .frame(maxWidth: .infinity).frame(height: 24).contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel(expanded ? "Collapse place panel" : "Expand place panel")
-                    .accessibilityIdentifier("place-panel-handle")
-                    .gesture(DragGesture(minimumDistance: 12).onEnded { value in
-                        withAnimation(.snappy) { expanded = value.translation.height < 0 }
-                    })
+                        PlacePanelHandle(level: $panelLevel, drag: $panelDrag)
                     }
                     if !navigation.error.isEmpty {
                         Text(LocalizedStringKey(navigation.error)).font(.callout).foregroundStyle(.red)
@@ -99,6 +164,7 @@ private struct StandardNavigationHome: View {
                     }
                     if !navigation.navigating {
                         searchBar.padding(.horizontal, 20).padding(.bottom, 12)
+                            .simultaneousGesture(panelLevel.dragGesture(level: $panelLevel, offset: $panelDrag))
                     }
                     if navigation.navigating {
                         VStack(alignment: .leading, spacing: 12) {
@@ -106,7 +172,7 @@ private struct StandardNavigationHome: View {
                             messages
                         }.padding(.horizontal, 16).padding(.vertical, 14)
                     } else {
-                        ScrollView {
+                        PlacePanelScroll(level: $panelLevel) {
                             VStack(alignment: .leading, spacing: 16) {
                                 if navigation.destination != nil { destinationPanel }
                                 else { browsePanel }
@@ -115,6 +181,8 @@ private struct StandardNavigationHome: View {
                         }
                         .scrollIndicators(.hidden)
                         .frame(height: panelContentHeight(available: geometry.size.height), alignment: .top)
+                        .clipped()
+                        .accessibilityHidden(panelLevel == .collapsed)
                         .id(navigation.destination == nil ? "browse" : "destination")
                     }
                 }
@@ -148,7 +216,7 @@ private struct StandardNavigationHome: View {
                 }
             }
             .onChange(of: navigation.navigating) { _, active in
-                expanded = false
+                panelLevel = .standard
                 if active {
                     if let place = navigation.destination { saved.rememberDestination(place) }
                     navigation.followLocation()
@@ -209,11 +277,17 @@ private struct StandardNavigationHome: View {
             .shadow(color: .black.opacity(0.08), radius: 4, y: 2).accessibilityLabel(label)
     }
     private func panelContentHeight(available: CGFloat) -> CGFloat {
-        if navigation.navigating { return min(available * 0.42, expanded ? 260 : 180) }
-        if navigation.destination != nil { return min(available * (expanded ? 0.58 : 0.42), expanded ? 520 : 360) }
-        let count = min(saved.recentDestinations.count, expanded ? 10 : 3)
-        let content: CGFloat = 180 + 42 + (count == 0 ? 30 : CGFloat(count) * 66)
-        return min(available * (expanded ? 0.55 : 0.42), content)
+        let count = saved.recentDestinations.count
+        func height(expanded: Bool) -> CGFloat {
+            if navigation.destination != nil {
+                return min(available * (expanded ? 0.58 : 0.42), expanded ? 520 : 360)
+            }
+            let rows = min(count, expanded ? 10 : 3)
+            return min(available * (expanded ? 0.55 : 0.42), rows == 0 ? 252 : 222 + CGFloat(rows) * 66)
+        }
+        let maximum = height(expanded: true)
+        let base = panelLevel == .collapsed ? 0 : height(expanded: expanded)
+        return min(maximum, max(0, base - panelDrag))
     }
     private var searchBar: some View {
         Button { search() } label: {
@@ -346,6 +420,7 @@ private struct StandardNavigationHome: View {
     }
     private func selectDestination(_ place: NavigationPlace) {
         guard !navigation.busy, !navigation.navigating else { return }
+        panelLevel = .standard
         saved.rememberDestination(place)
         Task { await navigation.select(place) }
     }
@@ -418,7 +493,9 @@ private struct DuoNavigationHome: View {
     @State private var searchPurpose: PlaceSearchPurpose?
     @State private var showLibrary = false
     @State private var navigationPanelHeight: CGFloat = 0
-    @State private var expanded = false
+    @State private var panelLevel: PlacePanelLevel = .standard
+    @GestureState private var panelDrag: CGFloat = 0
+    private var expanded: Bool { panelLevel == .expanded }
     @State private var appTabsExpanded = true
     init(connection: CommaConnection, navigation: NavigationModel, saved: SavedPlacesStore, selectAppTab: @escaping (CompanionTab) -> Void, submitReport: @escaping () -> Void, openSettings: @escaping () -> Void) {
         self.submitReport = submitReport
@@ -435,18 +512,7 @@ private struct DuoNavigationHome: View {
             .modifier(PlacePanelLayout(overlaid: navigation.navigating && navigation.usingComma) {
                 VStack(spacing: 0) {
                     if !navigation.navigating {
-                    Button {
-                        withAnimation(.snappy) { expanded.toggle() }
-                    } label: {
-                        Capsule().fill(.secondary.opacity(0.35)).frame(width: 36, height: 5)
-                            .frame(maxWidth: .infinity).frame(height: 24).contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel(expanded ? "Collapse place panel" : "Expand place panel")
-                    .accessibilityIdentifier("place-panel-handle")
-                    .gesture(DragGesture(minimumDistance: 12).onEnded { value in
-                        withAnimation(.snappy) { expanded = value.translation.height < 0 }
-                    })
+                        PlacePanelHandle(level: $panelLevel, drag: $panelDrag)
                     }
                     if !navigation.error.isEmpty {
                         Text(LocalizedStringKey(navigation.error)).font(.callout).foregroundStyle(.red)
@@ -465,6 +531,7 @@ private struct DuoNavigationHome: View {
                     }
                     if !navigation.navigating {
                         searchBar.padding(.horizontal, 20).padding(.bottom, 12)
+                            .simultaneousGesture(panelLevel.dragGesture(level: $panelLevel, offset: $panelDrag))
                     }
                     if navigation.navigating {
                         VStack(alignment: .leading, spacing: 6) {
@@ -473,7 +540,7 @@ private struct DuoNavigationHome: View {
                         }
                         .padding(12)
                     } else {
-                        ScrollView {
+                        PlacePanelScroll(level: $panelLevel) {
                             VStack(alignment: .leading, spacing: 16) {
                                 if navigation.destination != nil { destinationPanel }
                                 else { browsePanel(width: min(600, geometry.size.width - 24) - 40) }
@@ -482,6 +549,8 @@ private struct DuoNavigationHome: View {
                         }
                         .scrollIndicators(.hidden)
                         .frame(height: panelContentHeight(available: geometry.size.height), alignment: .top)
+                        .clipped()
+                        .accessibilityHidden(panelLevel == .collapsed)
                         .id(navigation.destination == nil ? "browse" : "destination")
                     }
                 }
@@ -512,7 +581,7 @@ private struct DuoNavigationHome: View {
                 }
             }
             .onChange(of: navigation.navigating) { _, active in
-                expanded = false
+                panelLevel = .standard
                 if active {
                     if let place = navigation.destination { saved.rememberDestination(place) }
                     navigation.followLocation()
@@ -586,11 +655,17 @@ private struct DuoNavigationHome: View {
             .shadow(color: .black.opacity(0.08), radius: 4, y: 2).accessibilityLabel(label)
     }
     private func panelContentHeight(available: CGFloat) -> CGFloat {
-        if navigation.navigating { return min(available * 0.42, expanded ? 260 : 180) }
-        if navigation.destination != nil { return min(available * (expanded ? 0.58 : 0.42), expanded ? 520 : 360) }
-        let count = min(saved.recentDestinations.count, expanded ? 10 : 3)
-        let content: CGFloat = 180 + 42 + (count == 0 ? 30 : CGFloat(count) * 66)
-        return min(available * (expanded ? 0.55 : 0.42), content)
+        let count = saved.recentDestinations.count
+        func height(expanded: Bool) -> CGFloat {
+            if navigation.destination != nil {
+                return min(available * (expanded ? 0.58 : 0.42), expanded ? 520 : 360)
+            }
+            let rows = min(count, expanded ? 10 : 3)
+            return min(available * (expanded ? 0.55 : 0.42), rows == 0 ? 252 : 222 + CGFloat(rows) * 66)
+        }
+        let maximum = height(expanded: true)
+        let base = panelLevel == .collapsed ? 0 : height(expanded: expanded)
+        return min(maximum, max(0, base - panelDrag))
     }
     private var searchBar: some View {
         Button { search() } label: {
@@ -725,6 +800,7 @@ private struct DuoNavigationHome: View {
     }
     private func selectDestination(_ place: NavigationPlace) {
         guard !navigation.busy, !navigation.navigating else { return }
+        panelLevel = .standard
         saved.rememberDestination(place)
         Task { await navigation.select(place) }
     }

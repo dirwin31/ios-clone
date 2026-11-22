@@ -265,7 +265,7 @@ struct CommaFollowingMap: UIViewRepresentable {
         }
         func mapView(_ mapView: MKMapView, rendererFor overlay: MKOverlay) -> MKOverlayRenderer {
             let renderer = MKPolylineRenderer(overlay: overlay)
-            renderer.strokeColor = StarPilotTheme.uiAccent; renderer.lineWidth = 7
+            renderer.strokeColor = StarPilotTheme.routePurple; renderer.lineWidth = 7
             renderer.lineCap = .round; renderer.lineJoin = .round
             return renderer
         }

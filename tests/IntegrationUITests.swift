@@ -171,6 +171,18 @@ final class IntegrationUITests: XCTestCase {
         place.tap()
         let send = app.buttons["Send to comma"]
         XCTAssertTrue(send.waitForExistence(timeout: 5))
+        let handle = app.buttons["place-panel-handle"]
+        let before = handle.frame.midY
+        let grab = handle.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        grab.press(forDuration: 0.1, thenDragTo: grab.withOffset(CGVector(dx: 0, dy: 90)))
+        XCTAssertTrue(app.buttons["map-search"].isHittable)
+        let collapsed = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            handle.label == "Expand place panel" && handle.frame.midY > before + 40
+        }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [collapsed], timeout: 3), .completed)
+        XCTAssertGreaterThan(handle.frame.midY, before + 40)
+        handle.tap()
+        XCTAssertTrue(send.waitForExistence(timeout: 3))
         XCTAssertFalse(app.buttons["Get directions"].exists)
         app.segmentedControls.buttons["iPhone"].tap()
         XCTAssertTrue(app.buttons["Get directions"].waitForExistence(timeout: 5))
