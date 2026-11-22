@@ -139,11 +139,10 @@ struct MapboxDriveMap: View {
 
     var body: some View {
         GeometryReader { geometry in
-            let panel: CGFloat = carDisplay == nil ? 0 : min(65, geometry.size.height * 0.24)
             let top = min(driving ? 190.0 : 90.0, geometry.size.height * 0.32)
             let bounds = geometry.frame(in: .global)
-            // The phone map occupies the row directly above the ETA card. CarPlay
-            // draws its own card over the leading lower portion of the map.
+            let phoneInset = driving && !tripFrame.isEmpty ? min(bounds.height, max(0, bounds.maxY - tripFrame.minY)) : 0
+            let panel: CGFloat = carDisplay == nil ? phoneInset : min(65, geometry.size.height * 0.24)
             let carX: CGFloat = layoutDirection == .rightToLeft ? 0.68 : 0.32
             let anchor = CGPoint(
                 x: carDisplay == nil ? (tripFrame.isEmpty ? bounds.width / 2 : min(bounds.width * 0.9, max(bounds.width * 0.1, tripFrame.midX - bounds.minX))) :

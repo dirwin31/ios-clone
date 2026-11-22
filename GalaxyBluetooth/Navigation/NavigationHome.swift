@@ -13,7 +13,7 @@ private struct NavigationMapLayer: View {
                 MapboxDriveMap(navigation: navigation, token: token, tripFrame: tripFrame)
                     .id(token)
             } else if navigation.navigating && navigation.usingComma {
-                CommaFollowingMap(navigation: navigation, bottomInset: 0)
+                CommaFollowingMap(navigation: navigation, bottomInset: tripFrame.height)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .ignoresSafeArea(.container, edges: [.top, .bottom])
             } else {
@@ -193,14 +193,13 @@ private struct StandardNavigationHome: View {
                     }
                 }
                 .background {
-                    if navigation.navigating {
-                        RoundedRectangle(cornerRadius: 28).fill(.regularMaterial)
-                    } else {
+                    if !navigation.navigating {
                         UnevenRoundedRectangle(topLeadingRadius: 24, topTrailingRadius: 24)
                             .fill(.regularMaterial).ignoresSafeArea(edges: .bottom)
                     }
                 }
-                .shadow(color: .black.opacity(0.12), radius: 16, y: -4)
+                .modifier(TripBarGlass(active: navigation.navigating))
+                .shadow(color: .black.opacity(navigation.navigating ? 0.06 : 0.12), radius: 12, y: -2)
                 .padding(navigation.navigating ? 12 : 0)
             })
             .onPreferenceChange(NavigationPanelFrameKey.self) { tripFrame = $0 }
@@ -449,6 +448,23 @@ private struct NavigationPanelFrameKey: PreferenceKey {
     static func reduce(value: inout CGRect, nextValue: () -> CGRect) { value = nextValue() }
 }
 
+private struct TripBarGlass: ViewModifier {
+    let active: Bool
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+
+    @ViewBuilder func body(content: Content) -> some View {
+        if !active {
+            content
+        } else if reduceTransparency {
+            content.background(Color(uiColor: .secondarySystemBackground), in: Capsule())
+        } else if #available(iOS 26.0, *) {
+            content.glassEffect(.clear, in: Capsule())
+        } else {
+            content.background(.ultraThinMaterial, in: Capsule())
+        }
+    }
+}
+
 private struct PlacePanelLayout<Panel: View>: ViewModifier {
     let guiding: Bool
     let panel: Panel
@@ -458,10 +474,7 @@ private struct PlacePanelLayout<Panel: View>: ViewModifier {
     }
     @ViewBuilder func body(content: Content) -> some View {
         if guiding {
-            VStack(spacing: 0) {
-                content.frame(maxWidth: .infinity, maxHeight: .infinity)
-                panel.fixedSize(horizontal: false, vertical: true)
-            }
+            content.overlay(alignment: .bottom) { panel.fixedSize(horizontal: false, vertical: true) }
         } else {
             content.safeAreaInset(edge: .bottom, spacing: 0) { panel }
         }
@@ -566,9 +579,12 @@ private struct DuoNavigationHome: View {
                     }
                 }
                 .background {
-                    RoundedRectangle(cornerRadius: 24).fill(.regularMaterial)
+                    if !navigation.navigating {
+                        RoundedRectangle(cornerRadius: 24).fill(.regularMaterial)
+                    }
                 }
-                .shadow(color: .black.opacity(0.12), radius: 16, y: -4)
+                .modifier(TripBarGlass(active: navigation.navigating))
+                .shadow(color: .black.opacity(navigation.navigating ? 0.06 : 0.12), radius: 12, y: -2)
                 .frame(maxWidth: .infinity, alignment: .center)
                 .padding(12)
             })
