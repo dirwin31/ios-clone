@@ -96,7 +96,8 @@ struct MapboxDriveMap: View {
                     if let routeShape {
                         GeoJSONSource(id: "galaxy-route").data(.geometry(.lineString(routeShape)))
                         LineLayer(id: "galaxy-selected-route", source: "galaxy-route")
-                            .slot(.top).lineCap(.round).lineJoin(.round)
+                            .slot(.middle).lineCap(.round).lineJoin(.round)
+                            .lineOcclusionOpacity(0)
                             .lineColor(StarPilotTheme.routePurple).lineWidth(7)
                             .lineBorderColor(UIColor(red: 0.27, green: 0.08, blue: 0.43, alpha: 1))
                             .lineBorderWidth(1).lineEmissiveStrength(1)
