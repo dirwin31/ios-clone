@@ -1724,7 +1724,7 @@ private struct AdaptiveCompanionLayout<Content: View>: View {
                     galaxyItem("routes")
                     ToolbarItem(placement: .topBarLeading) {
                         GalaxyPillMenu(page: galaxyPage, model: model, select: select)
-                    }
+                    }.axisBehavior(.verticalPreferred)
                 } else {
                     ToolbarItemGroup(placement: .topBarLeading) {
                         ForEach(tabs) { item in
@@ -1748,7 +1748,7 @@ private struct AdaptiveCompanionLayout<Content: View>: View {
                             .accessibilityIdentifier("main-tab-" + item.rawValue)
                             .accessibilityAddTraits(selected ? .isSelected : [])
                         }
-                    }
+                    }.axisBehavior(.verticalPreferred)
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     AdaptiveConnectionStatus(model: model, openSettings: { select(.connections) })
@@ -1762,7 +1762,7 @@ private struct AdaptiveCompanionLayout<Content: View>: View {
             ToolbarItem(placement: .topBarLeading) {
                 GalaxyPillButton(page: galaxyPage, item: item, showsText: verticalEdge == nil)
                     .fixedSize()
-            }
+            }.axisBehavior(.verticalPreferred)
         }
     }
 }

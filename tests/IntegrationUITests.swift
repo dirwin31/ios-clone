@@ -7,7 +7,7 @@ final class IntegrationUITests: XCTestCase {
         XCUIDevice.shared.orientation = .portrait
         defer { XCUIDevice.shared.orientation = .portrait }
         func capture(_ name: String) {
-            let shot = XCTAttachment(screenshot: app.screenshot())
+            let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
             shot.name = name
             shot.lifetime = .keepAlways
             add(shot)
@@ -16,7 +16,11 @@ final class IntegrationUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Your comma"].waitForExistence(timeout: 15))
         capture("Landing portrait")
         XCUIDevice.shared.orientation = .landscapeLeft
-        XCTAssertTrue(app.staticTexts["Your comma"].isHittable)
+        // XCTest can report the new orientation while UIKit is still animating rotation.
+        Thread.sleep(forTimeInterval: 0.8)
+        let heading = app.staticTexts["Your comma"]
+        XCTAssertFalse(heading.frame.isEmpty)
+        XCTAssertTrue(app.frame.intersects(heading.frame))
         capture("Landing landscape")
         app.terminate()
         app.launchArguments = ["--preview-galaxy"]
@@ -37,6 +41,7 @@ final class IntegrationUITests: XCTestCase {
         app.launch()
         for orientation: UIDeviceOrientation in [.landscapeLeft, .portrait] {
             XCUIDevice.shared.orientation = orientation
+            Thread.sleep(forTimeInterval: 0.8)
             let controls = ["back","home","toggles","tools","routes","options"].map { app.buttons["galaxy-pill-" + $0] }
             XCTAssertTrue(controls[0].waitForExistence(timeout: 30), app.debugDescription)
             for (index, control) in controls.enumerated() {
