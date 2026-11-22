@@ -1,5 +1,6 @@
 import CarPlay
 import UIKit
+import SwiftUI
 import CoreFoundation
 import CoreText
 import MapKit
@@ -164,6 +165,7 @@ final class CarPlaySceneDelegate: NSObject, CPTemplateApplicationSceneDelegate, 
         mapController = map
         window?.rootViewController = map
         let template = CPMapTemplate()
+        template.guidanceBackgroundColor = StarPilotTheme.uiGuidance
         template.mapDelegate = self
         template.automaticallyHidesNavigationBar = true
         template.hidesButtonsWithNavigationBar = false
@@ -1382,7 +1384,10 @@ final class CarPlayDashboardSceneDelegate: NSObject, CPTemplateApplicationDashbo
 
 @MainActor
 private final class CompanionCarPlayMap: UIViewController, MKMapViewDelegate {
-    private let map = MKMapView()
+    private lazy var map = MKMapView()
+    private var mapboxHost: UIHostingController<MapboxDriveMap>?
+    private var lastMapboxOptions: CarDisplayMapOptions?
+    private var lastMapboxToken: String?
     private let position = MKPointAnnotation()
     private let destinationPin = MKPointAnnotation()
     private var showingDestination = false
@@ -1444,7 +1449,14 @@ private final class CompanionCarPlayMap: UIViewController, MKMapViewDelegate {
         map.setCamera(camera, animated: animated && !UIAccessibility.isReduceMotionEnabled)
     }
     override func loadView() {
-        view = map
+        view = UIView()
+    }
+
+    private func installAppleMap() {
+        guard map.superview == nil else { return }
+        map.frame = view.bounds
+        map.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        view.addSubview(map)
         map.delegate = self
         let configuration = MKStandardMapConfiguration(elevationStyle: .realistic)
         configuration.pointOfInterestFilter = .excludingAll
@@ -1454,6 +1466,36 @@ private final class CompanionCarPlayMap: UIViewController, MKMapViewDelegate {
     }
     func update(_ navigation: NavigationModel) {
         loadViewIfNeeded()
+        if let token = NavigationMapPreference.activeToken {
+            let options = CarDisplayMapOptions(overview: showingOverview, zoomFactor: zoomFactor, dashboard: dashboard)
+            if lastMapboxToken != token || lastMapboxOptions != options {
+                let screen = MapboxDriveMap(navigation: navigation, token: token,
+                                           tripFrame: .zero, carDisplay: options)
+                if let host = mapboxHost {
+                    host.rootView = screen
+                } else {
+                    let host = UIHostingController(rootView: screen)
+                    addChild(host)
+                    host.view.frame = view.bounds
+                    host.view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+                    view.addSubview(host.view)
+                    host.didMove(toParent: self)
+                    mapboxHost = host
+                    if map.isDescendant(of: view) { map.removeFromSuperview() }
+                }
+                lastMapboxOptions = options
+                lastMapboxToken = token
+            }
+            return
+        }
+        if let host = mapboxHost {
+            host.willMove(toParent: nil)
+            host.view.removeFromSuperview()
+            host.removeFromParent()
+            mapboxHost = nil
+            lastMapboxToken = nil
+        }
+        installAppleMap()
         if let destination = navigation.destination {
             let coordinate = destination.coordinate
             if destinationPin.coordinate.latitude != coordinate.latitude || destinationPin.coordinate.longitude != coordinate.longitude {

@@ -45,6 +45,7 @@ import Foundation
         precondition(NavigationMapMotion.followPitch(cruising: 68, speed: 12, turnDistance: nil) == 68)
         precondition(NavigationMapMotion.followPitch(cruising: 68, speed: 12, turnDistance: 400) == 68)
         precondition(NavigationMapMotion.followPitch(cruising: 68, speed: 12, turnDistance: 20) == 32)
+        precondition(NavigationMapMotion.followPitch(cruising: 68, speed: 0, turnDistance: 165) < 45)
         precondition((32..<68).contains(NavigationMapMotion.followPitch(cruising: 68, speed: 12, turnDistance: 80)))
         precondition(abs(aligned.longitude + 80) < 0.0000001 && abs(aligned.latitude - beside.latitude) < 0.0000001)
         let offRoute = RoutePoint(latitude: 43.005, longitude: -79.999)

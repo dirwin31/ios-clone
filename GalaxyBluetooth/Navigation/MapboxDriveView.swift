@@ -75,6 +75,12 @@ struct NavigationMapSettings: View {
 }
 
 /// Uses the same navigation state and controls as the standard iPhone map.
+struct CarDisplayMapOptions: Equatable {
+    let overview: Bool
+    let zoomFactor: Double
+    let dashboard: Bool
+}
+
 struct MapboxDriveMap: View {
     private static let destinationIcon: UIImage = {
         let palette = UIImage.SymbolConfiguration(paletteColors: [.white, .systemRed])
@@ -89,8 +95,9 @@ struct MapboxDriveMap: View {
     @AppStorage(NavigationMapPreference.poiKey) private var labels = PointLabels.always
     @AppStorage(NavigationMapPreference.placesKey) private var showPlaces = true
     @AppStorage(NavigationMapPreference.trafficKey) private var showTraffic = false
+    @Environment(\.layoutDirection) private var layoutDirection
+    let carDisplay: CarDisplayMapOptions?
     let tripFrame: CGRect
-    let bottomInset: CGFloat
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var viewport: Viewport
@@ -103,12 +110,13 @@ struct MapboxDriveMap: View {
     @State private var cameraZoom = 16.8
     @State private var cameraPitch = 68.0
 
-    private var anchored: Bool { driving && navigation.followsUser && cameraFix != nil }
+    private var following: Bool { carDisplay.map { !$0.overview } ?? navigation.followsUser }
+    private var anchored: Bool { driving && following && cameraFix != nil }
 
-    init(navigation: NavigationModel, token: String, bottomInset: CGFloat, tripFrame: CGRect) {
+    init(navigation: NavigationModel, token: String, tripFrame: CGRect, carDisplay: CarDisplayMapOptions? = nil) {
         self.navigation = navigation
+        self.carDisplay = carDisplay
         self.tripFrame = tripFrame
-        self.bottomInset = bottomInset
         if MapboxOptions.accessToken != token { MapboxOptions.accessToken = token }
         let center = navigation.usingComma ? navigation.commaPosition : navigation.location?.coordinate
         _viewport = State(initialValue: .camera(center: center, zoom: center == nil ? 1 : 16.8, pitch: 55))
@@ -131,12 +139,16 @@ struct MapboxDriveMap: View {
 
     var body: some View {
         GeometryReader { geometry in
-            let panel = commaTrip ? min(bottomInset + 16, geometry.size.height * 0.45) : 0
+            let panel: CGFloat = carDisplay == nil ? 0 : min(65, geometry.size.height * 0.24)
             let top = min(driving ? 190.0 : 90.0, geometry.size.height * 0.32)
             let bounds = geometry.frame(in: .global)
+            // The phone map occupies the row directly above the ETA card. CarPlay
+            // draws its own card over the leading lower portion of the map.
+            let carX: CGFloat = layoutDirection == .rightToLeft ? 0.68 : 0.32
             let anchor = CGPoint(
-                x: tripFrame.isEmpty ? bounds.width / 2 : min(bounds.width * 0.9, max(bounds.width * 0.1, tripFrame.midX - bounds.minX)),
-                y: min(bounds.height - 20, max(bounds.height * 0.35, (tripFrame.isEmpty ? bounds.height - panel : tripFrame.minY - bounds.minY) - 34)))
+                x: carDisplay == nil ? (tripFrame.isEmpty ? bounds.width / 2 : min(bounds.width * 0.9, max(bounds.width * 0.1, tripFrame.midX - bounds.minX))) :
+                    bounds.width * (carDisplay?.dashboard == true ? 0.5 : carX),
+                y: max(bounds.height * 0.35, bounds.height - panel - (carDisplay == nil ? 22 : 18)))
             let dx = 2 * anchor.x - bounds.width, dy = 2 * anchor.y - bounds.height
             let padding = driving ? EdgeInsets(top: max(0, dy), leading: max(0, dx), bottom: max(0, -dy), trailing: max(0, -dx))
                                   : EdgeInsets(top: top, leading: 0, bottom: panel, trailing: 0)
@@ -204,7 +216,9 @@ struct MapboxDriveMap: View {
                     }
                 }
             }
-            .onChange(of: viewport.isIdle) { _, idle in if idle { navigation.followsUser = false } }
+            .onChange(of: viewport.isIdle) { _, idle in
+                if idle && carDisplay == nil { navigation.followsUser = false }
+            }
             .onChange(of: route.map { ObjectIdentifier($0) }, initial: true) { _, _ in
                 routeShape = route.flatMap { line in
                     guard line.pointCount >= 2 else { return nil }
@@ -214,13 +228,20 @@ struct MapboxDriveMap: View {
                 routePoints = routeShape?.coordinates.map { RoutePoint(latitude: $0.latitude, longitude: $0.longitude) } ?? []
                 if driving { cameraFix = nil }
                 if !driving && navigation.destination != nil { preview(top: top, bottom: panel, padding: padding) }
-                else if navigation.followsUser && position(at: .now) != nil { follow(padding: padding) }
-                else if navigation.followsUser { overview(top: top, bottom: panel) }
+                else if following && position(at: .now) != nil { follow(padding: padding) }
+                else if following || carDisplay?.overview == true { overview(top: top, bottom: panel) }
             }
             .onChange(of: navigation.destination?.id) { _, _ in preview(top: top, bottom: panel, padding: padding) }
             .onChange(of: driving) { _, _ in cameraFix = nil; follow(padding: padding) }
-            .onChange(of: navigation.overviewRevision) { _, _ in overview(top: top, bottom: panel) }
-            .onChange(of: navigation.followsUser) { _, _ in cameraFix = nil; follow(padding: padding) }
+            .onChange(of: navigation.overviewRevision) { _, _ in
+                if carDisplay == nil { overview(top: top, bottom: panel) }
+            }
+            .onChange(of: carDisplay) { _, options in
+                guard let options else { return }
+                if options.overview { overview(top: top, bottom: panel) }
+                else { follow(padding: padding, layoutChanged: true) }
+            }
+            .onChange(of: following) { _, _ in cameraFix = nil; follow(padding: padding) }
             .onChange(of: commaTrip ? navigation.commaPositionSampleDate : navigation.location?.timestamp) { _, _ in
                 if commaTrip { updateCommaSpeed() }
                 if driving || navigation.destination == nil { follow(padding: padding) }
@@ -254,7 +275,7 @@ struct MapboxDriveMap: View {
     }
 
     private func follow(padding: EdgeInsets, layoutChanged: Bool = false) {
-        guard navigation.followsUser, driving || navigation.destination == nil,
+        guard following, driving || navigation.destination == nil,
               let point = position(at: .now), let stamp = commaTrip
                 ? navigation.commaPositionSampleDate : navigation.location?.timestamp else { return }
         let previous = cameraFix
@@ -280,7 +301,7 @@ struct MapboxDriveMap: View {
         let accepted = continuous && !moving ? previous?.coordinate ?? point : point
         let center = aligned(accepted)
         cameraFix = CLLocation(coordinate: accepted, altitude: 0, horizontalAccuracy: -1, verticalAccuracy: -1, timestamp: stamp)
-        let camera = Viewport.camera(center: center, zoom: CGFloat(cameraZoom), bearing: cameraBearing,
+        let camera = Viewport.camera(center: center, zoom: CGFloat(cameraZoom - log2(carDisplay?.zoomFactor ?? 1)), bearing: cameraBearing,
                                      pitch: CGFloat(cameraPitch))
             .padding(padding)
         if reduceMotion || !continuous || layoutChanged { viewport = camera }

@@ -4,17 +4,16 @@ import MapKit
 private struct NavigationMapLayer: View {
     @ObservedObject var navigation: NavigationModel
     let tripFrame: CGRect
-    let bottomInset: CGFloat
     @AppStorage(NavigationMapPreference.enabledKey) private var useMapbox = true
     @AppStorage(NavigationMapPreference.tokenKey) private var token = ""
 
     var body: some View {
         Group {
             if useMapbox && token.hasPrefix("pk.") {
-                MapboxDriveMap(navigation: navigation, token: token, bottomInset: bottomInset, tripFrame: tripFrame)
+                MapboxDriveMap(navigation: navigation, token: token, tripFrame: tripFrame)
                     .id(token)
             } else if navigation.navigating && navigation.usingComma {
-                CommaFollowingMap(navigation: navigation, bottomInset: bottomInset)
+                CommaFollowingMap(navigation: navigation, bottomInset: 0)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .ignoresSafeArea(.container, edges: [.top, .bottom])
             } else {
@@ -142,9 +141,9 @@ private struct StandardNavigationHome: View {
     }
     var body: some View {
         GeometryReader { geometry in
-            NavigationMapLayer(navigation: navigation, tripFrame: tripFrame, bottomInset: tripFrame.height)
+            NavigationMapLayer(navigation: navigation, tripFrame: tripFrame)
             .overlay(alignment: .top) { mapHeader.padding(12) }
-            .modifier(PlacePanelLayout(overlaid: navigation.navigating && navigation.usingComma) {
+            .modifier(PlacePanelLayout(guiding: navigation.navigating) {
                 VStack(spacing: 0) {
                     if !navigation.navigating {
                         PlacePanelHandle(level: $panelLevel, drag: $panelDrag)
@@ -381,7 +380,7 @@ private struct StandardNavigationHome: View {
                 Spacer(minLength: 0)
                 Button(navigation.endingRoute ? "Ending…" : "End") { Task { await navigation.end(connection: connection) } }
                     .font(.headline).foregroundStyle(.white).padding(.horizontal, 18).padding(.vertical, 13)
-                    .background(.red, in: Capsule()).disabled(navigation.busy)
+                    .background(StarPilotTheme.guidance, in: Capsule()).disabled(navigation.busy)
             }
 
         }
@@ -451,15 +450,18 @@ private struct NavigationPanelFrameKey: PreferenceKey {
 }
 
 private struct PlacePanelLayout<Panel: View>: ViewModifier {
-    let overlaid: Bool
+    let guiding: Bool
     let panel: Panel
-    init(overlaid: Bool, @ViewBuilder panel: () -> Panel) {
-        self.overlaid = overlaid
+    init(guiding: Bool, @ViewBuilder panel: () -> Panel) {
+        self.guiding = guiding
         self.panel = panel()
     }
     @ViewBuilder func body(content: Content) -> some View {
-        if overlaid {
-            content.overlay(alignment: .bottom) { panel }
+        if guiding {
+            VStack(spacing: 0) {
+                content.frame(maxWidth: .infinity, maxHeight: .infinity)
+                panel.fixedSize(horizontal: false, vertical: true)
+            }
         } else {
             content.safeAreaInset(edge: .bottom, spacing: 0) { panel }
         }
@@ -509,10 +511,10 @@ private struct DuoNavigationHome: View {
     }
     var body: some View {
         GeometryReader { geometry in
-            NavigationMapLayer(navigation: navigation, tripFrame: tripFrame, bottomInset: tripFrame.height)
+            NavigationMapLayer(navigation: navigation, tripFrame: tripFrame)
             .modifier(NavigationMapBackground())
             .overlay(alignment: .top) { mapHeader.padding(12) }
-            .modifier(PlacePanelLayout(overlaid: navigation.navigating && navigation.usingComma) {
+            .modifier(PlacePanelLayout(guiding: navigation.navigating) {
                 VStack(spacing: 0) {
                     if !navigation.navigating {
                         PlacePanelHandle(level: $panelLevel, drag: $panelDrag)
@@ -761,7 +763,7 @@ private struct DuoNavigationHome: View {
                 Spacer(minLength: 0)
                 Button(navigation.endingRoute ? "Ending…" : "End") { Task { await navigation.end(connection: connection) } }
                     .font(.headline).foregroundStyle(.white).padding(.horizontal, 10).padding(.vertical, 12)
-                    .background(.red, in: Capsule()).disabled(navigation.busy)
+                    .background(StarPilotTheme.guidance, in: Capsule()).disabled(navigation.busy)
                 navigationOptions
             }
 
