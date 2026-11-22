@@ -2,178 +2,124 @@ import SwiftUI
 import MapKit
 import MapboxMaps
 
-/// A separate display of the comma route. Opening or closing it never starts a trip.
-struct MapboxDriveView: View {
-    @ObservedObject var navigation: NavigationModel
-    let connection: CommaConnection
+enum NavigationMapPreference {
+    static let enabledKey = "navigation.mapboxEnabled"
+    static let tokenKey = "navigation.mapboxPublicToken"
+}
+
+struct NavigationMapSettings: View {
     @Environment(\.dismiss) private var dismiss
-    @AppStorage("navigation.mapboxPublicToken") private var savedToken = ""
+    @AppStorage(NavigationMapPreference.tokenKey) private var token = ""
+    @AppStorage(NavigationMapPreference.enabledKey) private var enabled = true
     @State private var entry = ""
-    @State private var activeToken: String?
+    private var trimmed: String { entry.trimmingCharacters(in: .whitespacesAndNewlines) }
 
     var body: some View {
         NavigationStack {
-            Group {
-                if activeToken != nil {
-                    MapboxDriveMap(navigation: navigation, connection: connection)
-                } else {
-                    Form {
-                        Section {
-                            SecureField("pk.…", text: $entry)
-                                .textInputAutocapitalization(.never).autocorrectionDisabled()
-                            Button("Open 3D map") {
-                                let token = entry.trimmingCharacters(in: .whitespacesAndNewlines)
-                                savedToken = token
-                                activate(token)
-                            }.disabled(!entry.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("pk."))
-                        } header: {
-                            Text("Mapbox public access token")
-                        } footer: {
-                            Text("Map tiles use your Mapbox account. Galaxy saves this public token on this device.")
-                        }
-                    }
+            Form {
+                Section {
+                    SecureField("Mapbox public token (pk.…)", text: $entry)
+                        .textInputAutocapitalization(.never).autocorrectionDisabled()
+                    Button("Use Mapbox 3D") {
+                        token = trimmed
+                        enabled = true
+                        dismiss()
+                    }.disabled(!trimmed.hasPrefix("pk.") || trimmed.count < 4)
+                    Button("Use Apple Maps") { enabled = false; dismiss() }
+                } footer: {
+                    Text("Mapbox appears in Navigation while browsing and during comma guidance. Apple Maps handles destination previews and iPhone-guided routes.")
                 }
             }
-            .navigationTitle("3D Drive").navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Close") { dismiss() } }
-                if activeToken != nil {
-                    ToolbarItem(placement: .primaryAction) {
-                        Button("Change token", systemImage: "key") {
-                            activeToken = nil
-                            entry = ""
-                        }
-                    }
-                }
-            }
-        }
-        .onAppear { if savedToken.hasPrefix("pk.") { activate(savedToken) } }
-    }
-
-    private func activate(_ token: String) {
-        MapboxOptions.accessToken = token
-        activeToken = token
+            .navigationTitle("Navigation map").navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } } }
+        }.onAppear { entry = token }
     }
 }
 
-private struct MapboxDriveMap: View {
+/// Uses the same navigation state and controls as the standard iPhone map.
+struct MapboxDriveMap: View {
     @ObservedObject var navigation: NavigationModel
-    let connection: CommaConnection
+    let bottomInset: CGFloat
+    let onStyleFailure: () -> Void
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var viewport: Viewport = .camera(
-        center: CLLocationCoordinate2D(latitude: 43.6426, longitude: -79.3871),
-        zoom: 15.3, bearing: 65, pitch: 60)
+    @State private var viewport: Viewport
     @State private var coordinates: [CLLocationCoordinate2D] = []
-    @State private var following = true
-    @State private var loadFailed = false
+
+    init(navigation: NavigationModel, token: String, bottomInset: CGFloat, onStyleFailure: @escaping () -> Void) {
+        self.navigation = navigation
+        self.bottomInset = bottomInset
+        self.onStyleFailure = onStyleFailure
+        if MapboxOptions.accessToken != token { MapboxOptions.accessToken = token }
+        let center = navigation.usingComma ? navigation.commaPosition : navigation.location?.coordinate
+        _viewport = State(initialValue: .camera(center: center, zoom: center == nil ? 1 : 15, pitch: 55))
+    }
 
     private var driving: Bool { navigation.navigating && navigation.usingComma }
     private var route: MKPolyline? { driving ? navigation.commaPolyline : nil }
-    private func hasPosition(at date: Date) -> Bool {
-        driving && navigation.commaFeedReady && navigation.commaPosition != nil &&
-            date.timeIntervalSince(navigation.commaPositionSampleDate) <= 4
+
+    private func position(at date: Date) -> CLLocationCoordinate2D? {
+        if driving {
+            guard navigation.commaFeedReady, date.timeIntervalSince(navigation.commaPositionSampleDate) <= 4 else { return nil }
+            return navigation.commaPosition
+        }
+        return navigation.goodLocation?.coordinate
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            if loadFailed {
-                Text("Couldn’t load the Mapbox style. Check your connection and public token.")
-                    .font(.callout).padding(8)
-            }
+        GeometryReader { geometry in
+            let panel = driving ? min(bottomInset + 16, geometry.size.height * 0.45) : 0
+            let top = min(driving ? 190.0 : 90.0, geometry.size.height * 0.32)
             TimelineView(.periodic(from: .now, by: 1)) { clock in
-                let fresh = hasPosition(at: clock.date)
-                VStack(spacing: 0) {
-                    if driving {
-                        VStack(alignment: .leading, spacing: 4) {
-                            if fresh {
-                                Text(distance(navigation.distanceToTurn)).font(.title.bold())
-                                Text(navigation.instruction).font(.headline)
-                            } else { Text("Waiting for comma guidance").font(.headline) }
-                        }.frame(maxWidth: .infinity, alignment: .leading).padding()
+                MapboxMaps.Map(viewport: $viewport) {
+                    if coordinates.count >= 2 {
+                        PolylineAnnotation(lineCoordinates: coordinates)
+                            .lineColor(UIColor.systemCyan).lineWidth(6)
                     }
-                    MapboxMaps.Map(viewport: $viewport) {
-                        if coordinates.count >= 2 {
-                            PolylineAnnotation(lineCoordinates: coordinates)
-                                .lineColor(UIColor.systemCyan).lineWidth(6)
+                    if let point = position(at: clock.date) {
+                        MapViewAnnotation(coordinate: point) {
+                            Image(systemName: driving && navigation.followsUser ? "location.north.fill" : "circle.fill")
+                                .font(.callout.bold()).foregroundStyle(.white)
+                                .frame(width: 32, height: 32).background(.blue, in: Circle())
+                                .overlay { Circle().stroke(.white, lineWidth: 2) }
+                                .accessibilityLabel(driving ? "Comma location" : "Your location")
                         }
-                        if fresh, let point = navigation.commaPosition {
-                            MapViewAnnotation(coordinate: point) {
-                                Circle().fill(.blue).frame(width: 26, height: 26)
-                                    .overlay { Circle().stroke(.white, lineWidth: 2) }
-                                    .overlay {
-                                        if following {
-                                            Image(systemName: "location.north.fill")
-                                                .font(.caption.bold()).foregroundStyle(.white)
-                                        }
-                                    }
-                                    .accessibilityLabel("Comma location")
-                            }
-                        }
-                    }
-                    .mapStyle(.standard(lightPreset: colorScheme == .dark ? .night : .day))
-                    .onMapLoadingError { if $0.type == .style { loadFailed = true } }
-                    .onStyleLoaded { _ in loadFailed = false }
-                    .onChange(of: viewport.isIdle) { _, idle in if idle { following = false } }
-                    if driving {
-                        HStack {
-                            if fresh {
-                                VStack(alignment: .leading) {
-                                    Text(Date.now.addingTimeInterval(navigation.remainingTime), style: .time)
-                                        .font(.headline)
-                                    Text("Arrival").font(.caption)
-                                }
-                                Text(NavigationDuration.text(navigation.remainingTime))
-                                Text(distance(navigation.remainingDistance))
-                            }
-                            Spacer()
-                            Button("Route overview", systemImage: "arrow.up.left.and.arrow.down.right") {
-                                following = false
-                                showRoute()
-                            }.disabled(coordinates.count < 2)
-                            Button("Follow comma", systemImage: "location.fill") {
-                                following = true
-                                follow()
-                            }.disabled(!fresh)
-                            Button("End", role: .destructive) {
-                                Task { await navigation.end(connection: connection) }
-                            }.disabled(navigation.busy)
-                        }.padding().labelStyle(.iconOnly)
-                    } else {
-                        Text("Explore the map, or start a comma route for live guidance.")
-                            .font(.callout).padding()
                     }
                 }
+                .mapStyle(.standard(lightPreset: colorScheme == .dark ? .night : .day))
+                .ornamentOptions(.init(logo: .init(margins: .init(x: 8, y: panel + 6)),
+                                       attributionButton: .init(margins: .init(x: 8, y: panel + 6))))
+                .onMapLoadingError { if $0.type == .style { onStyleFailure() } }
             }
-        }
-        .onChange(of: route.map { ObjectIdentifier($0) }, initial: true) { _, _ in
-            coordinates = route.map { line in
-                let points = line.points()
-                return (0..<line.pointCount).map { points[$0].coordinate }
-            } ?? []
-            if following {
-                if hasPosition(at: .now) { follow() } else { showRoute() }
+            .onChange(of: viewport.isIdle) { _, idle in if idle { navigation.followsUser = false } }
+            .onChange(of: route.map { ObjectIdentifier($0) }, initial: true) { _, _ in
+                coordinates = route.map { line in
+                    let points = line.points()
+                    return (0..<line.pointCount).map { points[$0].coordinate }
+                } ?? []
+                if navigation.followsUser && position(at: .now) != nil { follow(top: top, bottom: panel) }
+                else if navigation.followsUser { overview(top: top, bottom: panel) }
             }
+            .onChange(of: navigation.overviewRevision) { _, _ in overview(top: top, bottom: panel) }
+            .onChange(of: navigation.followsUser) { _, _ in follow(top: top, bottom: panel) }
+            .onChange(of: driving ? navigation.commaPositionSampleDate : navigation.location?.timestamp) { _, _ in follow(top: top, bottom: panel) }
+            .onChange(of: navigation.commaFeedReady) { _, _ in follow(top: top, bottom: panel) }
+            .onChange(of: panel) { _, _ in follow(top: top, bottom: panel) }
         }
-        .onChange(of: navigation.commaPositionSampleDate, initial: true) { _, _ in follow() }
-        .onChange(of: navigation.commaFeedReady) { _, _ in follow() }
     }
 
-    private func follow() {
-        guard following, hasPosition(at: .now), let point = navigation.commaPosition else { return }
-        let camera = Viewport.camera(center: point, zoom: 16, bearing: navigation.commaHeading, pitch: 60)
-            .padding(.top, 100)
+    private func follow(top: CGFloat, bottom: CGFloat) {
+        guard navigation.followsUser, let point = position(at: .now) else { return }
+        let camera = Viewport.camera(center: point, zoom: driving ? 16 : 15,
+                                     bearing: driving ? navigation.commaHeading : 0, pitch: driving ? 60 : 48)
+            .padding(.init(top: top, leading: 0, bottom: bottom, trailing: 0))
         if reduceMotion { viewport = camera }
         else { withViewportAnimation(.easeInOut(duration: 0.35)) { viewport = camera } }
     }
 
-    private func showRoute() {
+    private func overview(top: CGFloat, bottom: CGFloat) {
         guard coordinates.count >= 2 else { return }
         viewport = .overview(geometry: LineString(coordinates),
-                             geometryPadding: .init(top: 28, leading: 28, bottom: 28, trailing: 28))
-    }
-
-    private func distance(_ meters: Double) -> String {
-        Measurement(value: meters, unit: UnitLength.meters).formatted(.measurement(width: .abbreviated, usage: .road))
+                             geometryPadding: .init(top: top + 8, leading: 24, bottom: bottom + 16, trailing: 24))
     }
 }

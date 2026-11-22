@@ -1,6 +1,49 @@
 import SwiftUI
 import MapKit
 
+private struct NavigationMapLayer: View {
+    @ObservedObject var navigation: NavigationModel
+    let bottomInset: CGFloat
+    @AppStorage(NavigationMapPreference.enabledKey) private var useMapbox = true
+    @AppStorage(NavigationMapPreference.tokenKey) private var token = ""
+
+    private var usesCommaMap: Bool {
+        if navigation.navigating { return navigation.usingComma }
+        return navigation.sendToComma && navigation.destination == nil
+    }
+
+    var body: some View {
+        Group {
+            if useMapbox && token.hasPrefix("pk.") && usesCommaMap {
+                MapboxDriveMap(navigation: navigation, token: token, bottomInset: bottomInset) {
+                    useMapbox = false
+                    navigation.notice = "Mapbox couldn’t load. Using Apple Maps. Check your connection or token in Navigation map settings."
+                }
+            } else if navigation.navigating && navigation.usingComma {
+                CommaFollowingMap(navigation: navigation, bottomInset: bottomInset)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .ignoresSafeArea(.container, edges: [.top, .bottom])
+            } else {
+                Map(position: $navigation.camera) {
+                    UserAnnotation()
+                    ForEach(Array(navigation.routes.enumerated()), id: \.offset) { index, route in
+                        MapPolyline(route.polyline).stroke(index == navigation.selectedRoute ? StarPilotTheme.accent : Color.gray.opacity(0.5),
+                            style: StrokeStyle(lineWidth: index == navigation.selectedRoute ? 8 : 5, lineCap: .round))
+                    }
+                    if let destination = navigation.destination {
+                        Marker(destination.name, coordinate: destination.coordinate).tint(.red)
+                    }
+                }
+                .mapStyle(.standard(elevation: .realistic))
+                .mapControls { MapCompass(); MapScaleView() }
+                .onChange(of: navigation.camera.positionedByUser) { _, moved in
+                    if moved { navigation.followsUser = false }
+                }
+            }
+        }
+    }
+}
+
 private struct StandardNavigationHome: View {
     @ObservedObject var connection: CommaConnection
     @ObservedObject var navigation: NavigationModel
@@ -13,7 +56,6 @@ private struct StandardNavigationHome: View {
     var selectAppTab: (CompanionTab) -> Void
     @State private var searchPurpose: PlaceSearchPurpose?
     @State private var showLibrary = false
-    @State private var showMapboxDrive = false
     @State private var navigationPanelHeight: CGFloat = 0
     @State private var expanded = false
     @State private var appTabsExpanded = true
@@ -26,29 +68,7 @@ private struct StandardNavigationHome: View {
     }
     var body: some View {
         GeometryReader { geometry in
-            Group {
-                if navigation.navigating && navigation.usingComma {
-                    CommaFollowingMap(navigation: navigation, bottomInset: navigationPanelHeight)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .ignoresSafeArea(.container, edges: [.top, .bottom])
-                } else {
-                    Map(position: $navigation.camera) {
-                        UserAnnotation()
-                        ForEach(Array(navigation.routes.enumerated()), id: \.offset) { index, route in
-                            MapPolyline(route.polyline).stroke(index == navigation.selectedRoute ? StarPilotTheme.accent : Color.gray.opacity(0.5),
-                                style: StrokeStyle(lineWidth: index == navigation.selectedRoute ? 8 : 5, lineCap: .round))
-                        }
-                        if let destination = navigation.destination {
-                            Marker(destination.name, coordinate: destination.coordinate).tint(.red)
-                        }
-                    }
-                    .mapStyle(.standard(elevation: .realistic))
-                    .mapControls { MapCompass(); MapScaleView() }
-                    .onChange(of: navigation.camera.positionedByUser) { _, moved in
-                        if moved { navigation.followsUser = false }
-                    }
-                }
-            }
+            NavigationMapLayer(navigation: navigation, bottomInset: navigationPanelHeight)
             .overlay(alignment: .top) { mapHeader.padding(12) }
             .modifier(PlacePanelLayout(overlaid: navigation.navigating && navigation.usingComma) {
                 VStack(spacing: 0) {
@@ -125,9 +145,6 @@ private struct StandardNavigationHome: View {
                     else { selectDestination(place) }
                 }
             }
-            .fullScreenCover(isPresented: $showMapboxDrive) {
-                MapboxDriveView(navigation: navigation, connection: connection)
-            }
             .sheet(isPresented: $showLibrary) {
                 SavedPlacesView(saved: saved) { place in
                     showLibrary = false
@@ -179,7 +196,6 @@ private struct StandardNavigationHome: View {
     }
     private var navigationOptions: some View {
         Menu {
-            Button("3D Drive", systemImage: "map") { showMapboxDrive = true }
             Button("Submit report", systemImage: "bubble.left.and.exclamationmark.bubble.right") {
                 submitReport()
             }
@@ -405,7 +421,6 @@ private struct DuoNavigationHome: View {
     var selectAppTab: (CompanionTab) -> Void
     @State private var searchPurpose: PlaceSearchPurpose?
     @State private var showLibrary = false
-    @State private var showMapboxDrive = false
     @State private var navigationPanelHeight: CGFloat = 0
     @State private var expanded = false
     @State private var appTabsExpanded = true
@@ -418,29 +433,7 @@ private struct DuoNavigationHome: View {
     }
     var body: some View {
         GeometryReader { geometry in
-            Group {
-                if navigation.navigating && navigation.usingComma {
-                    CommaFollowingMap(navigation: navigation, bottomInset: navigationPanelHeight)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .ignoresSafeArea(.container, edges: [.top, .bottom])
-                } else {
-                    Map(position: $navigation.camera) {
-                        UserAnnotation()
-                        ForEach(Array(navigation.routes.enumerated()), id: \.offset) { index, route in
-                            MapPolyline(route.polyline).stroke(index == navigation.selectedRoute ? StarPilotTheme.accent : Color.gray.opacity(0.5),
-                                style: StrokeStyle(lineWidth: index == navigation.selectedRoute ? 8 : 5, lineCap: .round))
-                        }
-                        if let destination = navigation.destination {
-                            Marker(destination.name, coordinate: destination.coordinate).tint(.red)
-                        }
-                    }
-                    .mapStyle(.standard(elevation: .realistic))
-                    .mapControls { MapCompass(); MapScaleView() }
-                    .onChange(of: navigation.camera.positionedByUser) { _, moved in
-                        if moved { navigation.followsUser = false }
-                    }
-                }
-            }
+            NavigationMapLayer(navigation: navigation, bottomInset: navigationPanelHeight)
             .modifier(NavigationMapBackground())
             .overlay(alignment: .top) { mapHeader.padding(12) }
             .modifier(PlacePanelLayout(overlaid: navigation.navigating && navigation.usingComma) {
@@ -524,9 +517,6 @@ private struct DuoNavigationHome: View {
                     else { selectDestination(place) }
                 }
             }
-            .fullScreenCover(isPresented: $showMapboxDrive) {
-                MapboxDriveView(navigation: navigation, connection: connection)
-            }
             .sheet(isPresented: $showLibrary) {
                 SavedPlacesView(saved: saved) { place in
                     showLibrary = false
@@ -586,7 +576,6 @@ private struct DuoNavigationHome: View {
     }
     private var navigationOptions: some View {
         Menu {
-            Button("3D Drive", systemImage: "map") { showMapboxDrive = true }
             if navigation.navigating {
                 Button("Show full route", systemImage: "arrow.up.left.and.arrow.down.right") {
                     navigation.showOverview()

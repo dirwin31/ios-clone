@@ -35,7 +35,9 @@ struct ConnectionSettingsView: View {
     @State private var confirmForget = false
     @State private var confirmPairingReset = false
     @State private var confirmNavigationAlpha = false
-    @State private var showMapboxDrive = false
+    @AppStorage(NavigationMapPreference.enabledKey) private var useMapbox = true
+    @AppStorage(NavigationMapPreference.tokenKey) private var mapboxToken = ""
+    @State private var showMapSettings = false
     @State private var showPairingHelp = false
     @State private var checked = false
     @State private var openAfterReconnect = false
@@ -97,9 +99,8 @@ struct ConnectionSettingsView: View {
                 .init(color: model.navigationEnabled ? panel.opacity(0.8) : background, location: 1)
             ], startPoint: .top, endPoint: .bottom).ignoresSafeArea()
         }.foregroundStyle(Color.primary).preferredColorScheme(model.navigationEnabled ? nil : .dark)
-            .fullScreenCover(isPresented: $showMapboxDrive) {
-                MapboxDriveView(navigation: model.navigationServices.navigation,
-                                connection: model.navigationServices.connection)
+            .sheet(isPresented: $showMapSettings) {
+                NavigationMapSettings()
             }
             .alert("Enable navigation alpha?", isPresented: $confirmNavigationAlpha) {
                 Button("Cancel", role: .cancel) { }
@@ -516,11 +517,11 @@ struct ConnectionSettingsView: View {
                             .accessibilityIdentifier("navigation-alpha-toggle")
                     }
                     separator
-                    row("map", title: "3D Drive", subtitle: model.navigationEnabled ? "Mapbox map and comma route guidance" : "Explore the map · enable Navigation alpha for guidance") {
-                        Button("Open") { showMapboxDrive = true }
+                    row("map", title: "Navigation map", subtitle: useMapbox && mapboxToken.hasPrefix("pk.") ? "Mapbox 3D" : "Apple Maps") {
+                        Button("Change") { showMapSettings = true }
                             .frame(minHeight: 44)
-                            .accessibilityLabel("Open 3D Drive")
-                            .accessibilityIdentifier("settings-open-3d-drive")
+                            .accessibilityLabel("Change navigation map")
+                            .accessibilityIdentifier("navigation-map-settings")
                     }
                 }
             }

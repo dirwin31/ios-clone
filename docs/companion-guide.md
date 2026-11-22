@@ -1,5 +1,7 @@
 # Companion guide
 
+To use Mapbox in the iPhone Navigation tab, enable **Navigation alpha testing**, then open **Navigation map → Change** beside it. Enter a public Mapbox token and choose **Use Mapbox 3D**. Galaxy uses the 3D map for browsing in comma mode and for active comma trips. Destination previews, iPhone-guided trips, and CarPlay use Apple Maps.
+
 The iOS source is in [starpilot-galaxy-ios](https://github.com/natehuby76/starpilot-galaxy-ios). Use `ios-companion-release` for the release app, `ios-companion-staging` for Live View testing, and `ios-companion-dev` for development including notification mirroring.
 
 The app starts with the regular StarPilot BT interface. Under Developer mode, Navigation alpha testing enables the native navigation interface and CarPlay map. Regular CarPlay keeps its existing toggles and stats. Turning alpha off clears phone navigation without sending a route-clear command to comma.
