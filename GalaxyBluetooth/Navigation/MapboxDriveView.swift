@@ -110,8 +110,8 @@ struct MapboxDriveMap: View {
     @AppStorage(NavigationMapPreference.poiKey) private var labels = PointLabels.always
     @AppStorage(NavigationMapPreference.placesKey) private var showPlaces = true
     @AppStorage(NavigationMapPreference.trafficKey) private var showTraffic = false
-    @Environment(\.layoutDirection) private var layoutDirection
     let carDisplay: CarDisplayMapOptions?
+    let headerBottom: CGFloat
     let tripFrame: CGRect
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -128,9 +128,10 @@ struct MapboxDriveMap: View {
     private var following: Bool { carDisplay.map { !$0.overview } ?? navigation.followsUser }
     private var anchored: Bool { driving && following && cameraFix != nil }
 
-    init(navigation: NavigationModel, token: String, tripFrame: CGRect, carDisplay: CarDisplayMapOptions? = nil) {
+    init(navigation: NavigationModel, token: String, tripFrame: CGRect, headerBottom: CGFloat = 0, carDisplay: CarDisplayMapOptions? = nil) {
         self.navigation = navigation
         self.carDisplay = carDisplay
+        self.headerBottom = headerBottom
         self.tripFrame = tripFrame
         if MapboxOptions.accessToken != token { MapboxOptions.accessToken = token }
         let center = navigation.usingComma ? navigation.commaPosition : navigation.location?.coordinate
@@ -158,10 +159,10 @@ struct MapboxDriveMap: View {
             let bounds = geometry.frame(in: .global)
             let phoneInset = driving && !tripFrame.isEmpty ? min(bounds.height, max(0, bounds.maxY - tripFrame.minY)) : 0
             let panel: CGFloat = carDisplay == nil ? phoneInset : min(65, geometry.size.height * 0.24)
-            let carX: CGFloat = layoutDirection == .rightToLeft ? 0.68 : 0.32
+            let headerInset = max(8, headerBottom - bounds.minY + 2)
             let anchor = CGPoint(
                 x: carDisplay == nil ? (tripFrame.isEmpty ? bounds.width / 2 : min(bounds.width * 0.9, max(bounds.width * 0.1, tripFrame.midX - bounds.minX))) :
-                    bounds.width * (carDisplay?.dashboard == true ? 0.5 : carX),
+                    bounds.width / 2 + (geometry.safeAreaInsets.leading - geometry.safeAreaInsets.trailing) / 2,
                 y: max(bounds.height * 0.35, bounds.height - panel - (carDisplay == nil ? DrivePositionMarker.barClearance + DrivePositionMarker.diameter / 2 : 18)))
             let dx = 2 * anchor.x - bounds.width, dy = 2 * anchor.y - bounds.height
             let padding = driving ? EdgeInsets(top: max(0, dy), leading: max(0, dx), bottom: max(0, -dy), trailing: max(0, -dx))
@@ -215,8 +216,7 @@ struct MapboxDriveMap: View {
                                     showPlaceLabels: showPlaces,
                                     densityPointOfInterestLabels: labels == .automatic && driving ? 1 : 3))
                 .usesSafeAreaInsetsAsPadding(!anchored)
-                .ornamentOptions(.init(logo: .init(margins: .init(x: 8, y: panel + 6)),
-                                       attributionButton: .init(margins: .init(x: 8, y: panel + 6))))
+                .ornamentOptions(mapOrnaments(headerInset: headerInset, panel: panel))
                 .onMapLoadingError {
                     if $0.type == .style {
                         navigation.notice = "Mapbox couldn’t load. Check your internet connection and public token in Navigation map settings."
@@ -269,6 +269,24 @@ struct MapboxDriveMap: View {
         }
     }
 
+    private func mapOrnaments(headerInset: CGFloat, panel: CGFloat) -> OrnamentOptions {
+        var options = OrnamentOptions()
+        if let carDisplay {
+            options.scaleBar.visibility = .hidden
+            // Leave the screen edges for CarPlay’s dock and zoom buttons.
+            let inset: CGFloat = carDisplay.dashboard ? 8 : 52
+            options.attributionButton.margins = CGPoint(x: inset, y: panel + 6)
+            options.logo.position = .bottomTrailing
+            options.logo.margins = CGPoint(x: inset + 28, y: panel + 6)
+        } else {
+            options.scaleBar.margins = CGPoint(x: 12, y: headerInset)
+            options.compass.margins = CGPoint(x: 12, y: headerInset)
+            options.logo.margins = CGPoint(x: 8, y: panel + 6)
+            options.attributionButton.margins = CGPoint(x: 8, y: panel + 6)
+        }
+        return options
+    }
+
     private func destinationFeature(_ destination: NavigationPlace) -> Feature {
         var feature = Feature(geometry: .point(Point(destination.coordinate)))
         feature.properties = ["name": .string(destination.name)]
@@ -293,7 +311,10 @@ struct MapboxDriveMap: View {
         let speed = commaTrip ? commaSpeed : navigation.goodLocation?.speed ?? 0
         let distance = NavigationMapMotion.cameraDistance(speed: speed, distanceToTurn: navigation.distanceToTurn)
         // Restrict the guide camera to street-level detail while keeping lookahead on faster roads.
-        let zoom = driving ? 17.6 - 0.8 * log2(distance / 1200) : 16.8
+        let targetPitch = driving ? navigation.followPitch(cruising: 72, speed: speed) : 48
+        let cruiseFraction = min(1, max(0, (targetPitch - 40) / 32))
+        let lookAhead = cruiseFraction * (carDisplay == nil ? 0.32 : 0.48)
+        let zoom = driving ? 17.6 - 0.8 * log2(distance / 1200) - lookAhead : 16.8
         let measuredBearing = commaTrip ? navigation.commaHeading : navigation.location?.course ?? -1
         let validBearing = measuredBearing.isFinite && (0..<360).contains(measuredBearing)
         let moving = speed >= 1.2 || displacement >= 6
@@ -302,7 +323,6 @@ struct MapboxDriveMap: View {
                 fraction: continuous ? 1 - exp(-dt / 0.5) : 1)
         }
         cameraZoom += (zoom - cameraZoom) * (continuous ? 1 - exp(-dt / 2) : 1)
-        let targetPitch = driving ? navigation.followPitch(cruising: 68, speed: speed) : 48
         cameraPitch += (targetPitch - cameraPitch) * (continuous ? 1 - exp(-dt / 1.2) : 1)
         let accepted = continuous && !moving ? previous?.coordinate ?? point : point
         let center = aligned(accepted)

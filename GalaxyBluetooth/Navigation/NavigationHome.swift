@@ -3,6 +3,7 @@ import MapKit
 
 private struct NavigationMapLayer: View {
     @ObservedObject var navigation: NavigationModel
+    let headerBottom: CGFloat
     let tripFrame: CGRect
     @AppStorage(NavigationMapPreference.enabledKey) private var useMapbox = true
     @AppStorage(NavigationMapPreference.tokenKey) private var token = ""
@@ -10,7 +11,7 @@ private struct NavigationMapLayer: View {
     var body: some View {
         Group {
             if useMapbox && token.hasPrefix("pk.") {
-                MapboxDriveMap(navigation: navigation, token: token, tripFrame: tripFrame)
+                MapboxDriveMap(navigation: navigation, token: token, tripFrame: tripFrame, headerBottom: headerBottom)
                     .id(token)
             } else if navigation.navigating && navigation.usingComma {
                 CommaFollowingMap(navigation: navigation, bottomInset: tripFrame.height)
@@ -127,6 +128,7 @@ private struct StandardNavigationHome: View {
     var selectAppTab: (CompanionTab) -> Void
     @State private var searchPurpose: PlaceSearchPurpose?
     @State private var showLibrary = false
+    @State private var headerBottom: CGFloat = 0
     @State private var tripFrame = CGRect.zero
     @State private var panelLevel: PlacePanelLevel = .standard
     @GestureState private var panelDrag: CGFloat = 0
@@ -141,8 +143,11 @@ private struct StandardNavigationHome: View {
     }
     var body: some View {
         GeometryReader { geometry in
-            NavigationMapLayer(navigation: navigation, tripFrame: tripFrame)
-            .overlay(alignment: .top) { mapHeader.padding(12) }
+            NavigationMapLayer(navigation: navigation, headerBottom: headerBottom, tripFrame: tripFrame)
+            .overlay(alignment: .top) {
+                mapHeader.padding(12)
+                    .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).maxY } action: { headerBottom = $0 }
+            }
             .modifier(PlacePanelLayout(guiding: navigation.navigating) {
                 VStack(spacing: 0) {
                     if !navigation.navigating {
@@ -526,6 +531,7 @@ private struct DuoNavigationHome: View {
     var selectAppTab: (CompanionTab) -> Void
     @State private var searchPurpose: PlaceSearchPurpose?
     @State private var showLibrary = false
+    @State private var headerBottom: CGFloat = 0
     @State private var tripFrame = CGRect.zero
     @State private var panelLevel: PlacePanelLevel = .standard
     @GestureState private var panelDrag: CGFloat = 0
@@ -540,9 +546,12 @@ private struct DuoNavigationHome: View {
     }
     var body: some View {
         GeometryReader { geometry in
-            NavigationMapLayer(navigation: navigation, tripFrame: tripFrame)
+            NavigationMapLayer(navigation: navigation, headerBottom: headerBottom, tripFrame: tripFrame)
             .modifier(NavigationMapBackground())
-            .overlay(alignment: .top) { mapHeader.padding(12) }
+            .overlay(alignment: .top) {
+                mapHeader.padding(12)
+                    .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).maxY } action: { headerBottom = $0 }
+            }
             .modifier(PlacePanelLayout(guiding: navigation.navigating) {
                 VStack(spacing: 0) {
                     if !navigation.navigating {

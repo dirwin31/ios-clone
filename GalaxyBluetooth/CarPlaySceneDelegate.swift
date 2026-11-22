@@ -1423,13 +1423,7 @@ private final class CompanionCarPlayMap: UIViewController, MKMapViewDelegate {
             map.setCamera(camera, animated: false)
         }
         let current = map.camera
-        let cardOnRight = map.effectiveUserInterfaceLayoutDirection == .rightToLeft
-        // CarPlay hosts the ETA card on the leading side and exposes no card frame.
-        // Frame above that side of the map, accounting for the dock and RTL.
-        let safe = map.safeAreaLayoutGuide.layoutFrame
-        let horizontal = dashboard || safe.isEmpty ? frame : safe
-        let xFraction: CGFloat = dashboard ? 0.5 : (cardOnRight ? 0.68 : 0.32)
-        let anchor = CGPoint(x: horizontal.minX + horizontal.width * xFraction,
+        let anchor = CGPoint(x: frame.midX,
                              y: frame.minY + max(frame.height * 0.45, frame.height - (dashboard ? 30 : min(68, frame.height * 0.26))))
         let ground = map.convert(anchor, toCoordinateFrom: map)
         if CLLocationCoordinate2DIsValid(ground), current.centerCoordinateDistance > 0 {
