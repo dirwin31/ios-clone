@@ -345,7 +345,8 @@ struct MapboxDriveMap: View {
         let speed = commaTrip ? commaSpeed : navigation.goodLocation?.speed ?? 0
         let distance = NavigationMapMotion.cameraDistance(speed: speed, distanceToTurn: navigation.distanceToTurn)
         // Restrict the guide camera to street-level detail while keeping lookahead on faster roads.
-        let zoom = driving ? 17.6 - 0.8 * log2(distance / 1200) : 16.8
+        let drivingZoom = carDisplay == nil ? 18.0 : 17.6
+        let zoom = driving ? drivingZoom - 0.8 * log2(distance / 1200) : 16.8
         let measuredBearing = commaTrip ? navigation.commaHeading : navigation.location?.course ?? -1
         let validBearing = measuredBearing.isFinite && (0..<360).contains(measuredBearing)
         let moving = speed >= 1.2 || displacement >= 6
