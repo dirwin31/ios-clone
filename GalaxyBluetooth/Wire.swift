@@ -28,6 +28,10 @@ struct BridgeResponse: Codable {
     let headers: [String: String]
     let body: String
 
+    // Local timing only. A remote response must never set its own freshness baseline.
+    var bluetoothDispatchDate: Date? = nil
+    private enum CodingKeys: String, CodingKey { case id, session, counter, status, headers, body }
+
     var bodyData: Data { Data(base64Encoded: body) ?? Data() }
 }
 

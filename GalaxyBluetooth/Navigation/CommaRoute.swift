@@ -67,6 +67,7 @@ struct CommaRouteSnapshot: Decodable {
     let polyline6: String?
     let instruction: CommaInstruction?
     let error: String?
+    var bluetoothDispatchDate: Date? = nil
     var routePoints: [RoutePoint]? = nil
     var positionValidForSeconds: Double? = nil
     enum CodingKeys: String, CodingKey {

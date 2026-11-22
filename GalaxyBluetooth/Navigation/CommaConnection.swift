@@ -32,8 +32,15 @@ final class CommaConnection: ObservableObject {
         guard connected, !setupInProgress else { throw BridgeError.message("Finish connection setup before using navigation.") }
         if let identity = deviceIdentity { return identity }
         let before = session
-        let response = try await transport.request(path: nativeNavigation ? "/data/runtime.json" : "/api/params?key=DongleId", method: "GET", headers: [:], body: Data())
-        guard connected, session == before, response.status == 200 else { throw BridgeError.message("Connection changed while verifying comma.") }
+        let bluetoothRuntime = nativeNavigation && transport.selectedRoute == .bluetooth
+        let path = bluetoothRuntime ? "/api/companion/runtime" : (nativeNavigation ? "/data/runtime.json" : "/api/params?key=DongleId")
+        var response = try await transport.request(path: path, method: "GET", headers: [:], body: Data())
+        guard connected, session == before else { throw BridgeError.message("Connection changed while verifying comma.") }
+        if bluetoothRuntime, response.status == 404 || (response.status == 200 && NativeNavigationAPI.identity(response.bodyData) == nil) {
+            response = try await transport.request(path: "/data/runtime.json", method: "GET", headers: [:], body: Data())
+        }
+        guard connected, session == before else { throw BridgeError.message("Connection changed while verifying comma.") }
+        guard response.status == 200 else { throw BridgeError.message("Couldn’t verify comma over \(transport.label) (HTTP \(response.status)).") }
         let identity = nativeNavigation ? NativeNavigationAPI.identity(response.bodyData) : String(data: response.bodyData, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let identity, identity.count == 16, identity.utf8.allSatisfy({ (48...57).contains($0) || (97...102).contains($0) }) else { throw BridgeError.message("Comma identity unavailable.") }
         verifiedIdentity = identity; identitySession = networkSession
@@ -100,7 +107,8 @@ final class CommaConnection: ObservableObject {
             let response = try await transport.request(path: try NativeNavigationAPI.statusPath(version: version), method: "GET", headers: [:], body: Data())
             guard before == session, response.status == 200 else { throw BridgeError.message("Comma navigation status unavailable (HTTP \(response.status)).") }
             let decoded = try NativeNavigationAPI.decode(response.bodyData)
-            let snapshot = try NativeNavigationAPI.snapshot(response.bodyData)
+            var snapshot = try NativeNavigationAPI.snapshot(response.bodyData)
+            snapshot.bluetoothDispatchDate = response.bluetoothDispatchDate
             if let version = snapshot.routeVersion { nativeRouteVersion = (before, version) }
             let state = "Navigation feed: \(decoded.status); enabled: \(decoded.enabled); map key configured: \(decoded.hasKey); instruction: \(snapshot.instruction != nil)"
             if requestID == 1 || requestID % 30 == 0 || state != lastFeedState {

@@ -1,4 +1,5 @@
 import SwiftUI
+import MapKit
 
 enum PlaceSearchPurpose: String, Identifiable {
     case destination, home, work, favorite
@@ -35,6 +36,22 @@ struct PlaceSearch: View {
                         Button("Clear Recent Destinations", role: .destructive) { saved.clearRecentDestinations() }
                     }
                 }
+                ForEach(navigation.suggestions, id: \.self) { suggestion in
+                    Button {
+                        Task {
+                            if let place = await navigation.resolve(suggestion) { onSelect(place); dismiss() }
+                        }
+                    } label: {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(suggestion.title).font(.headline).foregroundStyle(.primary)
+                            if !suggestion.subtitle.isEmpty {
+                                Text(suggestion.subtitle).font(.caption).foregroundStyle(.secondary)
+                            }
+                        }.padding(.vertical, 6)
+                    }
+                    .disabled(navigation.searching)
+                    .accessibilityIdentifier("place-search-result")
+                }
                 ForEach(query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? [] : navigation.results) { place in
                     Button { onSelect(place); dismiss() } label: {
                         HStack(spacing: 14) {
@@ -46,7 +63,7 @@ struct PlaceSearch: View {
                         }.padding(.vertical, 6)
                     }.accessibilityIdentifier("place-search-result")
                 }
-                if !navigation.error.isEmpty { Text(LocalizedStringKey(navigation.error)).foregroundStyle(.secondary) }
+                if !navigation.searchMessage.isEmpty { Text(LocalizedStringKey(navigation.searchMessage)).foregroundStyle(.secondary) }
                 if query.isEmpty {
                     Text(saveAs == .home ? "Search for your home address, then select it to save." :
                         saveAs == .work ? "Search for your work address, then select it to save." :
@@ -56,10 +73,8 @@ struct PlaceSearch: View {
             .navigationTitle(choosingStart ? "Starting point" : saveAs == .home ? "Add Home" : saveAs == .work ? "Add Work" : saveAs == .favorite ? "Add Favorite" : "Search Maps")
             .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search places or addresses")
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } } }
-            .task(id: query) {
-                do { try await Task.sleep(for: .milliseconds(450)); try Task.checkCancellation(); await navigation.search(query) }
-                catch {}
-            }
+            .onChange(of: query, initial: true) { _, text in navigation.suggest(text, choosingStart: choosingStart) }
+            .onDisappear { navigation.cancelPlaceSearch() }
         }.presentationDetents([.medium, .large])
     }
 }

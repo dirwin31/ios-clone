@@ -99,6 +99,7 @@ final class BluetoothTransport: NSObject, ObservableObject, GalaxyRequestTranspo
     private var counter: UInt64 = 0
     private var queue: [Pending] = []
     private var priorityStreak = 0
+    private var dispatchDate = Date.distantPast
     private var requestStarted = 0.0
     private var receivedPackets = 0
     private var receivedWireBytes = 0
@@ -380,6 +381,7 @@ final class BluetoothTransport: NSObject, ObservableObject, GalaxyRequestTranspo
         active = queue.remove(at: index)
         guard let active else { return }
         priorityStreak = index > 0 ? min(3, priorityStreak + 1) : 0
+        dispatchDate = Date()
         requestStarted = ProcessInfo.processInfo.systemUptime
         receivedPackets = 0
         receivedWireBytes = 0
@@ -450,7 +452,13 @@ final class BluetoothTransport: NSObject, ObservableObject, GalaxyRequestTranspo
         outgoing = []
         notificationBuffer = []
         if activeCancelled { previous?.completion.resume(throwing: CancellationError()) }
-        else { previous?.completion.resume(with: result) }
+        else {
+            previous?.completion.resume(with: result.map { value in
+                var response = value
+                response.bluetoothDispatchDate = dispatchDate
+                return response
+            })
+        }
         activeCancelled = false
         pump()
     }

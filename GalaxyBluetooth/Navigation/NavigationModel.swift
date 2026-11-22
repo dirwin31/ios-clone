@@ -98,7 +98,7 @@ struct NavigationPlace: Identifiable {
 }
 
 @MainActor
-final class NavigationModel: NSObject, ObservableObject, @preconcurrency CLLocationManagerDelegate {
+final class NavigationModel: NSObject, ObservableObject, @preconcurrency CLLocationManagerDelegate, @preconcurrency MKLocalSearchCompleterDelegate {
     var onEvent: ((String) -> Void)?
     @Published var results: [NavigationPlace] = []
     @Published var destination: NavigationPlace?
@@ -130,6 +130,9 @@ final class NavigationModel: NSObject, ObservableObject, @preconcurrency CLLocat
     @Published var camera: MapCameraPosition = .userLocation(fallback: .automatic)
     @Published var sendToComma = true { didSet { if oldValue != sendToComma { onEvent?("Send to comma changed: \(sendToComma)") } } }
     private let manager = CLLocationManager()
+    @Published private(set) var suggestions: [MKLocalSearchCompletion] = []
+    @Published private(set) var searchMessage = ""
+    private var completer: MKLocalSearchCompleter?
     private var searchRequest: MKLocalSearch?
     private var directions: MKDirections?
     private var revision = UUID()
@@ -198,8 +201,8 @@ final class NavigationModel: NSObject, ObservableObject, @preconcurrency CLLocat
         if !active {
             if usingComma { clearCommaDisplay("Reconnecting to comma…") }
             manager.stopUpdatingLocation()
-            directions?.cancel(); searchRequest?.cancel()
-            revision = UUID(); searchRevision = UUID()
+            directions?.cancel(); cancelPlaceSearch()
+            revision = UUID()
             searching = false; if !commandRunning { busy = false }; recalculating = false
         }
     }
@@ -240,7 +243,23 @@ final class NavigationModel: NSObject, ObservableObject, @preconcurrency CLLocat
             Task { await calculateRoutes(refresh: true) }
         }
     }
-    func search(_ query: String) async {
+    func cancelPlaceSearch() {
+        searchRevision = UUID()
+        completer?.delegate = nil
+        completer?.cancel()
+        completer = nil
+        searchRequest?.cancel()
+        searchRequest = nil
+        suggestions = []
+        results = []
+        searching = false
+        searchMessage = ""
+    }
+
+    func suggest(_ query: String, choosingStart: Bool) {
+        cancelPlaceSearch()
+        let cleaned = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleaned.isEmpty else { return }
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("--ui-testing") {
             results = query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? [] : [NavigationPlace(
@@ -250,30 +269,71 @@ final class NavigationModel: NSObject, ObservableObject, @preconcurrency CLLocat
             return
         }
         #endif
-        searchRequest?.cancel()
-        let token = UUID(); searchRevision = token
-        let cleaned = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !cleaned.isEmpty else { results = []; searching = false; return }
-        onEvent?("Place search started (query omitted)")
-        searching = true; error = ""
-        let request = MKLocalSearch.Request()
-        request.naturalLanguageQuery = cleaned
-        if let location = goodLocation {
-            request.region = MKCoordinateRegion(center: location.coordinate,
-                latitudinalMeters: 30_000, longitudinalMeters: 30_000)
+        let service = MKLocalSearchCompleter()
+        service.resultTypes = [.address, .pointOfInterest]
+        let nearby = location.flatMap { fix in
+            fix.horizontalAccuracy >= 0 && fix.horizontalAccuracy <= 5000
+                && abs(fix.timestamp.timeIntervalSinceNow) <= 900 ? fix.coordinate : nil
         }
-        let search = MKLocalSearch(request: request); searchRequest = search
+        let center = choosingStart ? (nearby ?? destination?.coordinate) : (plannedStart?.coordinate ?? nearby)
+        if let center {
+            service.region = MKCoordinateRegion(center: center, latitudinalMeters: 30_000, longitudinalMeters: 30_000)
+        }
+        completer = service
+        service.delegate = self
+        searching = true
+        service.queryFragment = cleaned
+    }
+
+    func completerDidUpdateResults(_ service: MKLocalSearchCompleter) {
+        guard service === completer else { return }
+        suggestions = Array(service.results.prefix(12))
+        if suggestions.isEmpty { searchFullText(service) }
+        else { searching = false }
+    }
+
+    func completer(_ service: MKLocalSearchCompleter, didFailWithError error: Error) {
+        guard service === completer else { return }
+        searchFullText(service)
+    }
+
+    private func searchFullText(_ service: MKLocalSearchCompleter) {
+        service.delegate = nil
+        let request = MKLocalSearch.Request()
+        request.naturalLanguageQuery = service.queryFragment
+        request.region = service.region
+        let token = searchRevision
+        Task {
+            guard searchRevision == token else { return }
+            let items = await findPlaces(request, token: token)
+            guard searchRevision == token else { return }
+            results = items.map { NavigationPlace(item: $0) }
+        }
+    }
+
+    func resolve(_ suggestion: MKLocalSearchCompletion) async -> NavigationPlace? {
+        guard suggestions.contains(where: { $0 === suggestion }), !searching else { return nil }
+        let token = searchRevision
+        let items = await findPlaces(MKLocalSearch.Request(completion: suggestion), token: token)
+        guard searchRevision == token, let item = items.first else { return nil }
+        return NavigationPlace(item: item, subtitle: suggestion.subtitle.isEmpty ? nil : suggestion.subtitle)
+    }
+
+    private func findPlaces(_ request: MKLocalSearch.Request, token: UUID) async -> [MKMapItem] {
+        searching = true
+        searchMessage = ""
+        let search = MKLocalSearch(request: request)
+        searchRequest = search
+        defer { if searchRevision == token { searching = false; searchRequest = nil } }
         do {
             let response = try await search.start()
-            guard foreground, searchRevision == token, !Task.isCancelled else { return }
-            onEvent?("Place search completed: \(response.mapItems.count) results")
-            results = response.mapItems.prefix(12).map { NavigationPlace(item: $0) }
-            if results.isEmpty { error = "No places found. Try a more specific search." }
+            guard searchRevision == token else { return [] }
+            if response.mapItems.isEmpty { searchMessage = "No places found. Try a more specific search." }
+            return Array(response.mapItems.prefix(12))
         } catch {
-            onEvent?("Place search failed: \(LANTransport.failureCode(error)); cancelled: \(Task.isCancelled)")
-            if searchRevision == token, !Task.isCancelled { self.error = "Couldn’t search places. Check your phone’s internet connection." }
+            if searchRevision == token { searchMessage = "Couldn’t find this place. Try again or refine your search." }
+            return []
         }
-        if searchRevision == token { searching = false }
     }
     func select(_ place: NavigationPlace) async {
         onEvent?("Destination selected; busy: \(busy); navigating: \(navigating)")
@@ -408,11 +468,12 @@ final class NavigationModel: NSObject, ObservableObject, @preconcurrency CLLocat
             }
             var sending = false
             do {
-                onEvent?("Go: checking comma navigation readiness")
-                let feed = try await connection.navigationSnapshot()
-                guard generation == commandGeneration else { return }
-                onEvent?("Go readiness: \(feed.ready); state: \(feed.status)")
-                guard feed.ready else { throw BridgeError.message(feed.error ?? "Comma’s navigation reader is starting. Try again in a moment.") }
+                if !connection.nativeNavigation {
+                    let feed = try await connection.navigationSnapshot()
+                    guard generation == commandGeneration else { return }
+                    guard feed.ready else { throw BridgeError.message(feed.error ?? "Comma’s navigation reader is starting. Try again in a moment.") }
+                }
+                guard connection.deviceIdentity == identity else { throw BridgeError.message("Comma connection changed. Try again.") }
                 let destinationPayload = try NavigationDestination(name: destination.name,
                     latitude: destination.coordinate.latitude, longitude: destination.coordinate.longitude)
                 sending = true
@@ -539,30 +600,32 @@ final class NavigationModel: NSObject, ObservableObject, @preconcurrency CLLocat
                     do { try await Task.sleep(for: .seconds(2)) } catch { return }
                     continue
                 }
+                // Time in the phone's outbound queue precedes sampling on comma.
+                let sampledAfter = max(requestedAt, min(snapshot.bluetoothDispatchDate ?? requestedAt, Date()))
                 guidanceMaxAge = connection.nativeNavigation ? NativeNavigationAPI.guidanceDisplayMaxAge : 4
-                let elapsed = Date().timeIntervalSince(requestedAt)
+                let elapsed = Date().timeIntervalSince(sampledAfter)
                 let remaining = connection.nativeNavigation
                     ? NativeNavigationAPI.guidanceRemaining(ageUpperBound: snapshot.ageSeconds, elapsed: elapsed)
                     : max(0, guidanceMaxAge - (snapshot.ageSeconds ?? guidanceMaxAge) - elapsed)
                 guard let age = snapshot.ageSeconds, remaining > 0 else {
-                    onEvent?("Guidance rejected: stale; server age: \(snapshot.ageSeconds ?? -1)s; request elapsed: \(String(format: "%.3f", Date().timeIntervalSince(requestedAt)))s; limit: \(guidanceMaxAge)s")
+                    onEvent?("Guidance rejected: stale; server age: \(snapshot.ageSeconds ?? -1)s; request elapsed: \(String(format: "%.3f", Date().timeIntervalSince(sampledAfter)))s; limit: \(guidanceMaxAge)s")
                     commaFeedReady = false; commaPolyline = nil; commaPosition = nil
                     commaFeedMessage = "Waiting for fresh navigation from comma…"
                     instruction = "Navigation unavailable"; distanceToTurn = 0; remainingDistance = 0; remainingTime = 0
                     do { try await Task.sleep(for: .seconds(2)) } catch { return }
                     continue
                 }
-                onEvent?("Guidance accepted; remaining freshness: \(String(format: "%.3f", guidanceMaxAge - age - Date().timeIntervalSince(requestedAt)))s")
+                onEvent?("Guidance accepted; remaining freshness: \(String(format: "%.3f", guidanceMaxAge - age - Date().timeIntervalSince(sampledAfter)))s")
                 commaPolyline = cachedCommaPolyline
-                lastCommaSample = requestedAt.addingTimeInterval(-age)
+                lastCommaSample = sampledAfter.addingTimeInterval(-age)
                 instruction = [instructions.primary, instructions.secondary].filter { !$0.isEmpty }.joined(separator: "\n")
                 distanceToTurn = instructions.distance
                 remainingDistance = instructions.distanceRemaining; remainingTime = instructions.timeRemaining
                 commaManeuverType = instructions.type; commaManeuverModifier = instructions.modifier
                 commaFeedReady = true; commaFeedMessage = ""; error = ""
-                if let position = snapshot.position, snapshot.positionValidForSeconds == nil || snapshot.positionValidForSeconds! > Date().timeIntervalSince(requestedAt) {
-                    commaPositionExpires = snapshot.positionValidForSeconds.map { requestedAt.addingTimeInterval($0) }
-                    commaPositionSampleDate = requestedAt
+                if let position = snapshot.position, snapshot.positionValidForSeconds == nil || snapshot.positionValidForSeconds! > Date().timeIntervalSince(sampledAfter) {
+                    commaPositionExpires = snapshot.positionValidForSeconds.map { sampledAfter.addingTimeInterval($0) }
+                    commaPositionSampleDate = sampledAfter
                     if let bearing = position.bearing { commaBearing = bearing }
                     commaPosition = CLLocationCoordinate2D(latitude: position.latitude, longitude: position.longitude)
                 } else { commaPosition = nil }
@@ -629,9 +692,9 @@ final class NavigationModel: NSObject, ObservableObject, @preconcurrency CLLocat
     }
 
     func resetLocalNavigation() {
-        commandGeneration = UUID(); revision = UUID(); searchRevision = UUID()
+        commandGeneration = UUID(); revision = UUID()
         directions?.cancel(); directions = nil
-        searchRequest?.cancel(); searchRequest = nil
+        cancelPlaceSearch()
         commandRunning = false; endingRoute = false; busy = false; searching = false; recalculating = false
         navigating = false; usingComma = false
         results = []; routes = []; plannedStart = nil; destination = nil; selectedRoute = 0
