@@ -167,6 +167,7 @@ final class CompanionDiagnostics: ObservableObject {
 }
 
 struct CompanionView: View {
+    @AppStorage(AppPreference.liveScreenAwake) private var keepAwake = true
     @ObservedObject var diagnostics: CompanionDiagnostics
     private let purple = Color(red: 0.55, green: 0.36, blue: 0.96)
     var body: some View {
@@ -174,8 +175,9 @@ struct CompanionView: View {
             if diagnostics.live { liveView } else { diagnosticView }
         }
         .background(Color(uiColor: .systemBackground))
-        .onAppear { diagnostics.phoneVisible = true; UIApplication.shared.isIdleTimerDisabled = diagnostics.live }
-        .onChange(of: diagnostics.live) { _, live in UIApplication.shared.isIdleTimerDisabled = live }
+        .onAppear { diagnostics.phoneVisible = true; UIApplication.shared.isIdleTimerDisabled = diagnostics.live && keepAwake }
+        .onChange(of: diagnostics.live) { _, live in UIApplication.shared.isIdleTimerDisabled = live && keepAwake }
+        .onChange(of: keepAwake) { _, enabled in UIApplication.shared.isIdleTimerDisabled = diagnostics.live && enabled }
         .onDisappear { diagnostics.phoneVisible = false; UIApplication.shared.isIdleTimerDisabled = false }
     }
     private var liveView: some View {

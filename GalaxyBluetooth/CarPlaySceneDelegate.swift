@@ -378,14 +378,8 @@ final class CarPlaySceneDelegate: NSObject, CPTemplateApplicationSceneDelegate, 
     }
 
     private func travelEstimates(meters: Double, seconds: Double) -> CPTravelEstimates {
-        let actual = Measurement(value: meters, unit: UnitLength.meters)
-        let display: Measurement<UnitLength>
-        if Locale.current.measurementSystem == .us || Locale.current.measurementSystem == .uk {
-            display = meters >= 160.9344 ? actual.converted(to: .miles) :
-                actual.converted(to: Locale.current.measurementSystem == .uk ? .yards : .feet)
-        } else {
-            display = meters >= 1000 ? actual.converted(to: .kilometers) : actual
-        }
+        let units = NavigationDistanceUnits(rawValue: UserDefaults.standard.string(forKey: NavigationDistanceUnits.key) ?? "") ?? .system
+        let display = units.measurement(meters)
         if #available(iOS 17.4, *) {
             return CPTravelEstimates(distanceRemaining: display, distanceRemainingToDisplay: display, timeRemaining: seconds)
         }

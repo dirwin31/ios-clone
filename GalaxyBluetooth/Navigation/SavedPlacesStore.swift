@@ -33,6 +33,7 @@ final class SavedPlacesStore: ObservableObject {
         }
     }
     func rememberDestination(_ place: NavigationPlace) {
+        guard defaults.object(forKey: AppPreference.rememberDestinations) as? Bool != false else { return }
         let entry = SavedPlace(id: UUID(), name: place.name, address: String(place.address.prefix(512)),
             latitude: place.coordinate.latitude, longitude: place.coordinate.longitude, kind: .favorite)
         guard entry.valid else { return }

@@ -20,6 +20,13 @@ struct ConnectionSettingsView: View {
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.openURL) private var openURL
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @SceneStorage("settings.navigationExpanded") private var navigationExpanded = false
+    @AppStorage(AppPreference.openGalaxy) private var autoOpenGalaxy = true
+    @AppStorage(AppPreference.arrival) private var showArrival = true
+    @AppStorage(AppPreference.toolbarLabels) private var toolbarLabels = true
+    @AppStorage(AppPreference.liveScreenAwake) private var keepLiveAwake = true
+    @AppStorage(AppPreference.rememberDestinations) private var rememberDestinations = true
+    @AppStorage(NavigationDistanceUnits.key) private var distanceUnits = NavigationDistanceUnits.system
     @AppStorage(AppAppearance.key) private var appearance = AppAppearance.system
     @AppStorage("galaxy.app.language") private var language = "en"
     @AppStorage("galaxy.galacticalAnimations") private var galacticalAnimations = true
@@ -244,7 +251,7 @@ struct ConnectionSettingsView: View {
     private func openReconnectedGalaxy() {
         guard openAfterReconnect, !pairing, connected, model.opened else { return }
         openAfterReconnect = false
-        select(.galaxy)
+        if autoOpenGalaxy { select(.galaxy) }
     }
 
     private var connectionModePanel: some View {
@@ -459,6 +466,8 @@ struct ConnectionSettingsView: View {
     private func preferences() -> some View {
         VStack(spacing: 0) {
             preferenceSection("Phone & alerts", expanded: $phoneExpanded) {
+                toggleRow("arrow.up.forward.app", title: "Open Galaxy after connecting", subtitle: "Switch from Settings when Galaxy is ready", isOn: $autoOpenGalaxy)
+                separator
                 row("music.note", title: "Phone music", subtitle: pairing ? "Waiting for app pairing" : audio.summary) {
                     Button("Set up") { model.startAudioPairing() }.disabled(!connected || pairing).font(.system(size: 12)).frame(minHeight: 44)
                 }
@@ -495,6 +504,12 @@ struct ConnectionSettingsView: View {
                 separator
                 toggleRow("sparkles", title: "Galactical Animations", subtitle: "Animate button presses, tab selection, and connection changes", isOn: $galacticalAnimations)
                 separator
+                if galacticalAnimations {
+                    toggleRow("sparkle", title: "Galaxy entry animation", subtitle: "Sweep stardust across the screen when opening Galaxy", isOn: $showArrival)
+                    separator
+                }
+                toggleRow("textformat", title: "Galaxy toolbar labels", subtitle: "Show names below icons when the toolbar has room", isOn: $toolbarLabels)
+                separator
                 row("rectangle.on.rectangle", title: "Galaxy screens", subtitle: pairing ? "Waiting for pairing" : checking ? "Checking version…" : assets.status == "Galaxy matches comma." ? "Up to date · just checked" : assets.status.contains("screens have changed") ? "Update available · connect over Wi-Fi or Tunnel" : assets.readyRoot != nil ? "Saved from your comma" : "Not downloaded · needs Local Wi-Fi or Tunnel") {
                     Button {
                         Task { await model.checkGalaxyUpdates(); checked = true }
@@ -511,6 +526,23 @@ struct ConnectionSettingsView: View {
                     .font(.system(size: 11)).foregroundStyle(muted)
             }
             separator
+            preferenceSection("Navigation", expanded: $navigationExpanded) {
+                Picker("Distance units", selection: $distanceUnits) {
+                    Text("System").tag(NavigationDistanceUnits.system)
+                    Text("Metric").tag(NavigationDistanceUnits.metric)
+                    Text("Imperial").tag(NavigationDistanceUnits.imperial)
+                }.pickerStyle(.menu)
+                separator
+                toggleRow("clock", title: "Remember destinations", subtitle: "Add destinations to Recents on this phone", isOn: $rememberDestinations)
+                separator
+                row("map", title: "Navigation map", subtitle: useMapbox && mapboxToken.hasPrefix("pk.") ? "Mapbox 3D" : "Apple Maps") {
+                    Button("Change") { showMapSettings = true }
+                        .frame(minHeight: 44)
+                        .accessibilityLabel("Change navigation map")
+                        .accessibilityIdentifier("navigation-map-settings")
+                }
+            }
+            separator
             preferenceSection("Support & developer", expanded: $supportExpanded) {
                 row("ladybug", title: "Logs & support", subtitle: "Report a problem or share diagnostics") {
                     Button { select(.logs) } label: { Image(systemName: "chevron.right").frame(width: 44, height: 44) }.accessibilityLabel("Open Logs & support")
@@ -521,17 +553,13 @@ struct ConnectionSettingsView: View {
                 }
                 if model.developerMode {
                     Divider().overlay(accent.opacity(0.12)).padding(.leading, 42)
+                    toggleRow("sun.max", title: "Keep Live View awake", subtitle: "Keep the iPhone display on while Live View is open", isOn: $keepLiveAwake)
+                    separator
                     row("location.fill", title: "Navigation alpha testing", subtitle: "Navigation UI and CarPlay maps · experimental") {
                         Toggle("Navigation alpha testing", isOn: Binding(get: { model.navigationAlpha }, set: { if $0 { confirmNavigationAlpha = true } else { model.navigationAlpha = false } })).labelsHidden()
                             .accessibilityIdentifier("navigation-alpha-toggle")
                     }
-                    separator
-                    row("map", title: "Navigation map", subtitle: useMapbox && mapboxToken.hasPrefix("pk.") ? "Mapbox 3D" : "Apple Maps") {
-                        Button("Change") { showMapSettings = true }
-                            .frame(minHeight: 44)
-                            .accessibilityLabel("Change navigation map")
-                            .accessibilityIdentifier("navigation-map-settings")
-                    }
+
                 }
             }
         }.background(panel, in: RoundedRectangle(cornerRadius: 20))

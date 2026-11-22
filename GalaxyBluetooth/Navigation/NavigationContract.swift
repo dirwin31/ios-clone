@@ -57,6 +57,31 @@ enum NavigationContractError: LocalizedError {
     }
 }
 
+@available(macOS 13.0, *)
+enum NavigationDistanceUnits: String {
+    case system, metric, imperial
+    static let key = "galaxy.navigation.distanceUnits"
+
+    func measurement(_ meters: Double) -> Measurement<UnitLength> {
+        let distance = Measurement(value: meters, unit: UnitLength.meters)
+        let region = Locale.current.measurementSystem
+        let miles = self == .imperial || (self == .system && (region == .us || region == .uk))
+        if miles {
+            if meters >= 160.9344 { return distance.converted(to: .miles) }
+            return distance.converted(to: region == .uk ? .yards : .feet)
+        }
+        return meters >= 1000 ? distance.converted(to: .kilometers) : distance
+    }
+
+    func text(_ meters: Double) -> String {
+        if self == .system {
+            return Measurement(value: meters, unit: UnitLength.meters).formatted(.measurement(width: .abbreviated, usage: .road))
+        }
+        return measurement(meters).formatted(.measurement(width: .abbreviated, usage: .asProvided,
+            numberFormatStyle: .number.precision(.fractionLength(0...1))))
+    }
+}
+
 enum NavigationDuration {
     static func text(_ seconds: TimeInterval) -> String {
         guard seconds.isFinite, seconds >= 0 else { return "—" }

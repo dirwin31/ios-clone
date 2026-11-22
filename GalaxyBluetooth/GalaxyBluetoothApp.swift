@@ -642,7 +642,7 @@ final class AppModel: ObservableObject {
     private func finishFirstConnection() {
         guard openAfterFirstConnection else { return }
         openAfterFirstConnection = false
-        if tab == .connections { tab = .galaxy }
+        if tab == .connections, UserDefaults.standard.object(forKey: AppPreference.openGalaxy) as? Bool != false { tab = .galaxy }
     }
     func disconnect() {
         legacyURL = nil
@@ -930,6 +930,14 @@ final class AppModel: ObservableObject {
 }
 
 
+enum AppPreference {
+    static let openGalaxy = "galaxy.app.openAfterConnection"
+    static let arrival = "galaxy.app.arrival"
+    static let toolbarLabels = "galaxy.app.toolbarLabels"
+    static let rememberDestinations = "galaxy.app.rememberDestinations"
+    static let liveScreenAwake = "galaxy.app.liveScreenAwake"
+}
+
 enum AppAppearance: String {
     case system, light, dark
     static let key = "galaxy.app.appearance"
@@ -961,6 +969,7 @@ struct GalaxyRootView: View {
     @State private var hasVisitedGalaxy = false
     @State private var appTabsExpanded = true
     @Namespace private var galaxySelection
+    @AppStorage(AppPreference.arrival) private var arrivalEnabled = true
     @State private var arrivalID: UUID?
     @State private var departingPage: CompanionTab?
     private var motionDisabled: Bool { reduceMotion || !galacticalAnimations || scenePhase != .active }
@@ -1079,7 +1088,7 @@ struct GalaxyRootView: View {
             else { chromeBackground.ignoresSafeArea() }
         }
         .onChange(of: requestedPage) { previous, next in
-            if next == .galaxy, !motionDisabled, model.transport.selectedRoute != nil {
+            if next == .galaxy, arrivalEnabled, !motionDisabled, model.transport.selectedRoute != nil {
                 departingPage = previous
                 arrivalID = UUID()
             } else {
@@ -1255,6 +1264,7 @@ private struct TabSelectionCapsule: View {
 private struct GalaxyPillButton: View {
     @ObservedObject var page: GalaxyPageDiagnostics
     let item: GalaxyBarItem
+    @AppStorage(AppPreference.toolbarLabels) private var toolbarLabels = true
     let showsText: Bool
     var selection: Namespace.ID? = nil
     @Environment(\.reduceGalacticalMotion) private var reduceMotion
@@ -1266,7 +1276,7 @@ private struct GalaxyPillButton: View {
                 Image(systemName: item.icon).font(.system(size: 16, weight: .semibold))
                     .scaleEffect(item.selected && !reduceMotion ? 1.09 : 1)
                     .animation(reduceMotion ? nil : CompanionMotion.selection, value: item.selected)
-                if item.primary && showsText && !typeSize.isAccessibilitySize {
+                if item.primary && toolbarLabels && showsText && !typeSize.isAccessibilitySize {
                     Text(verbatim: item.label).font(.caption2.weight(.semibold)).lineLimit(1)
                 }
             }.frame(minWidth: 44, maxWidth: showsText ? .infinity : 44, minHeight: 44)

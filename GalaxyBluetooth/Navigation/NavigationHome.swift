@@ -115,6 +115,7 @@ private struct PlacePanelHandle: View {
 }
 
 private struct StandardNavigationHome: View {
+    @AppStorage(NavigationDistanceUnits.key) private var distanceUnits = NavigationDistanceUnits.system
     @ObservedObject var connection: CommaConnection
     @ObservedObject var navigation: NavigationModel
     @ObservedObject var saved: SavedPlacesStore
@@ -425,7 +426,7 @@ private struct StandardNavigationHome: View {
         Task { await navigation.select(place) }
     }
     private func distance(_ meters: Double) -> String {
-        Measurement(value: meters, unit: UnitLength.meters).formatted(.measurement(width: .abbreviated, usage: .road))
+        distanceUnits.text(meters)
     }
     private func minutes(_ seconds: Double) -> String { NavigationDuration.text(seconds) }
 }
@@ -481,6 +482,7 @@ struct NavigationHome: View {
 }
 
 private struct DuoNavigationHome: View {
+    @AppStorage(NavigationDistanceUnits.key) private var distanceUnits = NavigationDistanceUnits.system
     @ObservedObject var connection: CommaConnection
     @ObservedObject var navigation: NavigationModel
     @ObservedObject var saved: SavedPlacesStore
@@ -805,12 +807,13 @@ private struct DuoNavigationHome: View {
         Task { await navigation.select(place) }
     }
     private func distance(_ meters: Double) -> String {
-        Measurement(value: meters, unit: UnitLength.meters).formatted(.measurement(width: .abbreviated, usage: .road))
+        distanceUnits.text(meters)
     }
     private func minutes(_ seconds: Double) -> String { NavigationDuration.text(seconds) }
 }
 
 private struct NavigationDestinationPanel: View {
+    @AppStorage(NavigationDistanceUnits.key) private var distanceUnits = NavigationDistanceUnits.system
     @State private var choosingStart = false
     @ObservedObject var navigation: NavigationModel
     @ObservedObject var connection: CommaConnection
@@ -894,7 +897,7 @@ private struct NavigationDestinationPanel: View {
                             Image(systemName: navigation.selectedRoute == index ? "checkmark.circle.fill" : "circle")
                             VStack(alignment: .leading, spacing: 3) {
                                 Text(NavigationDuration.text(route.expectedTravelTime)).font(.headline)
-                                Text("\(Measurement(value: route.distance, unit: UnitLength.meters).formatted(.measurement(width: .abbreviated, usage: .road))) · \(route.name)")
+                                Text("\(distanceUnits.text(route.distance)) · \(route.name)")
                                     .font(.subheadline).foregroundStyle(.secondary)
                             }
                             Spacer()

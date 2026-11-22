@@ -33,6 +33,12 @@ import Foundation
 @main struct NativeNavigationRegression {
     static func tryPath(_ version: String?) -> String { try! NativeNavigationAPI.statusPath(version: version) }
     @MainActor static func main() async throws {
+        if #available(macOS 13.0, *) {
+            precondition(NavigationDistanceUnits.metric.measurement(999).unit == .meters)
+            precondition(NavigationDistanceUnits.metric.measurement(1000).value == 1)
+            let mile = NavigationDistanceUnits.imperial.measurement(1609.344)
+            precondition(mile.unit == .miles && abs(mile.value - 1) < 0.00001)
+        }
         let straight = [RoutePoint(latitude: 43, longitude: -80), RoutePoint(latitude: 43.01, longitude: -80)]
         let beside = RoutePoint(latitude: 43.005, longitude: -79.9999)
         let aligned = NavigationMapMotion.routeAligned(beside, route: straight)
