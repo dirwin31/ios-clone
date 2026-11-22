@@ -537,8 +537,8 @@ final class NavigationModel: NSObject, ObservableObject, @preconcurrency CLLocat
         camera = .userLocation(fallback: .automatic)
     }
 
-    func monitorComma(connection: CommaConnection) async {
-        while !Task.isCancelled, foreground, navigating, usingComma {
+    func monitorComma(connection: CommaConnection, session: String) async {
+        while !Task.isCancelled, connection.session == session, foreground, navigating, usingComma {
             if commandRunning || connection.setupInProgress {
                 do { try await Task.sleep(for: .milliseconds(100)) } catch { return }
                 continue
@@ -548,7 +548,7 @@ final class NavigationModel: NSObject, ObservableObject, @preconcurrency CLLocat
                 // A route handoff invalidates the adapter's identity cache. Reverify
                 // before accepting guidance, rather than comparing against a stale nil.
                 let identity = try await connection.ensureDeviceIdentity()
-                guard !Task.isCancelled, navigating, usingComma, self.revision == revision else { return }
+                guard !Task.isCancelled, connection.session == session, navigating, usingComma, self.revision == revision else { return }
                 guard commaIdentity == identity else {
                     clearCommaDisplay("Paired comma changed. Check the connection.", discardRoute: true)
                     try await Task.sleep(for: .seconds(2))
@@ -557,7 +557,7 @@ final class NavigationModel: NSObject, ObservableObject, @preconcurrency CLLocat
                 let requestedAt = Date()
                 let snapshot = try await connection.navigationSnapshot(version: commaRouteVersion)
                 onEvent?("Guidance response; elapsed: \(String(format: "%.3f", Date().timeIntervalSince(requestedAt)))s; state: \(snapshot.status); instruction: \(snapshot.instruction != nil); route points: \(snapshot.routePoints?.count ?? 0); cached route: \(cachedCommaPolyline != nil); version matches: \(commaRouteVersion == snapshot.routeVersion)")
-                guard !Task.isCancelled, navigating, usingComma, self.revision == revision else { onEvent?("Guidance response ignored: navigation changed or cancelled"); return }
+                guard !Task.isCancelled, connection.session == session, navigating, usingComma, self.revision == revision else { onEvent?("Guidance response ignored: navigation changed or cancelled"); return }
                 guard !commandRunning else { onEvent?("Guidance ignored: route command in progress"); continue }
                 guard commaIdentity == connection.deviceIdentity else {
                     clearCommaDisplay("Paired comma changed. Check the connection.", discardRoute: true)
@@ -573,10 +573,13 @@ final class NavigationModel: NSObject, ObservableObject, @preconcurrency CLLocat
                 }
                 guard snapshot.status == "active", let instructions = snapshot.instruction else {
                     if snapshot.error?.isEmpty == false { clearCommaDisplay(snapshot.error!) }
-                    else if snapshot.status == "waiting", await connection.commaIsParked() == true {
-                        guard !Task.isCancelled, navigating, self.revision == revision else { return }
-                        clearCommaDisplay("Destination saved on comma. Waiting for route guidance.")
-                        instruction = "Waiting for guidance"
+                    else if snapshot.status == "waiting" {
+                        let parked = await connection.commaIsParked()
+                        guard !Task.isCancelled, connection.session == session, navigating, self.revision == revision else { return }
+                        if parked == true {
+                            clearCommaDisplay("Destination saved on comma. Waiting for route guidance.")
+                            instruction = "Waiting for guidance"
+                        } else { clearCommaDisplay("Waiting for fresh navigation from comma…") }
                     } else { clearCommaDisplay("Waiting for fresh navigation from comma…") }
                     try await Task.sleep(for: .seconds(2))
                     continue
@@ -629,7 +632,7 @@ final class NavigationModel: NSObject, ObservableObject, @preconcurrency CLLocat
                 } else { commaPosition = nil }
             } catch {
                 onEvent?("Guidance request failed: \(LANTransport.failureCode(error)); cancelled: \(Task.isCancelled)")
-                if Task.isCancelled { return }
+                if Task.isCancelled || connection.session != session { return }
                 clearCommaDisplay(error.localizedDescription)
                 // An unavailable connection cannot recover through faster status polls.
                 do { try await Task.sleep(for: .seconds(2)) } catch { return }

@@ -7,6 +7,7 @@ final class NavigationServices: ObservableObject {
     let navigation = NavigationModel()
     let saved = SavedPlacesStore()
     private var routeTask: Task<Void, Never>?
+    private var routeSession: String?
     private var freshnessTask: Task<Void, Never>?
     private var subscription: AnyCancellable?
     private var phoneActive = false
@@ -69,16 +70,29 @@ final class NavigationServices: ObservableObject {
         if active && freshnessTask == nil {
             freshnessTask = Task { [weak self] in
                 while !Task.isCancelled {
+                    self?.syncGuidancePolling()
                     self?.navigation.checkCommaFreshness()
                     do { try await Task.sleep(for: .seconds(1)) } catch { return }
                 }
             }
         } else if !active { freshnessTask?.cancel(); freshnessTask = nil }
-        if enabled && active && navigation.navigating && navigation.usingComma {
-            if routeTask == nil { routeTask = Task { [weak self] in
-                guard let self else { return }
-                await navigation.monitorComma(connection: connection)
-            } }
-        } else { routeTask?.cancel(); routeTask = nil }
+        syncGuidancePolling()
+    }
+    private func syncGuidancePolling() {
+        guard enabled, !resetting, navigation.navigating, navigation.usingComma else {
+            routeTask?.cancel()
+            routeTask = nil
+            routeSession = nil
+            return
+        }
+        let session = connection.session
+        guard routeTask == nil || routeSession != session else { return }
+        routeTask?.cancel()
+        routeSession = session
+        routeTask = Task { [weak self] in
+            guard let self, !Task.isCancelled else { return }
+            await navigation.monitorComma(connection: connection, session: session)
+            if !Task.isCancelled { routeTask = nil }
+        }
     }
 }
