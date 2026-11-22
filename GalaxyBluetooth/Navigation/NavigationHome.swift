@@ -467,19 +467,21 @@ private struct TripSummaryRow<Options: View>: View {
     @ViewBuilder let options: () -> Options
     @Environment(\.dynamicTypeSize) private var typeSize
 
+    @ScaledMetric(relativeTo: .title2) private var valueSize: CGFloat = 23
+
     var body: some View {
         let layout = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
-                                                  : AnyLayout(HStackLayout(alignment: .center, spacing: 8))
+                                                  : AnyLayout(HStackLayout(alignment: .center, spacing: 4))
         layout {
-            HStack(alignment: .top, spacing: 6) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
                 metric(Date().addingTimeInterval(navigation.remainingTime).formatted(date: .omitted, time: .shortened), "arrival")
                 metric(NavigationDuration.text(navigation.remainingTime), "remaining")
                 metric(units.text(navigation.remainingDistance), "distance")
-            }
+            }.frame(maxWidth: .infinity, alignment: .leading)
             HStack(spacing: 0) {
                 Button(navigation.endingRoute ? "Ending…" : "End") { Task { await navigation.end(connection: connection) } }
-                    .font(.headline).foregroundStyle(.white)
-                    .padding(.horizontal, 12).frame(minHeight: 44)
+                    .font(.subheadline.weight(.semibold)).foregroundStyle(.white)
+                    .padding(.horizontal, 8).frame(minWidth: 44, minHeight: 44)
                     .background(StarPilotTheme.guidance, in: Capsule()).disabled(navigation.busy)
                 options()
             }.fixedSize(horizontal: true, vertical: false)
@@ -487,12 +489,12 @@ private struct TripSummaryRow<Options: View>: View {
     }
 
     private func metric(_ value: String, _ label: LocalizedStringKey) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
+        VStack(alignment: .leading, spacing: 4) {
             Text(navigation.usingComma && !navigation.commaFeedReady ? "—" : value)
-                .font(.headline).monospacedDigit().lineLimit(1).minimumScaleFactor(0.7)
-            Text(label).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                .font(.system(size: valueSize, weight: .semibold, design: .rounded))
+                .monospacedDigit().lineLimit(1).minimumScaleFactor(0.75)
+            Text(label).font(.caption).foregroundStyle(.secondary).lineLimit(1).minimumScaleFactor(0.85)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityElement(children: .combine)
     }
 }
