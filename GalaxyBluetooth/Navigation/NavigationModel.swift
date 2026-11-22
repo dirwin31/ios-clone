@@ -1,5 +1,83 @@
 import SwiftUI
 import MapKit
+
+struct PhoneRoute {
+    struct Step {
+        let instructions: String
+        let distance: Double
+        let polyline: MKPolyline
+    }
+    let name: String
+    let distance: Double
+    let expectedTravelTime: Double
+    let polyline: MKPolyline
+    let steps: [Step]
+}
+
+extension PhoneRoute {
+    init(_ route: MKRoute) {
+        self.init(name: route.name, distance: route.distance, expectedTravelTime: route.expectedTravelTime,
+                  polyline: route.polyline, steps: route.steps.map {
+            Step(instructions: $0.instructions, distance: $0.distance, polyline: $0.polyline)
+        })
+    }
+
+    private struct Response: Decodable {
+        struct Geometry: Decodable {
+            let coordinates: [[Double]]
+            func line() throws -> MKPolyline {
+                let points = try coordinates.map { pair -> CLLocationCoordinate2D in
+                    guard pair.count >= 2 else { throw URLError(.cannotParseResponse) }
+                    let point = CLLocationCoordinate2D(latitude: pair[1], longitude: pair[0])
+                    guard CLLocationCoordinate2DIsValid(point) else { throw URLError(.cannotParseResponse) }
+                    return point
+                }
+                guard !points.isEmpty else { throw URLError(.cannotParseResponse) }
+                return MKPolyline(coordinates: points, count: points.count)
+            }
+        }
+        struct Leg: Decodable {
+            struct Segment: Decodable {
+                struct Maneuver: Decodable { let instruction: String }
+                let geometry: Geometry
+                let distance: Double
+                let maneuver: Maneuver
+            }
+            let steps: [Segment]
+            let summary: String
+        }
+        struct Route: Decodable {
+            let geometry: Geometry
+            let legs: [Leg]
+            let distance: Double
+            let duration: Double
+        }
+        let routes: [Route]
+    }
+
+    static func mapbox(from: CLLocationCoordinate2D, to: CLLocationCoordinate2D,
+                       alternatives: Bool, token: String) async throws -> [PhoneRoute] {
+        var url = URLComponents()
+        url.scheme = "https"
+        url.host = "api.mapbox.com"
+        url.path = "/directions/v5/mapbox/driving/\(from.longitude),\(from.latitude);\(to.longitude),\(to.latitude)"
+        url.queryItems = ["access_token": token, "alternatives": String(alternatives), "steps": "true",
+                          "geometries": "geojson", "overview": "full"].map { URLQueryItem(name: $0.key, value: $0.value) }
+        guard let endpoint = url.url else { throw URLError(.badURL) }
+        let (data, response) = try await URLSession.shared.data(from: endpoint)
+        guard (response as? HTTPURLResponse)?.statusCode == 200 else { throw URLError(.badServerResponse) }
+        return try JSONDecoder().decode(Response.self, from: data).routes.map { route in
+            let segments = route.legs.flatMap(\.steps)
+            // Mapbox maneuvers describe the start of each segment. Galaxy announces
+            // the turn at its end, so pair each segment with the following maneuver.
+            let steps = try zip(segments, segments.dropFirst()).map { current, next in
+                Step(instructions: next.maneuver.instruction, distance: current.distance, polyline: try current.geometry.line())
+            }
+            return PhoneRoute(name: route.legs.map(\.summary).joined(separator: ", "), distance: route.distance,
+                             expectedTravelTime: route.duration, polyline: try route.geometry.line(), steps: steps)
+        }
+    }
+}
 import CoreLocation
 import UIKit
 
@@ -21,7 +99,7 @@ final class NavigationModel: NSObject, ObservableObject, @preconcurrency CLLocat
     var onEvent: ((String) -> Void)?
     @Published var results: [NavigationPlace] = []
     @Published var destination: NavigationPlace?
-    @Published var routes: [MKRoute] = []
+    @Published var routes: [PhoneRoute] = []
     @Published var selectedRoute = 0
     @Published var usingComma = false
     @Published var commaPolyline: MKPolyline?
@@ -75,7 +153,7 @@ final class NavigationModel: NSObject, ObservableObject, @preconcurrency CLLocat
     private var commaRouteVersion: String?
     private var commaIdentity: String?
     private var commaDestination: CLLocationCoordinate2D?
-    var route: MKRoute? { routes.indices.contains(selectedRoute) ? routes[selectedRoute] : nil }
+    var route: PhoneRoute? { routes.indices.contains(selectedRoute) ? routes[selectedRoute] : nil }
     var goodLocation: CLLocation? {
         guard let location, location.horizontalAccuracy >= 0, location.horizontalAccuracy <= 50,
               abs(location.timestamp.timeIntervalSinceNow) < 15 else { return nil }
@@ -232,14 +310,21 @@ final class NavigationModel: NSObject, ObservableObject, @preconcurrency CLLocat
         request.destination = destination.item
         request.transportType = .automobile
         request.requestsAlternateRoutes = !refresh
-        let requestService = MKDirections(request: request); directions = requestService
         lastCalculation = Date()
         do {
-            let response = try await requestService.calculate()
+            let choices: [PhoneRoute]
+            if let accessToken = NavigationMapPreference.activeToken {
+                choices = try await PhoneRoute.mapbox(from: origin.coordinate, to: destination.coordinate,
+                                                      alternatives: !refresh, token: accessToken)
+            } else {
+                let service = MKDirections(request: request)
+                directions = service
+                choices = try await service.calculate().routes.map(PhoneRoute.init)
+            }
             guard foreground, revision == token, !Task.isCancelled else { return }
-            guard !response.routes.isEmpty else { throw BridgeError.message("No driving route found.") }
-            onEvent?("Route calculation completed: \(response.routes.count) alternatives")
-            routes = Array(response.routes.prefix(3)); selectedRoute = 0; stepIndex = 0
+            guard !choices.isEmpty else { throw BridgeError.message("No driving route found.") }
+            onEvent?("Route calculation completed: \(choices.count) alternatives")
+            routes = Array(choices.prefix(3)); selectedRoute = 0; stepIndex = 0
             offRouteSamples = 0; error = ""
             if !navigating { camera = .rect(routes[0].polyline.boundingMapRect) }
             updateProgress(routes[0], at: origin)
@@ -549,7 +634,7 @@ final class NavigationModel: NSObject, ObservableObject, @preconcurrency CLLocat
     }
     #endif
 
-    private func updateProgress(_ route: MKRoute, at location: CLLocation) {
+    private func updateProgress(_ route: PhoneRoute, at location: CLLocation) {
         let steps = route.steps.filter { !$0.instructions.isEmpty && $0.polyline.pointCount > 0 }
         guard !steps.isEmpty else { instruction = "Continue to your destination"; return }
         stepIndex = min(stepIndex, steps.count - 1)

@@ -7,18 +7,11 @@ private struct NavigationMapLayer: View {
     @AppStorage(NavigationMapPreference.enabledKey) private var useMapbox = true
     @AppStorage(NavigationMapPreference.tokenKey) private var token = ""
 
-    private var usesCommaMap: Bool {
-        if navigation.navigating { return navigation.usingComma }
-        return navigation.sendToComma && navigation.destination == nil
-    }
-
     var body: some View {
         Group {
-            if useMapbox && token.hasPrefix("pk.") && usesCommaMap {
-                MapboxDriveMap(navigation: navigation, token: token, bottomInset: bottomInset) {
-                    useMapbox = false
-                    navigation.notice = "Mapbox couldn’t load. Using Apple Maps. Check your connection or token in Navigation map settings."
-                }
+            if useMapbox && token.hasPrefix("pk.") {
+                MapboxDriveMap(navigation: navigation, token: token, bottomInset: bottomInset)
+                    .id(token)
             } else if navigation.navigating && navigation.usingComma {
                 CommaFollowingMap(navigation: navigation, bottomInset: bottomInset)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
