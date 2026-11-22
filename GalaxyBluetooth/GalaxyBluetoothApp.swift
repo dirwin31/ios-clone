@@ -992,7 +992,7 @@ struct GalaxyRootView: View {
                     GalaxyArrival(route: arrivalRoute)
                         .ignoresSafeArea().allowsHitTesting(false).accessibilityHidden(true)
                         .task {
-                            do { try await Task.sleep(for: .milliseconds(1120)) } catch { return }
+                            do { try await Task.sleep(for: GalaxyArrival.duration) } catch { return }
                             self.arrivalRoute = nil
                         }
                 }
@@ -1052,7 +1052,7 @@ struct GalaxyRootView: View {
             }.frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .safeAreaInset(edge: .top, spacing: 0) {
-            if showsGalaxyPill || (!usesAdaptiveChrome && !editorFocused && model.tab != .navigation) {
+            if !usesAdaptiveChrome && !editorFocused && model.tab != .navigation {
                 Group {
                     if showsGalaxyPill {
                         HStack(spacing: 0) {
@@ -1060,9 +1060,6 @@ struct GalaxyRootView: View {
                                 GalaxyPillButton(page: galaxyPage, item: item, showsText: true, selection: galaxySelection)
                             }
                             GalaxyPillMenu(page: galaxyPage, model: model, select: select)
-                            if usesAdaptiveChrome {
-                                CompactConnectionStatus(model: model, compact: true) { select(.connections) }
-                            }
                         }
                         .animation(motionDisabled ? nil : CompanionMotion.selection, value: galaxyPage.barItems.first(where: \.selected)?.id)
                         .padding(.horizontal, 3).modifier(FloatingGalaxyGlass())
@@ -1206,77 +1203,42 @@ private struct GalaxyArrival: View {
     let route: ConnectionRoute
     @State private var start = Date()
 
+    static let duration = Duration.milliseconds(640)
+
+    private func ease(_ value: Double) -> Double {
+        let t = min(1, max(0, value))
+        return t * t * (3 - 2 * t)
+    }
+
     var body: some View {
         GeometryReader { bounds in
-            let width = bounds.size.width
-            let height = bounds.size.height
-            let side = min(220, min(width, height) * 0.40)
-            let center = CGPoint(x: width * 0.5, y: height * 0.5)
-            let angle: Double = route == .lan ? 155 : route == .bluetooth ? 110 : -25
-            let radians = angle * .pi / 180
-            let target = CGPoint(x: center.x + cos(radians) * side * 0.92,
-                                 y: center.y + sin(radians) * side * 0.59)
+            let size = bounds.size
+            let side = min(220, min(size.width, size.height) * 0.40)
             let symbol = route == .lan ? "ConnectionWiFi" : route == .bluetooth ? "ConnectionBluetooth" : "ConnectionNetwork"
             TimelineView(.animation(minimumInterval: 1.0 / 60)) { clock in
-                let elapsed = max(0, clock.date.timeIntervalSince(start))
-                let flight = min(1, elapsed / 0.72)
-                let burst = min(1, max(0, (elapsed - 0.72) / 0.38))
+                let elapsed = clock.date.timeIntervalSince(start)
+                let flight = ease((elapsed - 0.08) / 0.34)
+                let entry = ease(elapsed / 0.13)
+                let exit = ease((elapsed - 0.44) / 0.20)
                 ZStack {
-                    RadialGradient(colors: [Color(red: 0.19, green: 0.08, blue: 0.34),
-                                            Color(red: 0.045, green: 0.026, blue: 0.12), .black],
-                                   center: .center, startRadius: 0, endRadius: max(width, height) * 0.72)
-                    Canvas { context, size in
-                        for i in 0..<120 {
-                            let x = Double((i * 619 + i * i * 31) % 997) / 997
-                            let y = Double((i * 463 + i * i * 17) % 991) / 991
-                            let depth = Double(i % 7 + 1) / 7
-                            let travel = 1 + depth * (0.08 * flight + 0.65 * burst * burst)
-                            let point = CGPoint(x: center.x + (x - 0.5) * size.width * travel,
-                                                y: center.y + (y - 0.5) * size.height * travel)
-                            let radius = 0.45 + depth
-                            context.fill(Path(ellipseIn: CGRect(x: point.x-radius, y: point.y-radius,
-                                                               width: 2*radius, height: 2*radius)),
-                                         with: .color(.white.opacity(0.3 + 0.65 * depth)))
-                        }
-                    }
-                    Group {
-                        Ellipse().stroke(.purple.opacity(0.7), lineWidth: 1)
-                            .frame(width: side * 2, height: side * 1.2).position(center)
-                        Image("StarPilotMark").resizable().scaledToFit()
-                            .frame(width: side, height: side).clipShape(RoundedRectangle(cornerRadius: side * 0.22))
-                            .scaleEffect(1 + 0.24 * burst).position(center)
-                        Image(symbol).renderingMode(.template).resizable().scaledToFit().padding(9)
-                            .frame(width: 44, height: 44).foregroundStyle(.white)
-                            .background(StarPilotTheme.guidance, in: Circle())
-                            .scaleEffect(1 + 0.5 * sin(.pi * burst)).position(target)
-                        Canvas { context, size in
-                            func point(_ t: Double) -> CGPoint {
-                                let u = 1 - t
-                                return CGPoint(x: u*u * (-20) + 2*u*t * size.width * 0.42 + t*t * target.x,
-                                               y: u*u * size.height * 0.85 + 2*u*t * size.height * 0.14 + t*t * target.y)
-                            }
-                            if flight < 1 {
-                                for i in 0..<22 {
-                                    let strength = Double(i + 1) / 22
-                                    let p = point(max(0, flight - (1 - strength) * 0.22))
-                                    let radius = 1 + 4 * strength
-                                    context.fill(Path(ellipseIn: CGRect(x: p.x-radius, y: p.y-radius, width: 2*radius, height: 2*radius)),
-                                                 with: .color(i == 21 ? .white : .purple.opacity(strength)))
-                                }
-                            } else {
-                                let radius = side * (0.1 + 1.2 * burst)
-                                for i in 0..<16 {
-                                    let a = Double(i) * .pi / 8
-                                    var ray = Path()
-                                    ray.move(to: CGPoint(x: target.x + cos(a)*radius, y: target.y + sin(a)*radius))
-                                    let tip = radius + 16 * (1-burst)
-                                    ray.addLine(to: CGPoint(x: target.x + cos(a)*tip, y: target.y + sin(a)*tip))
-                                    context.stroke(ray, with: .color(i.isMultiple(of: 2) ? .white : .purple), lineWidth: 2.5)
-                                }
-                            }
-                        }
-                    }.opacity(1 - burst * burst)
+                    Color.black
+                    Image("GalaxyDust").resizable().scaledToFill()
+                        .frame(width: size.width, height: size.height)
+                        .scaleEffect(1.03 + 0.06 * flight)
+                        .clipped()
+                    Image("StarPilotMark").resizable().scaledToFit()
+                        .frame(width: side, height: side)
+                        .clipShape(RoundedRectangle(cornerRadius: side * 0.22))
+                        .scaleEffect(0.97 + 0.04 * flight)
+                    Image(symbol).renderingMode(.template).resizable().scaledToFit()
+                        .frame(width: side * 0.13, height: side * 0.13)
+                        .foregroundStyle(.white)
+                        .shadow(color: .purple, radius: 6)
+                        .offset(x: -(1 - flight) * size.width * 0.40,
+                                y: (1 - flight) * size.height * 0.18)
+                        .opacity(1 - ease((elapsed - 0.34) / 0.10))
                 }
+                .opacity(entry * (1 - exit))
             }
         }
     }
@@ -1335,7 +1297,7 @@ private struct GalaxyPillMenu: View {
             Menu {
                 Section("Galaxy") {
                     if !page.deviceStatus.isEmpty { Text(verbatim: page.deviceStatus) }
-                    ForEach(page.barItems.filter { !$0.primary && $0.id != "back" }) { item in
+                    ForEach(page.barItems.filter { DuoLayout.isEnabled || (!$0.primary && $0.id != "back") }) { item in
                         Button { page.activate(item) } label: { Label(item.label, systemImage: item.icon) }.disabled(item.disabled)
                     }
                 }
@@ -1806,9 +1768,18 @@ private struct AdaptiveCompanionLayout<Content: View>: View {
     }
     var body: some View {
         content()
-            .environment(\.companionVerticalBar, !usesGalaxyPill && verticalEdge != nil)
+            .environment(\.companionVerticalBar, verticalEdge != nil)
             .toolbar {
-                if !usesGalaxyPill {
+                if usesGalaxyPill {
+                    ToolbarItemGroup(placement: .topBarLeading) {
+                        ForEach(galaxyPage.barItems.filter { $0.id == "back" || $0.primary }
+                            .sorted { $0.id == "back" && $1.id != "back" }) { item in
+                            GalaxyPillButton(page: galaxyPage, item: item, showsText: verticalEdge == nil)
+                                .fixedSize()
+                        }
+                        GalaxyPillMenu(page: galaxyPage, model: model, select: select)
+                    }.axisBehavior(.verticalPreferred)
+                } else {
                     ToolbarItemGroup(placement: .topBarLeading) {
                         ForEach(tabs) { item in
                             let selected = tab == item || (tab == .logs && item == .connections)
@@ -1838,7 +1809,7 @@ private struct AdaptiveCompanionLayout<Content: View>: View {
                 }.axisBehavior(.verticalPreferred)
             }
             .toolbarBackground(.hidden, for: .navigationBar)
-            .toolbar(usesGalaxyPill ? .hidden : .visible, for: .navigationBar)
+            .toolbar(.visible, for: .navigationBar)
             .toolbarVerticalBehavior(.automatic)
     }
 
