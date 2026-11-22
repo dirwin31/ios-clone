@@ -1476,27 +1476,70 @@ private struct GalaxyPillButton: View {
     }
 }
 
-private struct GalaxyPillMenu: View {
-    @ObservedObject var page: GalaxyPageDiagnostics
-    @ObservedObject var model: AppModel
+private struct GalaxyPillMenu: UIViewRepresentable {
+    let page: GalaxyPageDiagnostics
+    let model: AppModel
     let select: (CompanionTab) -> Void
+    @Environment(\.locale) private var locale
 
-    var body: some View {
-            Menu {
-                Section("StarPilot BT") {
-                    if model.navigationEnabled { Button { select(.navigation) } label: { Label("Navigation", systemImage: CompanionTab.navigation.icon) } }
-                    Button { select(.connections) } label: { Label("Settings", systemImage: CompanionTab.connections.icon) }
-                }
-                Section("Galaxy") {
-                    if !page.deviceStatus.isEmpty { Text(verbatim: page.deviceStatus) }
-                    ForEach(page.barItems.filter { DuoLayout.isEnabled || (!$0.primary && $0.id != "back") }) { item in
-                        Button { page.activate(item) } label: { Label(item.label, systemImage: item.icon) }.disabled(item.disabled)
-                    }
-                }
-            } label: {
-                Image(systemName: "ellipsis.circle").font(.title3)
-                    .frame(width: 44, height: 44).contentShape(Rectangle())
-            }.accessibilityLabel("Galaxy and app options").accessibilityIdentifier("galaxy-pill-options")
+    init(page: GalaxyPageDiagnostics, model: AppModel, select: @escaping (CompanionTab) -> Void) {
+        self.page = page
+        self.model = model
+        self.select = select
+    }
+
+    final class Coordinator {
+        var menu: GalaxyPillMenu
+        init(_ menu: GalaxyPillMenu) { self.menu = menu }
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator(self) }
+
+    func makeUIView(context: Context) -> UIButton {
+        let button = UIButton(type: .system)
+        button.setImage(UIImage(systemName: "ellipsis.circle", withConfiguration: UIImage.SymbolConfiguration(textStyle: .title3)), for: .normal)
+        button.showsMenuAsPrimaryAction = true
+        button.accessibilityIdentifier = "galaxy-pill-options"
+        // Resolve the rows once per opening so live telemetry cannot rebuild a
+        // presented menu while the user scrolls it.
+        let coordinator = context.coordinator
+        button.menu = UIMenu(children: [UIDeferredMenuElement.uncached { completion in
+            completion(coordinator.menu.sections())
+        }])
+        return button
+    }
+
+    func sizeThatFits(_ proposal: ProposedViewSize, uiView: UIButton, context: Context) -> CGSize? {
+        CGSize(width: 44, height: 44)
+    }
+
+    func updateUIView(_ button: UIButton, context: Context) {
+        context.coordinator.menu = self
+        button.accessibilityLabel = String(localized: "Galaxy and app options", locale: locale)
+    }
+
+    private func sections() -> [UIMenuElement] {
+        var appActions: [UIAction] = []
+        if model.navigationEnabled {
+            appActions.append(UIAction(title: String(localized: "Navigation", locale: locale), image: UIImage(systemName: CompanionTab.navigation.icon)) { _ in
+                if model.navigationEnabled { select(.navigation) }
+            })
+        }
+        appActions.append(UIAction(title: String(localized: "Settings", locale: locale), image: UIImage(systemName: CompanionTab.connections.icon)) { _ in select(.connections) })
+
+        var galaxyActions: [UIAction] = []
+        if !page.deviceStatus.isEmpty {
+            galaxyActions.append(UIAction(title: page.deviceStatus, attributes: .disabled) { _ in })
+        }
+        for item in page.barItems where DuoLayout.isEnabled || (!item.primary && item.id != "back") {
+            galaxyActions.append(UIAction(title: item.label, image: UIImage(systemName: item.icon), attributes: item.disabled ? .disabled : []) { _ in
+                if let current = page.barItems.first(where: { $0.id == item.id }) { page.activate(current) }
+            })
+        }
+        return [
+            UIMenu(title: String(localized: "StarPilot BT", locale: locale), options: .displayInline, children: appActions),
+            UIMenu(title: String(localized: "Galaxy", locale: locale), options: .displayInline, children: galaxyActions)
+        ]
     }
 }
 
