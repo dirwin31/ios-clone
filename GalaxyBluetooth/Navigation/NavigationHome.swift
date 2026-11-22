@@ -3,6 +3,7 @@ import MapKit
 
 private struct NavigationMapLayer: View {
     @ObservedObject var navigation: NavigationModel
+    let markerPerspective: DriveMarkerPerspective
     let headerBottom: CGFloat
     let tripFrame: CGRect
     @AppStorage(NavigationMapPreference.enabledKey) private var useMapbox = true
@@ -11,7 +12,7 @@ private struct NavigationMapLayer: View {
     var body: some View {
         Group {
             if useMapbox && token.hasPrefix("pk.") {
-                MapboxDriveMap(navigation: navigation, token: token, tripFrame: tripFrame, headerBottom: headerBottom)
+                MapboxDriveMap(navigation: navigation, token: token, markerPerspective: markerPerspective, tripFrame: tripFrame, headerBottom: headerBottom)
                     .id(token)
             } else if navigation.navigating && navigation.usingComma {
                 CommaFollowingMap(navigation: navigation, bottomInset: tripFrame.height)
@@ -128,6 +129,7 @@ private struct StandardNavigationHome: View {
     var selectAppTab: (CompanionTab) -> Void
     @State private var searchPurpose: PlaceSearchPurpose?
     @State private var showLibrary = false
+    @State private var markerPerspective = DriveMarkerPerspective()
     @State private var headerBottom: CGFloat = 0
     @State private var tripFrame = CGRect.zero
     @State private var panelLevel: PlacePanelLevel = .standard
@@ -143,7 +145,7 @@ private struct StandardNavigationHome: View {
     }
     var body: some View {
         GeometryReader { geometry in
-            NavigationMapLayer(navigation: navigation, headerBottom: headerBottom, tripFrame: tripFrame)
+            NavigationMapLayer(navigation: navigation, markerPerspective: markerPerspective, headerBottom: headerBottom, tripFrame: tripFrame)
             .overlay(alignment: .top) {
                 mapHeader.padding(12)
                     .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).maxY } action: { headerBottom = $0 }
@@ -201,7 +203,7 @@ private struct StandardNavigationHome: View {
                 }
                 .modifier(TripBarGlass(active: navigation.navigating))
                 .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { tripFrame = $0 }
-                .overlay(alignment: .top) { TripBarFollowMarker(navigation: navigation) }
+                .overlay(alignment: .top) { TripBarFollowMarker(markerPerspective: markerPerspective, navigation: navigation) }
                 .shadow(color: .black.opacity(navigation.navigating ? 0.06 : 0.12), radius: 12, y: -2)
                 .padding(navigation.navigating ? 12 : 0)
             })
@@ -446,6 +448,7 @@ private struct ManeuverDistance: View {
 }
 
 private struct TripBarFollowMarker: View {
+    let markerPerspective: DriveMarkerPerspective
     @ObservedObject var navigation: NavigationModel
     @AppStorage(NavigationMapPreference.enabledKey) private var useMapbox = true
     @AppStorage(NavigationMapPreference.tokenKey) private var token = ""
@@ -458,7 +461,7 @@ private struct TripBarFollowMarker: View {
                         clock.date.timeIntervalSince(navigation.commaPositionSampleDate) <= 4
                     : navigation.goodLocation != nil
                 if fresh {
-                    DrivePositionMarker(following: true, comma: navigation.usingComma)
+                    DrivePositionMarker(perspective: markerPerspective, following: true, comma: navigation.usingComma)
                         .offset(y: -DrivePositionMarker.barClearance - DrivePositionMarker.diameter)
                         .allowsHitTesting(false)
                 }
@@ -531,6 +534,7 @@ private struct DuoNavigationHome: View {
     var selectAppTab: (CompanionTab) -> Void
     @State private var searchPurpose: PlaceSearchPurpose?
     @State private var showLibrary = false
+    @State private var markerPerspective = DriveMarkerPerspective()
     @State private var headerBottom: CGFloat = 0
     @State private var tripFrame = CGRect.zero
     @State private var panelLevel: PlacePanelLevel = .standard
@@ -546,7 +550,7 @@ private struct DuoNavigationHome: View {
     }
     var body: some View {
         GeometryReader { geometry in
-            NavigationMapLayer(navigation: navigation, headerBottom: headerBottom, tripFrame: tripFrame)
+            NavigationMapLayer(navigation: navigation, markerPerspective: markerPerspective, headerBottom: headerBottom, tripFrame: tripFrame)
             .modifier(NavigationMapBackground())
             .overlay(alignment: .top) {
                 mapHeader.padding(12)
@@ -606,7 +610,7 @@ private struct DuoNavigationHome: View {
                 }
                 .modifier(TripBarGlass(active: navigation.navigating))
                 .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { tripFrame = $0 }
-                .overlay(alignment: .top) { TripBarFollowMarker(navigation: navigation) }
+                .overlay(alignment: .top) { TripBarFollowMarker(markerPerspective: markerPerspective, navigation: navigation) }
                 .shadow(color: .black.opacity(navigation.navigating ? 0.06 : 0.12), radius: 12, y: -2)
                 .frame(maxWidth: .infinity, alignment: .center)
                 .padding(12)

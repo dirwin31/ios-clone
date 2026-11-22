@@ -74,18 +74,28 @@ struct NavigationMapSettings: View {
     }
 }
 
-/// Uses the same navigation state and controls as the standard iPhone map.
+final class DriveMarkerPerspective: ObservableObject {
+    @Published private(set) var pitch = 0.0
+
+    func update(_ degrees: Double) {
+        let next = degrees.rounded()
+        if pitch != next { pitch = next }
+    }
+}
 struct DrivePositionMarker: View {
-    static let diameter: CGFloat = 32
+    static let diameter: CGFloat = 28
     static let barClearance: CGFloat = 8
+    @ObservedObject var perspective: DriveMarkerPerspective
     let following: Bool
     let comma: Bool
 
     var body: some View {
         Image(systemName: following ? "location.north.fill" : "circle.fill")
-            .font(.callout.bold()).foregroundStyle(.white)
+            .font(.system(size: 14, weight: .bold)).foregroundStyle(.white)
             .frame(width: Self.diameter, height: Self.diameter).background(StarPilotTheme.accent, in: Circle())
             .overlay { Circle().stroke(.white, lineWidth: 2) }
+            .rotation3DEffect(.degrees(following ? -perspective.pitch * 0.78 : 0),
+                              axis: (x: 1, y: 0, z: 0), perspective: 0.22)
             .accessibilityLabel(comma ? "Comma location" : "Your location")
     }
 }
@@ -118,6 +128,7 @@ struct MapboxDriveMap: View {
     @AppStorage(NavigationMapPreference.placesKey) private var showPlaces = true
     @AppStorage(NavigationMapPreference.trafficKey) private var showTraffic = false
     @Environment(\.layoutDirection) private var layoutDirection
+    let markerPerspective: DriveMarkerPerspective
     let carDisplay: CarDisplayMapOptions?
     let headerBottom: CGFloat
     let tripFrame: CGRect
@@ -136,8 +147,9 @@ struct MapboxDriveMap: View {
     private var following: Bool { carDisplay.map { !$0.overview } ?? navigation.followsUser }
     private var anchored: Bool { driving && following && cameraFix != nil }
 
-    init(navigation: NavigationModel, token: String, tripFrame: CGRect, headerBottom: CGFloat = 0, carDisplay: CarDisplayMapOptions? = nil) {
+    init(navigation: NavigationModel, token: String, markerPerspective: DriveMarkerPerspective, tripFrame: CGRect, headerBottom: CGFloat = 0, carDisplay: CarDisplayMapOptions? = nil) {
         self.navigation = navigation
+        self.markerPerspective = markerPerspective
         self.carDisplay = carDisplay
         self.headerBottom = headerBottom
         self.tripFrame = tripFrame
@@ -219,7 +231,7 @@ struct MapboxDriveMap: View {
                     }
                     if !(driving && following && carDisplay == nil) && !anchored, let point = position(at: clock.date) {
                         MapViewAnnotation(coordinate: aligned(point)) {
-                            DrivePositionMarker(following: false, comma: commaTrip)
+                            DrivePositionMarker(perspective: markerPerspective, following: false, comma: commaTrip)
                         }
                     }
                 }
@@ -229,6 +241,9 @@ struct MapboxDriveMap: View {
                                     densityPointOfInterestLabels: labels == .automatic && driving ? 1 : 3))
                 .usesSafeAreaInsetsAsPadding(!anchored)
                 .ornamentOptions(mapOrnaments(headerInset: headerInset, panel: panel))
+                .onCameraChanged { event in
+                    if driving && following { markerPerspective.update(Double(event.cameraState.pitch)) }
+                }
                 .onMapLoadingError {
                     if $0.type == .style {
                         navigation.notice = "Mapbox couldn’t load. Check your internet connection and public token in Navigation map settings."
@@ -236,7 +251,7 @@ struct MapboxDriveMap: View {
                 }
                 .overlay {
                     if carDisplay != nil, anchored, position(at: clock.date) != nil {
-                        DrivePositionMarker(following: true, comma: commaTrip)
+                        DrivePositionMarker(perspective: markerPerspective, following: true, comma: commaTrip)
                             .position(anchor)
                             .allowsHitTesting(false)
                     }

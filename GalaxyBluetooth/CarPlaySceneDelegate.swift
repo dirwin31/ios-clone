@@ -1385,6 +1385,7 @@ final class CarPlayDashboardSceneDelegate: NSObject, CPTemplateApplicationDashbo
 @MainActor
 private final class CompanionCarPlayMap: UIViewController, MKMapViewDelegate {
     private lazy var map = MKMapView()
+    private let markerPerspective = DriveMarkerPerspective()
     private var mapboxHost: UIHostingController<MapboxDriveMap>?
     private var lastMapboxOptions: CarDisplayMapOptions?
     private var lastMapboxToken: String?
@@ -1467,7 +1468,7 @@ private final class CompanionCarPlayMap: UIViewController, MKMapViewDelegate {
             let options = CarDisplayMapOptions(overview: showingOverview, zoomFactor: zoomFactor, dashboard: dashboard)
             if lastMapboxToken != token || lastMapboxOptions != options {
                 let screen = MapboxDriveMap(navigation: navigation, token: token,
-                                           tripFrame: .zero, carDisplay: options)
+                                           markerPerspective: markerPerspective, tripFrame: .zero, carDisplay: options)
                 if let host = mapboxHost {
                     host.rootView = screen
                 } else {
