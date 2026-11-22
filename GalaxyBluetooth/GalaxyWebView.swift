@@ -56,6 +56,10 @@ final class GalaxyPageDiagnostics: ObservableObject {
     fileprivate weak var barWebView: WKWebView?
     func activate(_ item: GalaxyBarItem) {
         guard barItems.contains(item), !item.disabled else { return }
+        if item.id == "theme", let dark = darkAppearance {
+            UserDefaults.standard.set((dark ? AppAppearance.light : AppAppearance.dark).rawValue, forKey: AppAppearance.key)
+            return
+        }
         barWebView?.callAsyncJavaScript("window.__galaxyBarSelect?.(id)", arguments: ["id": item.id],
                                         in: nil, in: .page, completionHandler: nil)
     }
@@ -208,6 +212,12 @@ private struct GalaxyPage: UIViewRepresentable {
             document.documentElement.dataset.theme = theme;
           };
           syncTheme();
+          document.addEventListener('click', event => {
+            if (event.isTrusted && event.target.closest?.('.gx-theme-toggle')) {
+              const dark = document.documentElement.dataset.theme !== 'dark';
+              window.webkit.messageHandlers.galaxyDiagnostics.postMessage({kind:'chooseTheme', dark});
+            }
+          }, true);
           phoneAppearance.addEventListener('change', () => {
             const dark = phoneAppearance.matches;
             if ((document.documentElement.dataset.theme === 'dark') !== dark) {
@@ -655,6 +665,10 @@ private struct GalaxyPage: UIViewRepresentable {
                         await SentryPush.shared.setEnabled(enabled)
                         if let webView = message.webView { self.syncPush(webView) }
                     }
+                }
+            case "chooseTheme":
+                if message.frameInfo.isMainFrame, let dark = body["dark"] as? Bool {
+                    UserDefaults.standard.set((dark ? AppAppearance.dark : AppAppearance.light).rawValue, forKey: AppAppearance.key)
                 }
             case "theme":
                 if message.frameInfo.isMainFrame, let dark = body["dark"] as? Bool {

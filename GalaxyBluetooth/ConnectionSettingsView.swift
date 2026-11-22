@@ -20,6 +20,7 @@ struct ConnectionSettingsView: View {
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.openURL) private var openURL
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @AppStorage(AppAppearance.key) private var appearance = AppAppearance.system
     @AppStorage("galaxy.app.language") private var language = "en"
     @AppStorage("galaxy.galacticalAnimations") private var galacticalAnimations = true
     @AppStorage("galaxy.app.followGalaxyLanguage") private var followGalaxyLanguage = true
@@ -98,7 +99,7 @@ struct ConnectionSettingsView: View {
                 .init(color: background, location: 0.22),
                 .init(color: model.navigationEnabled ? panel.opacity(0.8) : background, location: 1)
             ], startPoint: .top, endPoint: .bottom).ignoresSafeArea()
-        }.foregroundStyle(Color.primary).preferredColorScheme(model.navigationEnabled ? nil : .dark)
+        }.foregroundStyle(Color.primary)
             .sheet(isPresented: $showMapSettings) {
                 NavigationMapSettings()
             }
@@ -484,6 +485,14 @@ struct ConnectionSettingsView: View {
             }
             separator
             preferenceSection("Appearance & language", expanded: $galaxyExpanded) {
+                Picker("Appearance", selection: $appearance) {
+                    Text("System").tag(AppAppearance.system)
+                    Text("Light").tag(AppAppearance.light)
+                    Text("Dark").tag(AppAppearance.dark)
+                }
+                .pickerStyle(.segmented)
+                .padding(.horizontal, 14)
+                separator
                 toggleRow("sparkles", title: "Galactical Animations", subtitle: "Animate button presses, tab selection, and connection changes", isOn: $galacticalAnimations)
                 separator
                 row("rectangle.on.rectangle", title: "Galaxy screens", subtitle: pairing ? "Waiting for pairing" : checking ? "Checking version…" : assets.status == "Galaxy matches comma." ? "Up to date · just checked" : assets.status.contains("screens have changed") ? "Update available · connect over Wi-Fi or Tunnel" : assets.readyRoot != nil ? "Saved from your comma" : "Not downloaded · needs Local Wi-Fi or Tunnel") {

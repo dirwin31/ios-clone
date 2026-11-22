@@ -930,7 +930,20 @@ final class AppModel: ObservableObject {
 }
 
 
+enum AppAppearance: String {
+    case system, light, dark
+    static let key = "galaxy.app.appearance"
+    var scheme: ColorScheme? {
+        switch self {
+        case .system: return nil
+        case .light: return .light
+        case .dark: return .dark
+        }
+    }
+}
+
 struct GalaxyRootView: View {
+    @AppStorage(AppAppearance.key) private var appearance = AppAppearance.system
     private struct ReportCapture: Identifiable {
         let id = UUID()
         let logs: String
@@ -954,7 +967,7 @@ struct GalaxyRootView: View {
     private var page: CompanionTab { model.tab == .galaxy && !model.opened ? .connections : model.tab }
     @Environment(\.colorScheme) private var systemColorScheme
     private var chromeBackground: LinearGradient {
-        let dark = (galaxyColorScheme ?? systemColorScheme) == .dark
+        let dark = systemColorScheme == .dark
         let edge = Color(uiColor: StarPilotTheme.toolbarColor(dark: dark))
         if page == .galaxy {
             return LinearGradient(colors: [edge, edge], startPoint: .top, endPoint: .bottom)
@@ -962,9 +975,8 @@ struct GalaxyRootView: View {
         let farEdge = dark ? Color(red: 0.13, green: 0.07, blue: 0.22) : Color(red: 0.87, green: 0.81, blue: 0.96)
         return LinearGradient(colors: [edge, farEdge], startPoint: .topLeading, endPoint: .bottomTrailing)
     }
-    private var galaxyColorScheme: ColorScheme? {
-        guard model.tab == .galaxy, let dark = galaxyPage.darkAppearance else { return nil }
-        return dark ? .dark : .light
+    private var showsGalaxyPill: Bool {
+        page == .galaxy && !galaxyPage.barItems.isEmpty && !galaxyPage.stalled && !editorFocused
     }
     private var editorFocused: Bool { model.tab == .galaxy && galaxyPage.landscapeEditor }
     @Environment(\.openURL) private var openURL
@@ -975,6 +987,17 @@ struct GalaxyRootView: View {
     }
     var body: some View {
         chrome.environment(\.reduceGalacticalMotion, motionDisabled)
+            .overlay {
+                if let arrivalRoute, page == .galaxy, !motionDisabled {
+                    GalaxyArrival(route: arrivalRoute)
+                        .ignoresSafeArea().allowsHitTesting(false).accessibilityHidden(true)
+                        .task {
+                            do { try await Task.sleep(for: .milliseconds(1120)) } catch { return }
+                            self.arrivalRoute = nil
+                        }
+                }
+            }
+            .preferredColorScheme(appearance.scheme)
     }
     @ViewBuilder private var chrome: some View {
         if #available(iOS 27.1, *), DuoLayout.isEnabled {
@@ -1001,7 +1024,7 @@ struct GalaxyRootView: View {
                         .modifier(CompanionWebSafeArea())
                         .overlay(alignment: .top) {
                             if !DuoLayout.isEnabled && !editorFocused && galaxyPage.barItems.isEmpty {
-                                let dark = (galaxyColorScheme ?? systemColorScheme) == .dark
+                                let dark = systemColorScheme == .dark
                                 let edge = Color(uiColor: StarPilotTheme.toolbarColor(dark: dark))
                                 LinearGradient(colors: [edge, edge.opacity(0)], startPoint: .top, endPoint: .bottom)
                                     .frame(height: 16).allowsHitTesting(false).accessibilityHidden(true)
@@ -1029,14 +1052,17 @@ struct GalaxyRootView: View {
             }.frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .safeAreaInset(edge: .top, spacing: 0) {
-            if !usesAdaptiveChrome && !editorFocused && model.tab != .navigation {
+            if showsGalaxyPill || (!usesAdaptiveChrome && !editorFocused && model.tab != .navigation) {
                 Group {
-                    if page == .galaxy && !galaxyPage.barItems.isEmpty && !galaxyPage.stalled {
+                    if showsGalaxyPill {
                         HStack(spacing: 0) {
                             ForEach(galaxyPage.barItems.filter { $0.id == "back" || $0.primary }.sorted { $0.id == "back" && $1.id != "back" }) { item in
                                 GalaxyPillButton(page: galaxyPage, item: item, showsText: true, selection: galaxySelection)
                             }
                             GalaxyPillMenu(page: galaxyPage, model: model, select: select)
+                            if usesAdaptiveChrome {
+                                CompactConnectionStatus(model: model, compact: true) { select(.connections) }
+                            }
                         }
                         .animation(motionDisabled ? nil : CompanionMotion.selection, value: galaxyPage.barItems.first(where: \.selected)?.id)
                         .padding(.horizontal, 3).modifier(FloatingGalaxyGlass())
@@ -1052,21 +1078,10 @@ struct GalaxyRootView: View {
             if DuoLayout.isEnabled && model.tab == .navigation { Color.clear }
             else { chromeBackground.ignoresSafeArea() }
         }
-        .overlay {
-            if let arrivalRoute, page == .galaxy, !motionDisabled {
-                GalaxyArrival(route: arrivalRoute)
-                    .allowsHitTesting(false).accessibilityHidden(true)
-                    .task {
-                        do { try await Task.sleep(for: .milliseconds(1120)) } catch { return }
-                        self.arrivalRoute = nil
-                    }
-            }
-        }
         .onChange(of: page) { _, next in
             arrivalRoute = next == .galaxy && !motionDisabled ? model.transport.selectedRoute : nil
         }
         .onChange(of: motionDisabled) { _, disabled in if disabled { arrivalRoute = nil } }
-        .preferredColorScheme(galaxyColorScheme)
         .ignoresSafeArea(.container, edges: editorFocused ? .all : [])
         .statusBarHidden(editorFocused)
         .onChange(of: model.showConnections) { _, show in
@@ -1195,7 +1210,7 @@ private struct GalaxyArrival: View {
         GeometryReader { bounds in
             let width = bounds.size.width
             let height = bounds.size.height
-            let side = min(136, min(width, height) * 0.32)
+            let side = min(220, min(width, height) * 0.40)
             let center = CGPoint(x: width * 0.5, y: height * 0.5)
             let angle: Double = route == .lan ? 155 : route == .bluetooth ? 110 : -25
             let radians = angle * .pi / 180
@@ -1207,44 +1222,61 @@ private struct GalaxyArrival: View {
                 let flight = min(1, elapsed / 0.72)
                 let burst = min(1, max(0, (elapsed - 0.72) / 0.38))
                 ZStack {
-                    RadialGradient(colors: [StarPilotTheme.background.opacity(0.94), .clear], center: .center,
-                                   startRadius: side * 0.55, endRadius: side * 2.0)
-                    Ellipse().stroke(.purple.opacity(0.7), lineWidth: 1)
-                        .frame(width: side * 2, height: side * 1.2).position(center)
-                    Image("StarPilotMark").resizable().scaledToFit()
-                        .frame(width: side, height: side).clipShape(RoundedRectangle(cornerRadius: side * 0.22))
-                        .scaleEffect(1 + 0.24 * burst).position(center)
-                    Image(symbol).renderingMode(.template).resizable().scaledToFit().padding(9)
-                        .frame(width: 44, height: 44).foregroundStyle(.white)
-                        .background(StarPilotTheme.guidance, in: Circle())
-                        .scaleEffect(1 + 0.5 * sin(.pi * burst)).position(target)
+                    RadialGradient(colors: [Color(red: 0.19, green: 0.08, blue: 0.34),
+                                            Color(red: 0.045, green: 0.026, blue: 0.12), .black],
+                                   center: .center, startRadius: 0, endRadius: max(width, height) * 0.72)
                     Canvas { context, size in
-                        func point(_ t: Double) -> CGPoint {
-                            let u = 1 - t
-                            return CGPoint(x: u*u * (-20) + 2*u*t * size.width * 0.42 + t*t * target.x,
-                                           y: u*u * size.height * 0.85 + 2*u*t * size.height * 0.14 + t*t * target.y)
-                        }
-                        if flight < 1 {
-                            for i in 0..<22 {
-                                let strength = Double(i + 1) / 22
-                                let p = point(max(0, flight - (1 - strength) * 0.22))
-                                let radius = 1 + 4 * strength
-                                context.fill(Path(ellipseIn: CGRect(x: p.x-radius, y: p.y-radius, width: 2*radius, height: 2*radius)),
-                                             with: .color(i == 21 ? .white : .purple.opacity(strength)))
-                            }
-                        } else {
-                            let radius = side * (0.1 + 1.2 * burst)
-                            for i in 0..<16 {
-                                let a = Double(i) * .pi / 8
-                                var ray = Path()
-                                ray.move(to: CGPoint(x: target.x + cos(a)*radius, y: target.y + sin(a)*radius))
-                                let tip = radius + 16 * (1-burst)
-                                ray.addLine(to: CGPoint(x: target.x + cos(a)*tip, y: target.y + sin(a)*tip))
-                                context.stroke(ray, with: .color(i.isMultiple(of: 2) ? .white : .purple), lineWidth: 2.5)
-                            }
+                        for i in 0..<120 {
+                            let x = Double((i * 619 + i * i * 31) % 997) / 997
+                            let y = Double((i * 463 + i * i * 17) % 991) / 991
+                            let depth = Double(i % 7 + 1) / 7
+                            let travel = 1 + depth * (0.08 * flight + 0.65 * burst * burst)
+                            let point = CGPoint(x: center.x + (x - 0.5) * size.width * travel,
+                                                y: center.y + (y - 0.5) * size.height * travel)
+                            let radius = 0.45 + depth
+                            context.fill(Path(ellipseIn: CGRect(x: point.x-radius, y: point.y-radius,
+                                                               width: 2*radius, height: 2*radius)),
+                                         with: .color(.white.opacity(0.3 + 0.65 * depth)))
                         }
                     }
-                }.opacity(1 - burst * burst)
+                    Group {
+                        Ellipse().stroke(.purple.opacity(0.7), lineWidth: 1)
+                            .frame(width: side * 2, height: side * 1.2).position(center)
+                        Image("StarPilotMark").resizable().scaledToFit()
+                            .frame(width: side, height: side).clipShape(RoundedRectangle(cornerRadius: side * 0.22))
+                            .scaleEffect(1 + 0.24 * burst).position(center)
+                        Image(symbol).renderingMode(.template).resizable().scaledToFit().padding(9)
+                            .frame(width: 44, height: 44).foregroundStyle(.white)
+                            .background(StarPilotTheme.guidance, in: Circle())
+                            .scaleEffect(1 + 0.5 * sin(.pi * burst)).position(target)
+                        Canvas { context, size in
+                            func point(_ t: Double) -> CGPoint {
+                                let u = 1 - t
+                                return CGPoint(x: u*u * (-20) + 2*u*t * size.width * 0.42 + t*t * target.x,
+                                               y: u*u * size.height * 0.85 + 2*u*t * size.height * 0.14 + t*t * target.y)
+                            }
+                            if flight < 1 {
+                                for i in 0..<22 {
+                                    let strength = Double(i + 1) / 22
+                                    let p = point(max(0, flight - (1 - strength) * 0.22))
+                                    let radius = 1 + 4 * strength
+                                    context.fill(Path(ellipseIn: CGRect(x: p.x-radius, y: p.y-radius, width: 2*radius, height: 2*radius)),
+                                                 with: .color(i == 21 ? .white : .purple.opacity(strength)))
+                                }
+                            } else {
+                                let radius = side * (0.1 + 1.2 * burst)
+                                for i in 0..<16 {
+                                    let a = Double(i) * .pi / 8
+                                    var ray = Path()
+                                    ray.move(to: CGPoint(x: target.x + cos(a)*radius, y: target.y + sin(a)*radius))
+                                    let tip = radius + 16 * (1-burst)
+                                    ray.addLine(to: CGPoint(x: target.x + cos(a)*tip, y: target.y + sin(a)*tip))
+                                    context.stroke(ray, with: .color(i.isMultiple(of: 2) ? .white : .purple), lineWidth: 2.5)
+                                }
+                            }
+                        }
+                    }.opacity(1 - burst * burst)
+                }
             }
         }
     }
@@ -1774,18 +1806,9 @@ private struct AdaptiveCompanionLayout<Content: View>: View {
     }
     var body: some View {
         content()
-            .environment(\.companionVerticalBar, verticalEdge != nil)
+            .environment(\.companionVerticalBar, !usesGalaxyPill && verticalEdge != nil)
             .toolbar {
-                if tab == .galaxy && !galaxyPage.barItems.isEmpty && !galaxyPage.stalled && !galaxyPage.landscapeEditor {
-                    galaxyItem("back")
-                    galaxyItem("home")
-                    galaxyItem("toggles")
-                    galaxyItem("tools")
-                    galaxyItem("routes")
-                    ToolbarItem(placement: .topBarLeading) {
-                        GalaxyPillMenu(page: galaxyPage, model: model, select: select)
-                    }.axisBehavior(.verticalPreferred)
-                } else {
+                if !usesGalaxyPill {
                     ToolbarItemGroup(placement: .topBarLeading) {
                         ForEach(tabs) { item in
                             let selected = tab == item || (tab == .logs && item == .connections)
@@ -1815,16 +1838,12 @@ private struct AdaptiveCompanionLayout<Content: View>: View {
                 }.axisBehavior(.verticalPreferred)
             }
             .toolbarBackground(.hidden, for: .navigationBar)
+            .toolbar(usesGalaxyPill ? .hidden : .visible, for: .navigationBar)
             .toolbarVerticalBehavior(.automatic)
     }
 
-    @ToolbarContentBuilder private func galaxyItem(_ id: String) -> some ToolbarContent {
-        if let item = galaxyPage.barItems.first(where: { $0.id == id }) {
-            ToolbarItem(placement: .topBarLeading) {
-                GalaxyPillButton(page: galaxyPage, item: item, showsText: verticalEdge == nil)
-                    .fixedSize()
-            }.axisBehavior(.verticalPreferred)
-        }
+    private var usesGalaxyPill: Bool {
+        tab == .galaxy && !galaxyPage.barItems.isEmpty && !galaxyPage.stalled && !galaxyPage.landscapeEditor
     }
 }
 
