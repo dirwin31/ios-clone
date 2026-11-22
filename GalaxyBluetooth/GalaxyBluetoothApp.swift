@@ -1457,21 +1457,29 @@ private struct GalaxyPillButton: View {
 
     var body: some View {
         Button { page.activate(item) } label: {
-            VStack(spacing: 2) {
-                Image(systemName: item.icon).font(.system(size: 16, weight: .semibold))
+            VStack(spacing: 3) {
+                Image(systemName: item.icon)
+                    .font(.system(size: 16, weight: .medium))
+                    .frame(height: 19)
                 if item.primary && toolbarLabels && !typeSize.isAccessibilitySize {
-                    Text(verbatim: item.label).font(.caption2.weight(.semibold)).lineLimit(1)
+                    Text(verbatim: item.label)
+                        .font(.caption.weight(.medium))
+                        .lineLimit(1)
                 }
-            }.frame(minWidth: 44, maxWidth: item.primary ? .infinity : 44, minHeight: 44)
-                .foregroundStyle(item.selected ? Color.white : (item.primary ? Color.primary : Color.secondary))
-                .background {
-                    if item.selected {
-                        TabSelectionCapsule()
-                            .padding(.horizontal, 2)
-                            .padding(.vertical, 4)
-                    }
+            }
+            .padding(.vertical, 9)
+            .frame(minWidth: 44, maxWidth: item.primary ? .infinity : 44, minHeight: 48)
+            .foregroundStyle(item.primary ? Color.primary : Color.secondary)
+            .overlay(alignment: .bottom) {
+                if item.selected {
+                    Capsule()
+                        .fill(Color.primary)
+                        .frame(width: 20, height: 2)
+                        .padding(.bottom, 3)
+                        .accessibilityHidden(true)
                 }
-                .contentShape(Rectangle())
+            }
+            .contentShape(Rectangle())
         }.buttonStyle(CompanionPressStyle()).disabled(item.disabled).accessibilityLabel(Text(verbatim: item.label))
             .accessibilityIdentifier("galaxy-pill-" + item.id)
             .accessibilityAddTraits(item.selected ? .isSelected : [])
