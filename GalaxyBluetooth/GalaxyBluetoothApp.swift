@@ -961,10 +961,12 @@ struct GalaxyRootView: View {
     @State private var hasVisitedGalaxy = false
     @State private var appTabsExpanded = true
     @Namespace private var galaxySelection
-    @State private var arrivalRoute: ConnectionRoute?
+    @State private var arrivalID: UUID?
+    @State private var departingPage: CompanionTab?
     private var motionDisabled: Bool { reduceMotion || !galacticalAnimations || scenePhase != .active }
     @AppStorage("galaxy.galacticalAnimations") private var galacticalAnimations = true
-    private var page: CompanionTab { model.tab == .galaxy && !model.opened ? .connections : model.tab }
+    private var page: CompanionTab { departingPage ?? requestedPage }
+    private var requestedPage: CompanionTab { model.tab == .galaxy && !model.opened ? .connections : model.tab }
     @Environment(\.colorScheme) private var systemColorScheme
     private var chromeBackground: LinearGradient {
         let dark = systemColorScheme == .dark
@@ -978,7 +980,7 @@ struct GalaxyRootView: View {
     private var showsGalaxyPill: Bool {
         page == .galaxy && !galaxyPage.barItems.isEmpty && !galaxyPage.stalled && !editorFocused
     }
-    private var editorFocused: Bool { model.tab == .galaxy && galaxyPage.landscapeEditor }
+    private var editorFocused: Bool { page == .galaxy && galaxyPage.landscapeEditor }
     @Environment(\.openURL) private var openURL
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
@@ -988,13 +990,14 @@ struct GalaxyRootView: View {
     var body: some View {
         chrome.environment(\.reduceGalacticalMotion, motionDisabled)
             .overlay {
-                if let arrivalRoute, page == .galaxy, !motionDisabled {
-                    GalaxyArrival(route: arrivalRoute)
-                        .ignoresSafeArea().allowsHitTesting(false).accessibilityHidden(true)
-                        .task {
-                            do { try await Task.sleep(for: GalaxyArrival.duration) } catch { return }
-                            self.arrivalRoute = nil
-                        }
+                if let arrivalID, requestedPage == .galaxy, !motionDisabled {
+                    GalaxyArrival {
+                        if self.arrivalID == arrivalID { departingPage = nil }
+                    } finished: {
+                        if self.arrivalID == arrivalID { self.arrivalID = nil }
+                    }
+                    .id(arrivalID)
+                    .ignoresSafeArea().accessibilityHidden(true)
                 }
             }
             .preferredColorScheme(appearance.scheme)
@@ -1052,7 +1055,7 @@ struct GalaxyRootView: View {
             }.frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .safeAreaInset(edge: .top, spacing: 0) {
-            if !usesAdaptiveChrome && !editorFocused && model.tab != .navigation {
+            if !usesAdaptiveChrome && !editorFocused && page != .navigation {
                 Group {
                     if showsGalaxyPill {
                         HStack(spacing: 0) {
@@ -1072,13 +1075,24 @@ struct GalaxyRootView: View {
             }
         }
         .background {
-            if DuoLayout.isEnabled && model.tab == .navigation { Color.clear }
+            if DuoLayout.isEnabled && page == .navigation { Color.clear }
             else { chromeBackground.ignoresSafeArea() }
         }
-        .onChange(of: page) { _, next in
-            arrivalRoute = next == .galaxy && !motionDisabled ? model.transport.selectedRoute : nil
+        .onChange(of: requestedPage) { previous, next in
+            if next == .galaxy, !motionDisabled, model.transport.selectedRoute != nil {
+                departingPage = previous
+                arrivalID = UUID()
+            } else {
+                departingPage = nil
+                arrivalID = nil
+            }
         }
-        .onChange(of: motionDisabled) { _, disabled in if disabled { arrivalRoute = nil } }
+        .onChange(of: motionDisabled) { _, disabled in
+            if disabled {
+                departingPage = nil
+                arrivalID = nil
+            }
+        }
         .ignoresSafeArea(.container, edges: editorFocused ? .all : [])
         .statusBarHidden(editorFocused)
         .onChange(of: model.showConnections) { _, show in
@@ -1200,45 +1214,30 @@ struct CompanionPressStyle: ButtonStyle {
 }
 
 private struct GalaxyArrival: View {
-    let route: ConnectionRoute
-    @State private var start = Date()
-
-    static let duration = Duration.milliseconds(640)
-
-    private func ease(_ value: Double) -> Double {
-        let t = min(1, max(0, value))
-        return t * t * (3 - 2 * t)
-    }
+    let covered: () -> Void
+    let finished: () -> Void
+    @State private var position: CGFloat = -1
 
     var body: some View {
         GeometryReader { bounds in
             let size = bounds.size
-            let side = min(220, min(size.width, size.height) * 0.40)
-            let symbol = route == .lan ? "ConnectionWiFi" : route == .bluetooth ? "ConnectionBluetooth" : "ConnectionNetwork"
-            TimelineView(.animation(minimumInterval: 1.0 / 60)) { clock in
-                let elapsed = clock.date.timeIntervalSince(start)
-                let flight = ease((elapsed - 0.08) / 0.34)
-                let entry = ease(elapsed / 0.13)
-                let exit = ease((elapsed - 0.44) / 0.20)
-                ZStack {
-                    Color.black
-                    Image("GalaxyDust").resizable().scaledToFill()
-                        .frame(width: size.width, height: size.height)
-                        .scaleEffect(1.03 + 0.06 * flight)
-                        .clipped()
-                    Image("StarPilotMark").resizable().scaledToFit()
-                        .frame(width: side, height: side)
-                        .clipShape(RoundedRectangle(cornerRadius: side * 0.22))
-                        .scaleEffect(0.97 + 0.04 * flight)
-                    Image(symbol).renderingMode(.template).resizable().scaledToFit()
-                        .frame(width: side * 0.13, height: side * 0.13)
-                        .foregroundStyle(.white)
-                        .shadow(color: .purple, radius: 6)
-                        .offset(x: -(1 - flight) * size.width * 0.40,
-                                y: (1 - flight) * size.height * 0.18)
-                        .opacity(1 - ease((elapsed - 0.34) / 0.10))
+            // At the midpoint the opaque middle quarter covers the page swap.
+            Image("GalaxyDust").resizable()
+                .frame(width: size.width * 4, height: size.height)
+                .position(x: size.width * (0.5 + 2.5 * position), y: size.height / 2)
+        }
+        .clipped()
+        .contentShape(Rectangle())
+        .onAppear {
+            withAnimation(.easeIn(duration: 0.24), completionCriteria: .logicallyComplete) {
+                position = 0
+            } completion: {
+                covered()
+                withAnimation(.easeOut(duration: 0.24), completionCriteria: .logicallyComplete) {
+                    position = 1
+                } completion: {
+                    finished()
                 }
-                .opacity(entry * (1 - exit))
             }
         }
     }
