@@ -1407,15 +1407,14 @@ private final class CompanionCarPlayMap: UIViewController, MKMapViewDelegate {
         return frame.width >= 64 && frame.height >= 64 ? frame : fallback
     }
 
-    private func follow(_ coordinate: CLLocationCoordinate2D, heading: Double, animated: Bool) {
+    private func follow(_ coordinate: CLLocationCoordinate2D, heading: Double, pitch: CGFloat, animated: Bool) {
         let frame = visibleMapFrame
         guard !frame.isEmpty else { return }
         let distance = cameraDistance * zoomFactor
-        let pitch: CGFloat = dashboard ? 55 : 66
         // Measure the ground offset in MapKit's pitched projection. Rotating this
         // offset into the new heading keeps the arrow anchored through turns.
         let camera = MKMapCamera(lookingAtCenter: coordinate, fromDistance: distance, pitch: pitch, heading: heading)
-        if !animated || abs(map.camera.pitch - pitch) > 5 {
+        if !animated {
             map.setCamera(camera, animated: false)
         }
         let current = map.camera
@@ -1511,7 +1510,8 @@ private final class CompanionCarPlayMap: UIViewController, MKMapViewDelegate {
             let heading = course.isFinite && course >= 0 ? course : map.camera.heading
             if !showingOverview || next == nil {
                 showingDestination = false
-                follow(displayed, heading: heading, animated: hadPosition)
+                let pitch = navigation.followPitch(cruising: dashboard ? 55 : 66, speed: filteredSpeed)
+                follow(displayed, heading: heading, pitch: CGFloat(pitch), animated: hadPosition)
             }
             if let marker = map.view(for: position), showingOverview {
                 marker.transform = CGAffineTransform(rotationAngle: (heading - map.camera.heading) * .pi / 180)

@@ -3,6 +3,8 @@ import MapKit
 
 struct PhoneRoute {
     struct Step {
+        var maneuverType: String? = nil
+        var modifier: String? = nil
         let instructions: String
         let distance: Double
         let polyline: MKPolyline
@@ -38,7 +40,7 @@ extension PhoneRoute {
         }
         struct Leg: Decodable {
             struct Segment: Decodable {
-                struct Maneuver: Decodable { let instruction: String }
+                struct Maneuver: Decodable { let instruction: String; let type: String?; let modifier: String? }
                 let geometry: Geometry
                 let distance: Double
                 let maneuver: Maneuver
@@ -71,7 +73,8 @@ extension PhoneRoute {
             // Mapbox maneuvers describe the start of each segment. Galaxy announces
             // the turn at its end, so pair each segment with the following maneuver.
             let steps = try zip(segments, segments.dropFirst()).map { current, next in
-                Step(instructions: next.maneuver.instruction, distance: current.distance, polyline: try current.geometry.line())
+                Step(maneuverType: next.maneuver.type, modifier: next.maneuver.modifier,
+                     instructions: next.maneuver.instruction, distance: current.distance, polyline: try current.geometry.line())
             }
             return PhoneRoute(name: route.legs.map(\.summary).joined(separator: ", "), distance: route.distance,
                              expectedTravelTime: route.duration, polyline: try route.geometry.line(), steps: steps)
@@ -136,6 +139,27 @@ final class NavigationModel: NSObject, ObservableObject, @preconcurrency CLLocat
     private var lastCalculation = Date.distantPast
     private var offRouteSamples = 0
     private var stepIndex = 0
+    private var phoneTurn = false
+
+    private func isTurn(type: String?, modifier: String?, instruction: String) -> Bool {
+        if let type = type?.lowercased(), !type.isEmpty {
+            switch type {
+            case "turn", "fork", "merge", "on ramp", "off ramp", "roundabout", "rotary", "roundabout turn", "exit rotary", "exit roundabout":
+                return modifier?.lowercased() != "straight"
+            case "continue", "end of road":
+                return ["right", "left", "sharp right", "sharp left", "slight right", "slight left", "uturn"].contains(modifier?.lowercased() ?? "")
+            default: return false
+            }
+        }
+        let words = instruction.lowercased().split { !$0.isLetter }
+        return words.contains { ["left", "right", "roundabout", "rotary", "uturn", "exit", "ramp"].contains(String($0)) }
+    }
+
+    func followPitch(cruising: Double, speed: Double) -> Double {
+        let upcoming = usingComma ? commaFeedReady && isTurn(type: commaManeuverType, modifier: commaManeuverModifier, instruction: instruction) : phoneTurn
+        return NavigationMapMotion.followPitch(cruising: cruising, speed: speed,
+            turnDistance: navigating && upcoming ? distanceToTurn : nil)
+    }
     private var commandRunning = false
     private var commandGeneration = UUID()
 #if targetEnvironment(simulator)
@@ -205,7 +229,8 @@ final class NavigationModel: NSObject, ObservableObject, @preconcurrency CLLocat
         if followsUser {
             withAnimation(.linear(duration: UIAccessibility.isReduceMotionEnabled ? 0 : 0.8)) {
                 camera = .camera(MapCamera(centerCoordinate: fresh.coordinate, distance: followCameraDistance,
-                    heading: fresh.course >= 0 ? fresh.course : camera.camera?.heading ?? 0, pitch: 35))
+                    heading: fresh.course >= 0 ? fresh.course : camera.camera?.heading ?? 0,
+                    pitch: followPitch(cruising: 62, speed: fresh.speed)))
             }
         }
         let deviation = distanceFromRoute(fresh.coordinate, polyline: route.polyline)
@@ -584,14 +609,15 @@ final class NavigationModel: NSObject, ObservableObject, @preconcurrency CLLocat
             if let coordinate = commaPosition {
                 withAnimation(.easeInOut(duration: UIAccessibility.isReduceMotionEnabled ? 0 : 0.4)) {
                     camera = .camera(MapCamera(centerCoordinate: coordinate, distance: followCameraDistance,
-                        heading: commaBearing, pitch: 35))
+                        heading: commaBearing, pitch: followPitch(cruising: 62, speed: 0)))
                 }
             }
             return
         }
         if navigating, let location = goodLocation {
             camera = .camera(MapCamera(centerCoordinate: location.coordinate, distance: followCameraDistance,
-                heading: location.course >= 0 ? location.course : camera.camera?.heading ?? 0, pitch: 35))
+                heading: location.course >= 0 ? location.course : camera.camera?.heading ?? 0,
+                pitch: followPitch(cruising: 62, speed: location.speed)))
         } else { camera = .userLocation(fallback: .automatic) }
     }
     func showOverview() {
@@ -656,7 +682,7 @@ final class NavigationModel: NSObject, ObservableObject, @preconcurrency CLLocat
 
     private func updateProgress(_ route: PhoneRoute, at location: CLLocation) {
         let steps = route.steps.filter { !$0.instructions.isEmpty && $0.polyline.pointCount > 0 }
-        guard !steps.isEmpty else { instruction = "Continue to your destination"; return }
+        guard !steps.isEmpty else { phoneTurn = false; instruction = "Continue to your destination"; return }
         stepIndex = min(stepIndex, steps.count - 1)
         while stepIndex < steps.count - 1 {
             let step = steps[stepIndex]
@@ -666,6 +692,7 @@ final class NavigationModel: NSObject, ObservableObject, @preconcurrency CLLocat
             stepIndex += 1
         }
         let current = steps[stepIndex]
+        phoneTurn = isTurn(type: current.maneuverType, modifier: current.modifier, instruction: current.instructions)
         let end = current.polyline.points()[current.polyline.pointCount - 1].coordinate
         distanceToTurn = location.distance(from: CLLocation(latitude: end.latitude, longitude: end.longitude))
         instruction = current.instructions
@@ -675,6 +702,7 @@ final class NavigationModel: NSObject, ObservableObject, @preconcurrency CLLocat
         if let destination, location.distance(from: CLLocation(latitude: destination.coordinate.latitude,
             longitude: destination.coordinate.longitude)) < 40 {
             instruction = "You’re near your destination"
+            phoneTurn = false
         }
     }
     private func distanceFromRoute(_ coordinate: CLLocationCoordinate2D, polyline: MKPolyline) -> Double {

@@ -150,6 +150,13 @@ enum NavigationMapMotion {
         return 1200 + (cruising - 1200) * blend
     }
 
+    static func followPitch(cruising: Double, speed: Double, turnDistance: Double?) -> Double {
+        guard let meters = turnDistance, meters.isFinite, meters >= 0 else { return cruising }
+        let approach = min(300, max(100, (speed.isFinite ? speed : 0) * 12))
+        let t = min(1, max(0, (meters - 20) / (approach - 20)))
+        return 32 + (cruising - 32) * t * t * (3 - 2 * t)
+    }
+
     static func smoothDistance(_ current: Double, toward target: Double, elapsed: Double) -> Double {
         let dt = min(0.1, max(0, elapsed))
         let amount = 1 - exp(-dt / (target < current ? 1.5 : 3.0))

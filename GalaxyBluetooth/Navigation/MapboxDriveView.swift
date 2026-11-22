@@ -101,6 +101,7 @@ struct MapboxDriveMap: View {
     @State private var cameraFix: CLLocation?
     @State private var cameraBearing = 0.0
     @State private var cameraZoom = 16.8
+    @State private var cameraPitch = 68.0
 
     private var anchored: Bool { driving && navigation.followsUser && cameraFix != nil }
 
@@ -274,11 +275,13 @@ struct MapboxDriveMap: View {
                 fraction: continuous ? 1 - exp(-dt / 0.5) : 1)
         }
         cameraZoom += (zoom - cameraZoom) * (continuous ? 1 - exp(-dt / 2) : 1)
+        let targetPitch = driving ? navigation.followPitch(cruising: 68, speed: speed) : 48
+        cameraPitch += (targetPitch - cameraPitch) * (continuous ? 1 - exp(-dt / 1.2) : 1)
         let accepted = continuous && !moving ? previous?.coordinate ?? point : point
         let center = aligned(accepted)
         cameraFix = CLLocation(coordinate: accepted, altitude: 0, horizontalAccuracy: -1, verticalAccuracy: -1, timestamp: stamp)
         let camera = Viewport.camera(center: center, zoom: CGFloat(cameraZoom), bearing: cameraBearing,
-                                     pitch: driving ? 68 : 48)
+                                     pitch: CGFloat(cameraPitch))
             .padding(padding)
         if reduceMotion || !continuous || layoutChanged { viewport = camera }
         else { withViewportAnimation(.linear(duration: min(2.5, max(0.1, dt)))) { viewport = camera } }

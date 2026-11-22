@@ -42,6 +42,10 @@ import Foundation
         let straight = [RoutePoint(latitude: 43, longitude: -80), RoutePoint(latitude: 43.01, longitude: -80)]
         let beside = RoutePoint(latitude: 43.005, longitude: -79.9999)
         let aligned = NavigationMapMotion.routeAligned(beside, route: straight)
+        precondition(NavigationMapMotion.followPitch(cruising: 68, speed: 12, turnDistance: nil) == 68)
+        precondition(NavigationMapMotion.followPitch(cruising: 68, speed: 12, turnDistance: 400) == 68)
+        precondition(NavigationMapMotion.followPitch(cruising: 68, speed: 12, turnDistance: 20) == 32)
+        precondition((32..<68).contains(NavigationMapMotion.followPitch(cruising: 68, speed: 12, turnDistance: 80)))
         precondition(abs(aligned.longitude + 80) < 0.0000001 && abs(aligned.latitude - beside.latitude) < 0.0000001)
         let offRoute = RoutePoint(latitude: 43.005, longitude: -79.999)
         precondition(NavigationMapMotion.routeAligned(offRoute, route: straight) == offRoute)
