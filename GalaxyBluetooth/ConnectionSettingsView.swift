@@ -78,17 +78,9 @@ struct ConnectionSettingsView: View {
     }
 
     var body: some View {
-        if DuoLayout.isEnabled {
-            GeometryReader { geometry in
-                // Keep the system-provided safe-area width. Ignoring the horizontal
-                // safe area here lets the cards extend behind Duo's toolbar rail.
-                let width = max(0, geometry.size.width)
-                let wide = width >= 640 && !dynamicTypeSize.isAccessibilitySize
-                settingsContent(wide: wide)
-                    .frame(width: width, height: geometry.size.height)
-            }
-        } else {
-            settingsContent(wide: false)
+        GeometryReader { geometry in
+            settingsContent(wide: geometry.size.width >= 700 && !dynamicTypeSize.isAccessibilitySize)
+                .frame(width: geometry.size.width, height: geometry.size.height)
         }
     }
 
@@ -154,58 +146,45 @@ struct ConnectionSettingsView: View {
             }
     }
 
-    private func settingsPage(wide: Bool) -> AnyView {
-        // Bound the concrete SwiftUI type at the page boundary. Keep one page tree
-        // instead of nesting multiple complete pages in a fitting container.
-        AnyView(VStack(spacing: 8) {
-            HStack {
-                if returningFromGalaxy && model.opened {
-                    Button { select(.galaxy) } label: {
-                        Image(systemName: "chevron.left").frame(width: 44, height: 44)
-                    }.accessibilityLabel("Back to Galaxy")
-                } else { Color.clear.frame(width: 44, height: 44) }
-                Spacer(minLength: 0)
-                Text(returningFromGalaxy ? "Settings" : "StarPilot BT")
-                    .font(.custom("Sora-Regular", size: 22).weight(.medium)).lineLimit(1)
-                Spacer(minLength: 0)
-                Color.clear.frame(width: 44, height: 44)
-            }
-            if wide {
-                HStack(alignment: .top, spacing: 20) {
-                    VStack(alignment: .leading, spacing: 8) {
-                        preferencesHeading
-                        preferences(extraSpacing: 3)
-                    }.frame(maxWidth: .infinity)
-
-                    VStack(spacing: 8) {
-                        ConnectionOrbit(route: connected ? model.transport.label : "", pairing: pairing)
-                        connectionPanel(extraSpacing: 6)
-                        connectionExtras
-                    }.frame(maxWidth: .infinity)
+    private func settingsPage(wide: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 20) {
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 6) {
+                    if returningFromGalaxy && model.opened {
+                        Button { select(.galaxy) } label: { Label("Back to Galaxy", systemImage: "chevron.backward") }
+                            .font(.subheadline).frame(minHeight: 44)
+                    }
+                    Text(returningFromGalaxy ? "Settings" : "StarPilot BT")
+                        .font(.custom("Sora-Regular", size: 32, relativeTo: .largeTitle).weight(.semibold))
+                        .accessibilityAddTraits(.isHeader)
                 }
-                .padding(.top, 12)
-            } else {
-                ConnectionOrbit(route: connected ? model.transport.label : "", pairing: pairing)
-                    .padding(.bottom, 10)
-                connectionPanel()
-                preferencesHeading
-                preferences()
-                connectionExtras
+                Spacer(minLength: 0)
+                if !dynamicTypeSize.isAccessibilitySize {
+                    ConnectionOrbit(route: connected ? model.transport.label : "", pairing: pairing)
+                        .scaleEffect(0.46).frame(width: 124, height: 48)
+                }
             }
-            if wide {
-                HStack(spacing: 24) {
-                    footerLinks
-                    versionLabel
-                }.frame(maxWidth: .infinity).padding(.top, 8)
-            } else {
-                footerLinks
+            let layout = wide ? AnyLayout(HStackLayout(alignment: .top, spacing: 22)) : AnyLayout(VStackLayout(spacing: 20))
+            layout {
+                VStack(alignment: .leading, spacing: 12) {
+                    connectionPanel()
+                    if !model.legacyMessage.isEmpty { message(model.legacyMessage) }
+                    if !server.error.isEmpty { message(server.error) }
+                }.frame(maxWidth: .infinity)
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("Connection").font(.title3.bold()).accessibilityAddTraits(.isHeader)
+                    connectionModePanel
+                    connectionExtras
+                    Text("Preferences").font(.title3.bold()).accessibilityAddTraits(.isHeader).padding(.top, 8)
+                    preferences()
+                }.frame(maxWidth: .infinity)
             }
-            if !model.legacyMessage.isEmpty { message(model.legacyMessage) }
-            if !server.error.isEmpty { message(server.error) }
-            if !wide { versionLabel }
-
-        }.padding(.horizontal, 18).padding(.top, 0).padding(.bottom, 12)
-            .frame(maxWidth: wide ? 1200 : 460).frame(maxWidth: .infinity))
+            Divider()
+            footerLinks.frame(maxWidth: .infinity)
+            versionLabel.frame(maxWidth: .infinity)
+        }
+        .padding(.horizontal, wide ? 28 : 20).padding(.vertical, 18)
+        .frame(maxWidth: wide ? 1100 : 560).frame(maxWidth: .infinity)
     }
 
     private var footerLinks: some View {
@@ -238,11 +217,6 @@ struct ConnectionSettingsView: View {
             .font(.system(size: 11)).foregroundStyle(muted)
     }
 
-    private var preferencesHeading: some View {
-        Text("PREFERENCES").font(.system(size: 11, weight: .medium)).tracking(1.2)
-            .foregroundStyle(muted).frame(maxWidth: .infinity, alignment: .leading)
-    }
-
     private var connectionExtras: some View {
         VStack(spacing: 8) {
             row("network", title: "Galaxy tunnel", subtitle: model.tunnel.credential == nil ? "Not set up" : model.tunnel.status) {
@@ -261,21 +235,8 @@ struct ConnectionSettingsView: View {
         select(.galaxy)
     }
 
-    private func connectionPanel(extraSpacing: CGFloat = 0) -> some View {
-        VStack(alignment: .leading, spacing: 10 + extraSpacing) {
-            HStack(spacing: 10) {
-                Image(model.transport.label == "Tunnel" ? "ConnectionNetwork" : model.transport.label == "Local Wi-Fi" ? "ConnectionWiFi" : "ConnectionBluetooth").renderingMode(.template).resizable().scaledToFit().frame(width: 20, height: 20).foregroundStyle(accent)
-                    .frame(width: 38, height: 38).background(accent.opacity(0.15), in: RoundedRectangle(cornerRadius: 12))
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Your comma").font(.system(size: 17, weight: .medium))
-                    Text(LocalizedStringKey(status)).font(.system(size: 11)).foregroundStyle(muted).accessibilityAddTraits(.updatesFrequently)
-                }
-                Spacer(minLength: 4)
-                Text(LocalizedStringKey(pairing ? "Pairing…" : connected ? "Connected" : connecting ? "Connecting…" : "Offline"))
-                    .font(.system(size: 10, weight: .medium)).foregroundStyle(pairing ? accent : connected ? .mint : muted)
-                    .padding(.horizontal, 9).padding(.vertical, 6)
-                    .background((pairing ? accent : connected ? Color.mint : muted).opacity(0.13), in: Capsule())
-            }
+    private var connectionModePanel: some View {
+        VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 3) {
                 ForEach([ConnectionMode.automatic, .bluetooth, .lan], id: \.self) { mode in
                     Button { model.mode = mode } label: {
@@ -296,27 +257,18 @@ struct ConnectionSettingsView: View {
                     Button("Set order") { showOrder = true }.font(.system(size: 12)).frame(minHeight: 32)
                 }.disabled(pairing)
             }
-            if !pairing {
-                if model.pairingKey.isEmpty && !model.hasLANPairingSetup {
-                    Text("Allow Local Network and Bluetooth when iPhone asks. We’ll find comma on your Wi-Fi or hotspot first.").font(.system(size: 11)).foregroundStyle(muted)
+        }.padding(14).background(panel, in: RoundedRectangle(cornerRadius: 16))
+    }
+
+    private func connectionPanel() -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 10) {
+                Image(model.transport.label == "Tunnel" ? "ConnectionNetwork" : model.transport.label == "Local Wi-Fi" ? "ConnectionWiFi" : "ConnectionBluetooth").renderingMode(.template).resizable().scaledToFit().frame(width: 20, height: 20).foregroundStyle(accent)
+                    .frame(width: 38, height: 38).background(accent.opacity(0.15), in: RoundedRectangle(cornerRadius: 12))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Your comma").font(.title2.bold()).accessibilityAddTraits(.isHeader)
+                    Text(LocalizedStringKey(status)).font(.subheadline).foregroundStyle(muted).accessibilityAddTraits(.updatesFrequently)
                 }
-                Text(LocalizedStringKey(model.mode == .automatic ? "Uses your first available connection" : model.mode == .bluetooth ? "Connect directly to comma\nControl Galaxy without Local Wi-Fi" : "Connect over your local network\nJoin the same Wi-Fi or comma’s hotspot"))
-                    .font(.system(size: 11)).foregroundStyle(muted).lineSpacing(3)
-                    .multilineTextAlignment(.center).frame(maxWidth: .infinity)
-                    .fixedSize(horizontal: false, vertical: true).padding(.vertical, 3)
-            }
-            if needsPairing && !pairing && !connecting {
-                if bluetooth.pairingRecoveryNeeded {
-                    Text("We found comma, but couldn’t verify your saved pairing after repeated attempts. The pairing may have changed, or the connection may be interrupted.")
-                        .font(.caption).foregroundStyle(muted).multilineTextAlignment(.center)
-                }
-                Text(model.hasLANPairingSetup
-                     ? "1. Keep comma on and nearby.\n2. Join the same Wi-Fi as comma, or comma’s hotspot.\n3. Tap the button below. This app opens pairing on comma automatically, then connects over Bluetooth."
-                     : "Join the same Wi-Fi as comma, or comma’s hotspot. The app checks the comma it finds automatically. Once Local Wi-Fi connects, choose Bluetooth to finish setup.")
-                    .font(.caption).foregroundStyle(muted).multilineTextAlignment(.center)
-            }
-            if model.mode != .bluetooth && !connected && !pairing && (discovery.searching || !discovery.devices.isEmpty) {
-                discoveredCommas
             }
             Button {
                 if connected && model.opened { select(.galaxy) }
@@ -340,11 +292,33 @@ struct ConnectionSettingsView: View {
                     else if (connecting && !needsRecoveryAction) || (connected && !model.opened) { ProgressView().controlSize(.small) }
                     Text(LocalizedStringKey(pairing ? model.connectionMessage : primaryTitle))
                         .lineLimit(2).minimumScaleFactor(0.85).multilineTextAlignment(.center)
-                }.font(.system(size: 12, weight: .medium)).padding(.horizontal, 18)
-                    .frame(maxWidth: .infinity, minHeight: 44)
+                }.font(.headline).padding(.horizontal, 18)
+                    .frame(maxWidth: .infinity, minHeight: 50)
                     .background(LinearGradient(colors: [Color(red: 0.73, green: 0.55, blue: 1), accent], startPoint: .leading, endPoint: .trailing), in: Capsule())
                     .foregroundStyle(Color(red: 0.12, green: 0.06, blue: 0.19))
             }.buttonStyle(.plain).disabled(pairing || model.selectingDiscoveredComma || (connecting && !needsRecoveryAction) || (connected && !model.opened))
+            if !pairing {
+                if model.pairingKey.isEmpty && !model.hasLANPairingSetup {
+                    Text("Allow Local Network and Bluetooth when iPhone asks. We’ll find comma on your Wi-Fi or hotspot first.").font(.system(size: 11)).foregroundStyle(muted)
+                }
+                Text(LocalizedStringKey(model.mode == .automatic ? "Uses your first available connection" : model.mode == .bluetooth ? "Connect directly to comma\nControl Galaxy without Local Wi-Fi" : "Connect over your local network\nJoin the same Wi-Fi or comma’s hotspot"))
+                    .font(.system(size: 11)).foregroundStyle(muted).lineSpacing(3)
+                    .multilineTextAlignment(.center).frame(maxWidth: .infinity)
+                    .fixedSize(horizontal: false, vertical: true).padding(.vertical, 3)
+            }
+            if needsPairing && !pairing && !connecting {
+                if bluetooth.pairingRecoveryNeeded {
+                    Text("We found comma, but couldn’t verify your saved pairing after repeated attempts. The pairing may have changed, or the connection may be interrupted.")
+                        .font(.caption).foregroundStyle(muted).multilineTextAlignment(.center)
+                }
+                Text(model.hasLANPairingSetup
+                     ? "Keep comma on and nearby. Join the same Wi-Fi as comma, or its hotspot, then start Bluetooth setup."
+                     : "Join the same Wi-Fi as comma, or comma’s hotspot. The app checks the comma it finds automatically. Once Local Wi-Fi connects, choose Bluetooth to finish setup.")
+                    .font(.caption).foregroundStyle(muted).multilineTextAlignment(.center)
+            }
+            if model.mode != .bluetooth && !connected && !pairing && (discovery.searching || !discovery.devices.isEmpty) {
+                discoveredCommas
+            }
             if bluetooth.pairingRecoveryNeeded && model.mode == .bluetooth && !pairing && !connecting && !connected {
                 Button("Try saved pairing once more") {
                     bluetooth.retrySavedPairing()
@@ -368,8 +342,6 @@ struct ConnectionSettingsView: View {
             }
             if !pairing && !connecting && !connected {
                 VStack(spacing: 4) {
-                    Text("Still not working? Submit a log so we can investigate. Describe what happened and which steps you tried.")
-                        .font(.caption).foregroundStyle(muted).multilineTextAlignment(.center)
                     Button(action: submitReport) {
                         Label("Submit connection log", systemImage: "bubble.left.and.exclamationmark.bubble.right")
                             .font(.system(size: 12, weight: .medium)).frame(maxWidth: .infinity, minHeight: 44)
@@ -466,8 +438,8 @@ struct ConnectionSettingsView: View {
         }
     }
 
-    private func preferences(extraSpacing: CGFloat = 0) -> some View {
-        VStack(spacing: extraSpacing) {
+    private func preferences() -> some View {
+        VStack(spacing: 0) {
             preferenceSection("Phone & alerts", expanded: $phoneExpanded) {
                 row("music.note", title: "Phone music", subtitle: pairing ? "Waiting for app pairing" : audio.summary) {
                     Button("Set up") { model.startAudioPairing() }.disabled(!connected || pairing).font(.system(size: 12)).frame(minHeight: 44)

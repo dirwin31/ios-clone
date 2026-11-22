@@ -1,6 +1,27 @@
 import SwiftUI
 import WebKit
 
+struct GalaxyBarItem: Decodable, Identifiable, Equatable {
+    let id: String
+    let label: String
+    let selected: Bool
+    let disabled: Bool
+    var icon: String {
+        switch id {
+        case "home": return "house.fill"
+        case "toggles": return "switch.2"
+        case "tools": return "wrench.and.screwdriver"
+        case "routes": return "film.stack"
+        case "back": return "chevron.backward"
+        case "search": return "magnifyingglass"
+        case "theme": return "circle.lefthalf.filled"
+        case "menu": return "list.bullet"
+        default: return "rectangle.portrait.and.arrow.right"
+        }
+    }
+    var primary: Bool { ["home", "toggles", "tools", "routes"].contains(id) }
+}
+
 struct GalaxyDownloadedFile: Identifiable {
     let id = UUID()
     let url: URL
@@ -30,6 +51,14 @@ final class GalaxyPageDiagnostics: ObservableObject {
     var recover: ((Bool) -> Void)?
     @Published var darkAppearance: Bool?
     @Published var landscapeEditor = false
+    @Published var barItems: [GalaxyBarItem] = []
+    @Published var deviceStatus = ""
+    fileprivate weak var barWebView: WKWebView?
+    func activate(_ item: GalaxyBarItem) {
+        guard barItems.contains(item), !item.disabled else { return }
+        barWebView?.callAsyncJavaScript("window.__galaxyBarSelect?.(id)", arguments: ["id": item.id],
+                                        in: nil, in: .page, completionHandler: nil)
+    }
     @Published var copied = false
     @Published var stalled = false
     @Published var mounted = false
@@ -44,6 +73,8 @@ final class GalaxyPageDiagnostics: ObservableObject {
     }
     func begin() {
         deadline?.cancel()
+        barItems = []
+        deviceStatus = ""
         started = Date(); mounted = false; stalled = false; landscapeEditor = false
         record("Page loading")
         deadline = Task { [weak self] in
@@ -241,6 +272,12 @@ private struct GalaxyPage: UIViewRepresentable {
 
             """)
 
+            html.native-galaxy-pill { --bottomnav-height: 0px; --bottomnav-clearance: env(safe-area-inset-bottom, 0px); }
+            html.native-galaxy-pill .gx-app > .blur-nav { display: none !important; }
+            html.native-galaxy-pill:not(.native-layout-editor) .gx-app > .gx-appbar:not(:has(.gx-searchbox.open)) { display: none !important; }
+            html.native-galaxy-pill:not(.native-layout-editor) .gx-appbar:has(.gx-searchbox.open) { padding-top: 0; }
+            html.native-galaxy-pill .gx-appbar:has(.gx-searchbox.open) :is(.gx-appbar__back, .gx-appbar__home, .gx-appbar__right, .gx-appbar__menu, .gx-theme-toggle) { display: none !important; }
+            html.native-galaxy-pill .gx-content { padding-bottom: max(var(--sp-3), env(safe-area-inset-bottom, 0px)) !important; }
             html.native-layout-editor .blur-nav,
             html.native-layout-editor .gx-appbar__pill,
             html.native-layout-editor .gx-appbar__menu,
@@ -280,8 +317,68 @@ private struct GalaxyPage: UIViewRepresentable {
             document.documentElement.classList.toggle('native-layout-editor', focused);
             try { window.webkit.messageHandlers.galaxyDiagnostics.postMessage({kind: 'editorFocus', active: focused}); } catch (_) {}
           };
+          // BEGIN GALAXY PILL
+          const primaryIcons = {'bi-house-fill':'home', 'bi-toggle-on':'toggles', 'bi-tools':'tools', 'bi-camera-reels':'routes'};
+          const headerSelectors = {back:'.gx-appbar__back', search:'.gx-search-toggle', theme:'.gx-theme-toggle', menu:'.gx-appbar__menu', signout:'.gx-appbar__right > button'};
+          let buttons = new Map();
+          let lastBar = '';
+          const syncBar = () => {
+            const header = document.querySelector('.gx-app > .gx-appbar');
+            const nav = document.querySelector('.gx-app > nav.blur-nav');
+            const next = new Map();
+            let compatible = !!header && !!nav;
+            for (const button of nav?.querySelectorAll('button') || []) {
+              const id = Object.keys(primaryIcons).find(icon => button.querySelector('.' + icon));
+              if (!id || next.has(primaryIcons[id])) { compatible = false; break; }
+              next.set(primaryIcons[id], button);
+            }
+            compatible &&= next.size === 4;
+            if (compatible) {
+              for (const [id, selector] of Object.entries(headerSelectors)) {
+                const button = header.querySelector(selector);
+                if (button) next.set(id, button);
+              }
+              const supported = new Set([...next.values(), header.querySelector('.gx-appbar__home')]);
+              compatible = [...header.querySelectorAll('button, a[href], input, select')].every(el => supported.has(el) || el.matches('input.gx-appbar__search'));
+            }
+            buttons = compatible ? next : new Map();
+            const items = [...buttons].map(([id, el]) => ({id, label:(el.getAttribute('aria-label') || el.textContent || id).trim(),
+              selected:el.getAttribute('aria-current') === 'page' || el.classList.contains('active'),
+              disabled:el.disabled || !!el.closest('[inert]')}));
+            const device = header?.querySelector('.gx-appbar__right .gx-status-pill');
+            const status = device?.getAttribute('aria-label') || device?.textContent.trim() || '';
+            const payload = JSON.stringify({items,status});
+            if (payload === lastBar) return;
+            lastBar = payload;
+            if (!compatible) document.documentElement.classList.remove('native-galaxy-pill');
+            window.webkit.messageHandlers.galaxyDiagnostics.postMessage({kind:'bar',items,status});
+          };
+          window.__galaxyBarSelect = id => {
+            const el = buttons.get(id);
+            if (el?.isConnected && !el.disabled && !el.closest('[inert]')) el.click();
+          };
+          window.__galaxyBarReady = () => document.documentElement.classList.toggle('native-galaxy-pill', buttons.size > 0);
+          const startBar = () => {
+            if (window !== window.top) return;
+            let queued = false;
+            const schedule = () => {
+              if (!queued) { queued = true; requestAnimationFrame(() => { queued = false; syncBar(); }); }
+            };
+            const controls = '.gx-appbar, nav.blur-nav';
+            const touchesBar = change => {
+              const target = change.target.nodeType === 1 ? change.target : change.target.parentElement;
+              if (target?.closest(controls) || target?.matches('.gx-app')) return true;
+              return [...change.addedNodes, ...change.removedNodes].some(node =>
+                node.nodeType === 1 && (node.matches(controls) || node.querySelector(controls)));
+            };
+            new MutationObserver(changes => { if (changes.some(touchesBar)) schedule(); }).observe(document.body, {subtree:true, childList:true, characterData:true,
+              attributes:true, attributeFilter:['class','aria-current','aria-label','aria-expanded','disabled','inert']});
+            syncBar();
+          };
+          // END GALAXY PILL
           const startEditorPresentation = () => {
             document.head.appendChild(editorCSS);
+            startBar();
             new MutationObserver(syncEditor).observe(document.body, {childList: true, subtree: true});
             editorScreen.addEventListener('change', syncEditor);
             syncEditor();
@@ -435,6 +532,7 @@ private struct GalaxyPage: UIViewRepresentable {
         """
         config.userContentController.addUserScript(WKUserScript(source: script, injectionTime: .atDocumentStart, forMainFrameOnly: false))
         let webView = WKWebView(frame: .zero, configuration: config)
+        diagnostics.barWebView = webView
         webView.navigationDelegate = context.coordinator
         webView.uiDelegate = context.coordinator
         webView.isOpaque = false
@@ -511,6 +609,14 @@ private struct GalaxyPage: UIViewRepresentable {
                   let body = message.body as? [String: Any], let kind = body["kind"] as? String else { return }
             let path = LoopbackServer.reportPath(body["path"] as? String ?? "")
             switch kind {
+            case "bar":
+                guard message.frameInfo.isMainFrame, let webView = message.webView, diagnostics.barWebView === webView,
+                      let items = body["items"] as? [[String: Any]], items.count <= 12,
+                      let data = try? JSONSerialization.data(withJSONObject: items),
+                      let bar = try? JSONDecoder().decode([GalaxyBarItem].self, from: data) else { return }
+                diagnostics.barItems = bar
+                diagnostics.deviceStatus = body["status"] as? String ?? ""
+                webView.evaluateJavaScript("window.__galaxyBarReady?.()", completionHandler: nil)
             case "language":
                 guard message.frameInfo.isMainFrame,
                       UserDefaults.standard.object(forKey: "galaxy.app.followGalaxyLanguage") as? Bool ?? true,

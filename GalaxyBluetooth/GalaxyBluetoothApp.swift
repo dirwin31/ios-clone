@@ -1011,7 +1011,7 @@ struct GalaxyRootView: View {
                     }
                         .modifier(CompanionWebSafeArea())
                         .overlay(alignment: .top) {
-                            if !DuoLayout.isEnabled && !editorFocused {
+                            if !DuoLayout.isEnabled && !editorFocused && galaxyPage.barItems.isEmpty {
                                 let dark = (galaxyColorScheme ?? systemColorScheme) == .dark
                                 let edge = dark ? Color(red: 0.035, green: 0.035, blue: 0.078) : Color(red: 0.94, green: 0.91, blue: 0.99)
                                 LinearGradient(colors: [edge, edge.opacity(0)], startPoint: .top, endPoint: .bottom)
@@ -1047,11 +1047,16 @@ struct GalaxyRootView: View {
         }
         .safeAreaInset(edge: .top, spacing: 0) {
             if !usesAdaptiveChrome && !editorFocused && model.tab != .navigation {
-                CompanionNavigationBar(tab: page, developerMode: model.developerMode,
-                    navigation: model.navigationServices.navigation, expanded: $appTabsExpanded,
-                    compactIconOnly: true, statusModel: model, select: select)
-                    .padding(.horizontal, 14)
-                    .padding(.bottom, model.tab == .galaxy ? 8 : 0)
+                Group {
+                    if page == .galaxy && !galaxyPage.barItems.isEmpty && !galaxyPage.stalled {
+                        GalaxyPill(page: galaxyPage, model: model, vertical: false, select: select)
+                            .padding(.horizontal, 3).modifier(FloatingGalaxyGlass())
+                    } else {
+                        CompanionNavigationBar(tab: page, developerMode: model.developerMode,
+                            navigation: model.navigationServices.navigation, expanded: $appTabsExpanded,
+                            compactIconOnly: true, statusModel: model, select: select)
+                    }
+                }.padding(.horizontal, 14)
             }
         }
         .background {
@@ -1191,6 +1196,49 @@ private struct PlanetTabHighlight: View {
         .allowsHitTesting(false)
         .accessibilityHidden(true)
         .onAppear { risen = true }
+    }
+}
+
+private struct GalaxyPill: View {
+    @ObservedObject var page: GalaxyPageDiagnostics
+    @ObservedObject var model: AppModel
+    let vertical: Bool
+    let select: (CompanionTab) -> Void
+    @Environment(\.dynamicTypeSize) private var typeSize
+
+    var body: some View {
+        let layout = vertical ? AnyLayout(VStackLayout(spacing: 0)) : AnyLayout(HStackLayout(spacing: 0))
+        layout {
+            ForEach(page.barItems.filter { $0.id == "back" || $0.primary }.sorted { $0.id == "back" && $1.id != "back" }) { item in
+                Button { page.activate(item) } label: {
+                    VStack(spacing: 2) {
+                        Image(systemName: item.icon).font(.system(size: 16, weight: .semibold))
+                        if item.primary && !vertical && !typeSize.isAccessibilitySize {
+                            Text(verbatim: item.label).font(.caption2.weight(.medium)).lineLimit(1)
+                        }
+                    }.frame(minWidth: 44, maxWidth: vertical ? 44 : .infinity, minHeight: 44)
+                        .foregroundStyle(item.selected ? StarPilotTheme.accent : Color.primary)
+                        .background(item.selected ? StarPilotTheme.accent.opacity(0.17) : Color.clear, in: Capsule())
+                        .contentShape(Rectangle())
+                }.buttonStyle(.plain).disabled(item.disabled).accessibilityLabel(Text(verbatim: item.label))
+                    .accessibilityAddTraits(item.selected ? .isSelected : [])
+            }
+            Menu {
+                Section("Galaxy") {
+                    if !page.deviceStatus.isEmpty { Text(verbatim: page.deviceStatus) }
+                    ForEach(page.barItems.filter { !$0.primary && $0.id != "back" }) { item in
+                        Button { page.activate(item) } label: { Label(item.label, systemImage: item.icon) }.disabled(item.disabled)
+                    }
+                }
+                Section("StarPilot BT") {
+                    if model.navigationEnabled { Button { select(.navigation) } label: { Label("Navigation", systemImage: CompanionTab.navigation.icon) } }
+                    Button { select(.connections) } label: { Label("Settings", systemImage: CompanionTab.connections.icon) }
+                }
+            } label: {
+                Image(systemName: "ellipsis.circle").font(.title3)
+                    .frame(width: 44, height: 44).contentShape(Rectangle())
+            }.accessibilityLabel("Galaxy and app options")
+        }
     }
 }
 
@@ -1637,6 +1685,7 @@ private extension EnvironmentValues {
 
 @available(iOS 27.1, *)
 private struct AdaptiveCompanionLayout<Content: View>: View {
+    @ObservedObject private var galaxyPage = AppModel.shared.galaxyPage
     @Environment(\.reduceGalacticalMotion) private var reduceMotion
     @Environment(\.toolbarVerticalEdge) private var verticalEdge
     @ObservedObject var model: AppModel
@@ -1655,7 +1704,11 @@ private struct AdaptiveCompanionLayout<Content: View>: View {
             .environment(\.companionVerticalBar, verticalEdge != nil)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    tabLayout {
+                    if tab == .galaxy && !galaxyPage.barItems.isEmpty && !galaxyPage.stalled && !galaxyPage.landscapeEditor {
+                        GalaxyPill(page: galaxyPage, model: model, vertical: verticalEdge != nil, select: select)
+                            .fixedSize()
+                    } else {
+                      tabLayout {
                         ForEach(tabs) { item in
                             let selected = tab == item || (tab == .logs && item == .connections)
                             Button { select(item) } label: {
@@ -1680,6 +1733,7 @@ private struct AdaptiveCompanionLayout<Content: View>: View {
                     }
                     .fixedSize()
                     .animation(reduceMotion ? nil : .easeInOut(duration: 0.2), value: tab)
+                    }
                 }.axisBehavior(.verticalPreferred)
                 ToolbarItem(placement: .topBarTrailing) {
                     AdaptiveConnectionStatus(model: model, openSettings: { select(.connections) })

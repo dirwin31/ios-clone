@@ -1135,7 +1135,7 @@ final class CarPlaySceneDelegate: NSObject, CPTemplateApplicationSceneDelegate, 
         edit.lastTap = ProcessInfo.processInfo.systemUptime
         var displayed = row
         displayed["value"] = NSNumber(value: target.value).stringValue
-        edit.valueItem?.setText(displayedSettingValue(displayed))
+        if let value = displayedSettingValue(displayed) { edit.valueItem?.setText(value) }
         guard firstTap else { return }
         settingsRead?.cancel()
         settingsRead = nil
