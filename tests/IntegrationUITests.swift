@@ -42,6 +42,10 @@ final class IntegrationUITests: XCTestCase {
             controls[1].tap()
             XCTAssertTrue(app.webViews.staticTexts["Home selected"].waitForExistence(timeout: 8))
             capture(orientation == .portrait ? "Galaxy pill portrait" : "Galaxy pill landscape")
+            app.buttons["galaxy-app-tabs"].tap()
+            XCTAssertTrue(app.buttons["main-tab-Settings"].waitForExistence(timeout: 5))
+            app.buttons["main-tab-Galaxy"].tap()
+            XCTAssertTrue(app.buttons["galaxy-pill-options"].waitForExistence(timeout: 5))
         }
         app.buttons["galaxy-pill-options"].tap()
         app.buttons["Settings"].firstMatch.tap()

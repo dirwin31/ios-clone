@@ -982,6 +982,7 @@ struct GalaxyRootView: View {
     @ObservedObject private var navigation: NavigationModel
     @State private var hasVisitedGalaxy = false
     @State private var appTabsExpanded = true
+    @State private var showingAppTabsInGalaxy = false
     @Namespace private var galaxySelection
     @AppStorage(AppPreference.arrival) private var arrivalEnabled = true
     @State private var arrivalID: UUID?
@@ -1001,7 +1002,7 @@ struct GalaxyRootView: View {
         return LinearGradient(colors: [edge, farEdge], startPoint: .topLeading, endPoint: .bottomTrailing)
     }
     private var showsGalaxyPill: Bool {
-        page == .galaxy && !galaxyPage.barItems.isEmpty && !galaxyPage.stalled && !editorFocused
+        page == .galaxy && !showingAppTabsInGalaxy && !galaxyPage.barItems.isEmpty && !galaxyPage.stalled && !editorFocused
     }
     private var editorFocused: Bool { page == .galaxy && galaxyPage.landscapeEditor }
     @Environment(\.openURL) private var openURL
@@ -1030,7 +1031,7 @@ struct GalaxyRootView: View {
     }
     @ViewBuilder private var chrome: some View {
         if #available(iOS 27.1, *), DuoLayout.isEnabled {
-            AdaptiveCompanionChrome(model: model, tab: page, select: select) {
+            AdaptiveCompanionChrome(model: model, tab: page, select: select, showsGalaxyPill: showsGalaxyPill, showAppTabs: showAppTabs) {
                 rootContent
             }
         } else {
@@ -1085,6 +1086,7 @@ struct GalaxyRootView: View {
                 Group {
                     if showsGalaxyPill {
                         HStack(spacing: 0) {
+                            AppTabsButton(action: showAppTabs)
                             ForEach(galaxyPage.barItems.filter { $0.id == "back" || $0.primary }.sorted { $0.id == "back" && $1.id != "back" }) { item in
                                 GalaxyPillButton(page: galaxyPage, item: item, showsText: true, selection: galaxySelection)
                             }
@@ -1095,7 +1097,7 @@ struct GalaxyRootView: View {
                     } else {
                         CompanionNavigationBar(tab: page, developerMode: model.developerMode,
                             navigation: model.navigationServices.navigation, expanded: $appTabsExpanded,
-                            compactIconOnly: true, statusModel: model, select: select)
+                            compactIconOnly: true, statusModel: model, keepsExpanded: showingAppTabsInGalaxy, select: select)
                     }
                 }.padding(.horizontal, 14)
             }
@@ -1105,6 +1107,7 @@ struct GalaxyRootView: View {
             else { chromeBackground.ignoresSafeArea() }
         }
         .onChange(of: requestedPage) { previous, next in
+            showingAppTabsInGalaxy = false
             if arrivalEnabled, !motionDisabled {
                 departingPage = departingPage ?? previous
                 arrivalID = UUID()
@@ -1195,7 +1198,12 @@ struct GalaxyRootView: View {
                     model.diagnostics.diagnosticLog(),
                     "Galaxy screen updates\n" + model.assets.status].joined(separator: "\n\n")
     }
+    private func showAppTabs() {
+        appTabsExpanded = true
+        showingAppTabsInGalaxy = true
+    }
     private func select(_ requestedTab: CompanionTab) {
+        showingAppTabsInGalaxy = false
         let tab = (requestedTab.isDeveloperPage && !model.developerMode) || (requestedTab == .navigation && !model.navigationEnabled) ? (model.opened ? CompanionTab.galaxy : .connections) : requestedTab
         if tab == .connections { appTabsExpanded = true }
         if tab != .connections { discovery.stop() }
@@ -1476,6 +1484,15 @@ private struct GalaxyPillButton: View {
     }
 }
 
+private struct AppTabsButton: View {
+    let action: () -> Void
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: "square.grid.2x2").frame(width: 44, height: 44)
+        }.accessibilityLabel("Show app tabs").accessibilityIdentifier("galaxy-app-tabs")
+    }
+}
+
 private struct GalaxyPillMenu: UIViewRepresentable {
     let page: GalaxyPageDiagnostics
     let model: AppModel
@@ -1551,6 +1568,7 @@ struct CompanionNavigationBar: View {
     @Binding var expanded: Bool
     var compactIconOnly = false
     var statusModel: AppModel? = nil
+    var keepsExpanded = false
     let select: (CompanionTab) -> Void
     @Environment(\.reduceGalacticalMotion) private var reduceMotion
     @Environment(\.accessibilityVoiceOverEnabled) private var voiceOver
@@ -1611,7 +1629,7 @@ struct CompanionNavigationBar: View {
         .frame(height: 46)
         .onChange(of: tab) { _, newTab in if newTab == .connections { setExpanded(true) } }
         .task(id: idleKey) {
-            guard expanded, !voiceOver, tab == .galaxy || tab == .navigation else { return }
+            guard expanded, !keepsExpanded, !voiceOver, tab == .galaxy || tab == .navigation else { return }
             do { try await Task.sleep(for: .seconds(5)) } catch { return }
             setExpanded(false)
         }
@@ -1959,10 +1977,12 @@ private struct AdaptiveCompanionChrome<Content: View>: View {
     @ObservedObject var model: AppModel
     let tab: CompanionTab
     let select: (CompanionTab) -> Void
+    let showsGalaxyPill: Bool
+    let showAppTabs: () -> Void
     @ViewBuilder var content: () -> Content
     var body: some View {
         NavigationStack {
-            AdaptiveCompanionLayout(model: model, tab: tab, select: select, content: content)
+            AdaptiveCompanionLayout(model: model, tab: tab, select: select, showsGalaxyPill: showsGalaxyPill, showAppTabs: showAppTabs, content: content)
         }
     }
 }
@@ -1992,6 +2012,8 @@ private struct AdaptiveCompanionLayout<Content: View>: View {
     @ObservedObject var model: AppModel
     let tab: CompanionTab
     let select: (CompanionTab) -> Void
+    let showsGalaxyPill: Bool
+    let showAppTabs: () -> Void
     @ViewBuilder var content: () -> Content
     private var tabs: [CompanionTab] {
         model.navigationEnabled ? [.galaxy, .navigation, .connections] : [.galaxy, .connections]
@@ -2000,8 +2022,9 @@ private struct AdaptiveCompanionLayout<Content: View>: View {
         content()
             .environment(\.companionVerticalBar, verticalEdge != nil)
             .toolbar {
-                if usesGalaxyPill {
+                if showsGalaxyPill {
                     ToolbarItemGroup(placement: .topBarLeading) {
+                        AppTabsButton(action: showAppTabs)
                         ForEach(galaxyPage.barItems.filter { $0.id == "back" || $0.primary }
                             .sorted { $0.id == "back" && $1.id != "back" }) { item in
                             Button { galaxyPage.activate(item) } label: {
@@ -2042,9 +2065,6 @@ private struct AdaptiveCompanionLayout<Content: View>: View {
             .toolbarVerticalBehavior(.automatic)
     }
 
-    private var usesGalaxyPill: Bool {
-        tab == .galaxy && !galaxyPage.barItems.isEmpty && !galaxyPage.stalled && !galaxyPage.landscapeEditor
-    }
 }
 
 @available(iOS 27.1, *)

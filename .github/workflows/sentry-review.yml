@@ -1,7 +1,7 @@
 name: Sentry integration review
 on:
   push:
-    branches: [ios-companion-staging]
+    branches: [ios-companion-testing]
   workflow_dispatch:
 permissions:
   contents: read
