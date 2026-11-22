@@ -1003,7 +1003,9 @@ struct GalaxyRootView: View {
                 if let arrivalID, arrivalEnabled, !motionDisabled {
                     GalaxyArrival {
                         guard self.arrivalID == arrivalID else { return }
-                        withAnimation(.easeInOut(duration: 0.16)) { departingPage = nil }
+                        var handoff = Transaction(animation: nil)
+                        handoff.disablesAnimations = true
+                        withTransaction(handoff) { departingPage = nil }
                     } finished: {
                         if self.arrivalID == arrivalID { self.arrivalID = nil }
                     }
@@ -1249,6 +1251,8 @@ private struct GalaxyArrival: UIViewRepresentable {
         private static let duration: CFTimeInterval = 0.48
         private static let texture = UIImage(named: "GalaxyDust")?.preparingForDisplay()?.cgImage
         private let dust = CALayer()
+        private let cloud = CAGradientLayer()
+        private let stars = CALayer()
         private var started = false
         private var revealed = false
 
@@ -1257,7 +1261,17 @@ private struct GalaxyArrival: UIViewRepresentable {
             isOpaque = false
             isUserInteractionEnabled = false
             clipsToBounds = true
-            dust.contents = Self.texture
+            // The PNG supplies the wispy edges. A solid nebula core hides the page handoff.
+            let violet = UIColor(red: 0.12, green: 0.07, blue: 0.21, alpha: 1)
+            let indigo = UIColor(red: 0.08, green: 0.08, blue: 0.17, alpha: 1)
+            cloud.startPoint = CGPoint(x: 0, y: 0.5)
+            cloud.endPoint = CGPoint(x: 1, y: 0.5)
+            cloud.colors = [violet.withAlphaComponent(0).cgColor, violet.cgColor, indigo.cgColor,
+                            violet.cgColor, violet.withAlphaComponent(0).cgColor]
+            cloud.locations = [0, 0.14, 0.5, 0.86, 1]
+            dust.addSublayer(cloud)
+            stars.contents = Self.texture
+            dust.addSublayer(stars)
             layer.addSublayer(dust)
         }
 
@@ -1271,10 +1285,12 @@ private struct GalaxyArrival: UIViewRepresentable {
         override func layoutSubviews() {
             super.layoutSubviews()
             guard let screen = window?.screen, !bounds.isEmpty else { return }
-            let travel = bounds.width * 1.2
+            let travel = bounds.width * 1.6
             CATransaction.begin()
             CATransaction.setDisableActions(true)
-            dust.bounds = CGRect(origin: .zero, size: CGSize(width: bounds.width * 1.4, height: bounds.height))
+            dust.bounds = CGRect(origin: .zero, size: CGSize(width: bounds.width * 2.2, height: bounds.height))
+            cloud.frame = dust.bounds
+            stars.frame = dust.bounds
             dust.position = CGPoint(x: bounds.midX + travel, y: bounds.midY)
             CATransaction.commit()
             guard !started else { return }
