@@ -89,11 +89,13 @@ struct MapboxDriveMap: View {
     @AppStorage(NavigationMapPreference.poiKey) private var labels = PointLabels.always
     @AppStorage(NavigationMapPreference.placesKey) private var showPlaces = true
     @AppStorage(NavigationMapPreference.trafficKey) private var showTraffic = false
+    let tripFrame: CGRect
     let bottomInset: CGFloat
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var viewport: Viewport
     @State private var routeShape: LineString?
+    @State private var routePoints: [RoutePoint] = []
     @State private var lastCommaFix: CLLocation?
     @State private var commaSpeed = 0.0
     @State private var cameraFix: CLLocation?
@@ -102,8 +104,9 @@ struct MapboxDriveMap: View {
 
     private var anchored: Bool { driving && navigation.followsUser && cameraFix != nil }
 
-    init(navigation: NavigationModel, token: String, bottomInset: CGFloat) {
+    init(navigation: NavigationModel, token: String, bottomInset: CGFloat, tripFrame: CGRect) {
         self.navigation = navigation
+        self.tripFrame = tripFrame
         self.bottomInset = bottomInset
         if MapboxOptions.accessToken != token { MapboxOptions.accessToken = token }
         let center = navigation.usingComma ? navigation.commaPosition : navigation.location?.coordinate
@@ -129,6 +132,13 @@ struct MapboxDriveMap: View {
         GeometryReader { geometry in
             let panel = commaTrip ? min(bottomInset + 16, geometry.size.height * 0.45) : 0
             let top = min(driving ? 190.0 : 90.0, geometry.size.height * 0.32)
+            let bounds = geometry.frame(in: .global)
+            let anchor = CGPoint(
+                x: tripFrame.isEmpty ? bounds.width / 2 : min(bounds.width * 0.9, max(bounds.width * 0.1, tripFrame.midX - bounds.minX)),
+                y: min(bounds.height - 20, max(bounds.height * 0.35, (tripFrame.isEmpty ? bounds.height - panel : tripFrame.minY - bounds.minY) - 34)))
+            let dx = 2 * anchor.x - bounds.width, dy = 2 * anchor.y - bounds.height
+            let padding = driving ? EdgeInsets(top: max(0, dy), leading: max(0, dx), bottom: max(0, -dy), trailing: max(0, -dx))
+                                  : EdgeInsets(top: top, leading: 0, bottom: panel, trailing: 0)
             TimelineView(.periodic(from: .now, by: 1)) { clock in
                 MapboxMaps.Map(viewport: $viewport) {
                     if showTraffic {
@@ -168,7 +178,7 @@ struct MapboxDriveMap: View {
                         }
                     }
                     if !anchored, let point = position(at: clock.date) {
-                        MapViewAnnotation(coordinate: point) {
+                        MapViewAnnotation(coordinate: aligned(point)) {
                             positionMarker(following: false)
                         }
                     }
@@ -188,7 +198,7 @@ struct MapboxDriveMap: View {
                 .overlay {
                     if anchored, position(at: clock.date) != nil {
                         positionMarker(following: true)
-                            .padding(.top, top).padding(.bottom, panel)
+                            .position(anchor)
                             .allowsHitTesting(false)
                     }
                 }
@@ -200,25 +210,26 @@ struct MapboxDriveMap: View {
                     let points = line.points()
                     return LineString((0..<line.pointCount).map { points[$0].coordinate })
                 }
-                if !driving && navigation.destination != nil { preview(top: top, bottom: panel) }
-                else if navigation.followsUser && position(at: .now) != nil { follow(top: top, bottom: panel) }
+                routePoints = routeShape?.coordinates.map { RoutePoint(latitude: $0.latitude, longitude: $0.longitude) } ?? []
+                if driving { cameraFix = nil }
+                if !driving && navigation.destination != nil { preview(top: top, bottom: panel, padding: padding) }
+                else if navigation.followsUser && position(at: .now) != nil { follow(padding: padding) }
                 else if navigation.followsUser { overview(top: top, bottom: panel) }
             }
-            .onChange(of: navigation.destination?.id) { _, _ in preview(top: top, bottom: panel) }
-            .onChange(of: driving) { _, _ in cameraFix = nil; follow(top: top, bottom: panel) }
+            .onChange(of: navigation.destination?.id) { _, _ in preview(top: top, bottom: panel, padding: padding) }
+            .onChange(of: driving) { _, _ in cameraFix = nil; follow(padding: padding) }
             .onChange(of: navigation.overviewRevision) { _, _ in overview(top: top, bottom: panel) }
-            .onChange(of: navigation.followsUser) { _, _ in cameraFix = nil; follow(top: top, bottom: panel) }
+            .onChange(of: navigation.followsUser) { _, _ in cameraFix = nil; follow(padding: padding) }
             .onChange(of: commaTrip ? navigation.commaPositionSampleDate : navigation.location?.timestamp) { _, _ in
                 if commaTrip { updateCommaSpeed() }
-                if driving || navigation.destination == nil { follow(top: top, bottom: panel) }
+                if driving || navigation.destination == nil { follow(padding: padding) }
             }
             .onChange(of: navigation.positionDisplayGeneration) { _, _ in lastCommaFix = nil; commaSpeed = 0; cameraFix = nil }
             .onChange(of: navigation.commaFeedReady) { _, ready in
                 if !ready && commaTrip { cameraFix = nil }
-                follow(top: top, bottom: panel)
+                follow(padding: padding)
             }
-            .onChange(of: panel) { _, _ in follow(top: top, bottom: panel, layoutChanged: true) }
-            .onChange(of: top) { _, _ in follow(top: top, bottom: panel, layoutChanged: true) }
+            .onChange(of: padding) { _, _ in follow(padding: padding, layoutChanged: true) }
         }
     }
 
@@ -236,7 +247,12 @@ struct MapboxDriveMap: View {
         return feature
     }
 
-    private func follow(top: CGFloat, bottom: CGFloat, layoutChanged: Bool = false) {
+    private func aligned(_ coordinate: CLLocationCoordinate2D) -> CLLocationCoordinate2D {
+        guard driving else { return coordinate }
+        return NavigationMapMotion.alignedCoordinate(coordinate, route: routePoints)
+    }
+
+    private func follow(padding: EdgeInsets, layoutChanged: Bool = false) {
         guard navigation.followsUser, driving || navigation.destination == nil,
               let point = position(at: .now), let stamp = commaTrip
                 ? navigation.commaPositionSampleDate : navigation.location?.timestamp else { return }
@@ -258,11 +274,12 @@ struct MapboxDriveMap: View {
                 fraction: continuous ? 1 - exp(-dt / 0.5) : 1)
         }
         cameraZoom += (zoom - cameraZoom) * (continuous ? 1 - exp(-dt / 2) : 1)
-        let center = continuous && !moving ? previous?.coordinate ?? point : point
-        cameraFix = CLLocation(coordinate: center, altitude: 0, horizontalAccuracy: -1, verticalAccuracy: -1, timestamp: stamp)
+        let accepted = continuous && !moving ? previous?.coordinate ?? point : point
+        let center = aligned(accepted)
+        cameraFix = CLLocation(coordinate: accepted, altitude: 0, horizontalAccuracy: -1, verticalAccuracy: -1, timestamp: stamp)
         let camera = Viewport.camera(center: center, zoom: CGFloat(cameraZoom), bearing: cameraBearing,
-                                     pitch: driving ? 60 : 48)
-            .padding(.init(top: top, leading: 0, bottom: bottom, trailing: 0))
+                                     pitch: driving ? 68 : 48)
+            .padding(padding)
         if reduceMotion || !continuous || layoutChanged { viewport = camera }
         else { withViewportAnimation(.linear(duration: min(2.5, max(0.1, dt)))) { viewport = camera } }
     }
@@ -285,11 +302,11 @@ struct MapboxDriveMap: View {
                              geometryPadding: .init(top: top + 8, leading: 24, bottom: bottom + 16, trailing: 24))
     }
 
-    private func preview(top: CGFloat, bottom: CGFloat) {
+    private func preview(top: CGFloat, bottom: CGFloat, padding: EdgeInsets) {
         guard !driving else { return }
         if routeShape != nil { overview(top: top, bottom: bottom) }
         else if let destination = navigation.destination {
             viewport = .camera(center: destination.coordinate, zoom: 16.8, pitch: 50)
-        } else { follow(top: top, bottom: bottom) }
+        } else { follow(padding: padding) }
     }
 }

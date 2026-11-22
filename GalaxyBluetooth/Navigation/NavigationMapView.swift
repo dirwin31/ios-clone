@@ -2,6 +2,13 @@ import SwiftUI
 import MapKit
 import QuartzCore
 
+extension NavigationMapMotion {
+    static func alignedCoordinate(_ coordinate: CLLocationCoordinate2D, route: [RoutePoint]) -> CLLocationCoordinate2D {
+        let aligned = routeAligned(RoutePoint(latitude: coordinate.latitude, longitude: coordinate.longitude), route: route)
+        return CLLocationCoordinate2D(latitude: aligned.latitude, longitude: aligned.longitude)
+    }
+}
+
 @MainActor
 struct CommaFollowingMap: UIViewRepresentable {
     @ObservedObject var navigation: NavigationModel
@@ -219,7 +226,7 @@ struct CommaFollowingMap: UIViewRepresentable {
                 changingCamera = true
                 // Start from the position, never the previous camera centre. Overview and
                 // gesture offsets must not feed back into subsequent follow frames.
-                map.setCamera(MKMapCamera(lookingAtCenter: coordinate, fromDistance: distance, pitch: 40, heading: heading), animated: false)
+                map.setCamera(MKMapCamera(lookingAtCenter: coordinate, fromDistance: distance, pitch: 62, heading: heading), animated: false)
                 let anchor = CGPoint(x: map.bounds.midX, y: CGFloat(NavigationMapMotion.anchorY(
                     height: Double(map.bounds.height), bottomInset: Double(bottomInset))))
                 for _ in 0..<3 {

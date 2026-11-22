@@ -3,6 +3,7 @@ import MapKit
 
 private struct NavigationMapLayer: View {
     @ObservedObject var navigation: NavigationModel
+    let tripFrame: CGRect
     let bottomInset: CGFloat
     @AppStorage(NavigationMapPreference.enabledKey) private var useMapbox = true
     @AppStorage(NavigationMapPreference.tokenKey) private var token = ""
@@ -10,7 +11,7 @@ private struct NavigationMapLayer: View {
     var body: some View {
         Group {
             if useMapbox && token.hasPrefix("pk.") {
-                MapboxDriveMap(navigation: navigation, token: token, bottomInset: bottomInset)
+                MapboxDriveMap(navigation: navigation, token: token, bottomInset: bottomInset, tripFrame: tripFrame)
                     .id(token)
             } else if navigation.navigating && navigation.usingComma {
                 CommaFollowingMap(navigation: navigation, bottomInset: bottomInset)
@@ -127,7 +128,7 @@ private struct StandardNavigationHome: View {
     var selectAppTab: (CompanionTab) -> Void
     @State private var searchPurpose: PlaceSearchPurpose?
     @State private var showLibrary = false
-    @State private var navigationPanelHeight: CGFloat = 0
+    @State private var tripFrame = CGRect.zero
     @State private var panelLevel: PlacePanelLevel = .standard
     @GestureState private var panelDrag: CGFloat = 0
     private var expanded: Bool { panelLevel == .expanded }
@@ -141,7 +142,7 @@ private struct StandardNavigationHome: View {
     }
     var body: some View {
         GeometryReader { geometry in
-            NavigationMapLayer(navigation: navigation, bottomInset: navigationPanelHeight)
+            NavigationMapLayer(navigation: navigation, tripFrame: tripFrame, bottomInset: tripFrame.height)
             .overlay(alignment: .top) { mapHeader.padding(12) }
             .modifier(PlacePanelLayout(overlaid: navigation.navigating && navigation.usingComma) {
                 VStack(spacing: 0) {
@@ -189,7 +190,7 @@ private struct StandardNavigationHome: View {
                 }
                 .background {
                     GeometryReader { panel in
-                        Color.clear.preference(key: NavigationPanelHeightKey.self, value: panel.size.height)
+                        Color.clear.preference(key: NavigationPanelFrameKey.self, value: panel.frame(in: .global))
                     }
                 }
                 .background {
@@ -203,7 +204,7 @@ private struct StandardNavigationHome: View {
                 .shadow(color: .black.opacity(0.12), radius: 16, y: -4)
                 .padding(navigation.navigating ? 12 : 0)
             })
-            .onPreferenceChange(NavigationPanelHeightKey.self) { navigationPanelHeight = $0 }
+            .onPreferenceChange(NavigationPanelFrameKey.self) { tripFrame = $0 }
             .sheet(item: $searchPurpose) { purpose in
                 PlaceSearch(navigation: navigation, saved: saved, saveAs: purpose.savedKind) { place in
                     if let kind = purpose.savedKind { saved.save(place, as: kind) }
@@ -444,9 +445,9 @@ private struct ManeuverDistance: View {
     }
 }
 
-private struct NavigationPanelHeightKey: PreferenceKey {
-    static var defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
+private struct NavigationPanelFrameKey: PreferenceKey {
+    static var defaultValue: CGRect { .zero }
+    static func reduce(value: inout CGRect, nextValue: () -> CGRect) { value = nextValue() }
 }
 
 private struct PlacePanelLayout<Panel: View>: ViewModifier {
@@ -494,7 +495,7 @@ private struct DuoNavigationHome: View {
     var selectAppTab: (CompanionTab) -> Void
     @State private var searchPurpose: PlaceSearchPurpose?
     @State private var showLibrary = false
-    @State private var navigationPanelHeight: CGFloat = 0
+    @State private var tripFrame = CGRect.zero
     @State private var panelLevel: PlacePanelLevel = .standard
     @GestureState private var panelDrag: CGFloat = 0
     private var expanded: Bool { panelLevel == .expanded }
@@ -508,7 +509,7 @@ private struct DuoNavigationHome: View {
     }
     var body: some View {
         GeometryReader { geometry in
-            NavigationMapLayer(navigation: navigation, bottomInset: navigationPanelHeight)
+            NavigationMapLayer(navigation: navigation, tripFrame: tripFrame, bottomInset: tripFrame.height)
             .modifier(NavigationMapBackground())
             .overlay(alignment: .top) { mapHeader.padding(12) }
             .modifier(PlacePanelLayout(overlaid: navigation.navigating && navigation.usingComma) {
@@ -559,7 +560,7 @@ private struct DuoNavigationHome: View {
                 .frame(maxWidth: navigation.navigating ? .infinity : 600)
                 .background {
                     GeometryReader { panel in
-                        Color.clear.preference(key: NavigationPanelHeightKey.self, value: panel.size.height)
+                        Color.clear.preference(key: NavigationPanelFrameKey.self, value: panel.frame(in: .global))
                     }
                 }
                 .background {
@@ -569,7 +570,7 @@ private struct DuoNavigationHome: View {
                 .frame(maxWidth: .infinity, alignment: .center)
                 .padding(12)
             })
-            .onPreferenceChange(NavigationPanelHeightKey.self) { navigationPanelHeight = $0 }
+            .onPreferenceChange(NavigationPanelFrameKey.self) { tripFrame = $0 }
             .sheet(item: $searchPurpose) { purpose in
                 PlaceSearch(navigation: navigation, saved: saved, saveAs: purpose.savedKind) { place in
                     if let kind = purpose.savedKind { saved.save(place, as: kind) }

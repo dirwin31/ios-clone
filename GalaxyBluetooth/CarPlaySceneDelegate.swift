@@ -1389,6 +1389,7 @@ private final class CompanionCarPlayMap: UIViewController, MKMapViewDelegate {
     var dashboard = false
     var showingOverview = false { didSet { showingDestination = false } }
     private var zoomFactor = 1.0
+    private var routePoints: [RoutePoint] = []
     private var line: MKPolyline?
     private var lastLocation: CLLocation?
     private var lastMovement = Date.distantPast
@@ -1410,7 +1411,7 @@ private final class CompanionCarPlayMap: UIViewController, MKMapViewDelegate {
         let frame = visibleMapFrame
         guard !frame.isEmpty else { return }
         let distance = cameraDistance * zoomFactor
-        let pitch: CGFloat = dashboard ? 40 : 55
+        let pitch: CGFloat = dashboard ? 55 : 66
         // Measure the ground offset in MapKit's pitched projection. Rotating this
         // offset into the new heading keeps the arrow anchored through turns.
         let camera = MKMapCamera(lookingAtCenter: coordinate, fromDistance: distance, pitch: pitch, heading: heading)
@@ -1419,12 +1420,13 @@ private final class CompanionCarPlayMap: UIViewController, MKMapViewDelegate {
         }
         let current = map.camera
         let cardOnRight = map.effectiveUserInterfaceLayoutDirection == .rightToLeft
-        let alreadyInset = cardOnRight ? map.bounds.maxX - frame.maxX : frame.minX - map.bounds.minX
-        // Some displays include the maneuver card in the system guide; others
-        // report only the dock. Reserve card space only in the latter case.
-        let xFraction: CGFloat = dashboard || alreadyInset > map.bounds.width * 0.28 ? 0.5 : (cardOnRight ? 0.32 : 0.68)
-        let anchor = CGPoint(x: frame.minX + frame.width * xFraction,
-                             y: frame.minY + frame.height * (dashboard ? 0.66 : 0.80))
+        // CarPlay hosts the ETA card on the leading side and exposes no card frame.
+        // Frame above that side of the map, accounting for the dock and RTL.
+        let safe = map.safeAreaLayoutGuide.layoutFrame
+        let horizontal = dashboard || safe.isEmpty ? frame : safe
+        let xFraction: CGFloat = dashboard ? 0.5 : (cardOnRight ? 0.68 : 0.32)
+        let anchor = CGPoint(x: horizontal.minX + horizontal.width * xFraction,
+                             y: frame.minY + max(frame.height * 0.45, frame.height - (dashboard ? 30 : min(68, frame.height * 0.26))))
         let ground = map.convert(anchor, toCoordinateFrom: map)
         if CLLocationCoordinate2DIsValid(ground), current.centerCoordinateDistance > 0 {
             let center = MKMapPoint(current.centerCoordinate)
@@ -1470,6 +1472,13 @@ private final class CompanionCarPlayMap: UIViewController, MKMapViewDelegate {
             map.removeOverlays(map.overlays)
             showingDestination = false
             line = next
+            routePoints = next.map { line in
+                let points = line.points()
+                return (0..<line.pointCount).map { index in
+                    let coordinate = points[index].coordinate
+                    return RoutePoint(latitude: coordinate.latitude, longitude: coordinate.longitude)
+                }
+            } ?? []
             if let next { map.addOverlays([MKMultiPolyline([next]), next], level: .aboveRoads) }
         }
         let coordinate = navigation.usingComma ? (navigation.commaFeedReady ? navigation.commaPosition : nil) : navigation.goodLocation?.coordinate
@@ -1490,18 +1499,19 @@ private final class CompanionCarPlayMap: UIViewController, MKMapViewDelegate {
             let target = 0.50 * NavigationMapMotion.cameraDistance(speed: filteredSpeed,
                 distanceToTurn: navigation.navigating ? navigation.distanceToTurn : 0)
             cameraDistance += (target - cameraDistance) * (target < cameraDistance ? 0.35 : 0.2)
+            let displayed = navigation.navigating ? NavigationMapMotion.alignedCoordinate(coordinate, route: routePoints) : coordinate
             let hadPosition = map.annotations.contains(where: { $0 === position })
             if hadPosition && !UIAccessibility.isReduceMotionEnabled {
                 UIView.animate(withDuration: 0.8, delay: 0, options: [.beginFromCurrentState, .curveLinear]) {
-                    self.position.coordinate = coordinate
+                    self.position.coordinate = displayed
                 }
-            } else { position.coordinate = coordinate }
+            } else { position.coordinate = displayed }
             if !hadPosition { map.addAnnotation(position) }
             let course = navigation.usingComma ? navigation.commaHeading : navigation.goodLocation?.course ?? -1
             let heading = course.isFinite && course >= 0 ? course : map.camera.heading
             if !showingOverview || next == nil {
                 showingDestination = false
-                follow(coordinate, heading: heading, animated: hadPosition)
+                follow(displayed, heading: heading, animated: hadPosition)
             }
             if let marker = map.view(for: position), showingOverview {
                 marker.transform = CGAffineTransform(rotationAngle: (heading - map.camera.heading) * .pi / 180)
