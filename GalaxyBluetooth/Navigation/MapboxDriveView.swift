@@ -94,6 +94,13 @@ struct CarDisplayMapOptions: Equatable {
     let overview: Bool
     let zoomFactor: Double
     let dashboard: Bool
+
+    static func followX(in frame: CGRect, dashboard: Bool, rightToLeft: Bool) -> CGFloat {
+        guard !dashboard else { return frame.midX }
+        // Leave the leading side to the maneuver and ETA cards and keep clear of the trailing buttons.
+        let trailingMargin = min(frame.width / 2, max(52, frame.width * 0.22))
+        return rightToLeft ? frame.minX + trailingMargin : frame.maxX - trailingMargin
+    }
 }
 
 struct MapboxDriveMap: View {
@@ -110,6 +117,7 @@ struct MapboxDriveMap: View {
     @AppStorage(NavigationMapPreference.poiKey) private var labels = PointLabels.always
     @AppStorage(NavigationMapPreference.placesKey) private var showPlaces = true
     @AppStorage(NavigationMapPreference.trafficKey) private var showTraffic = false
+    @Environment(\.layoutDirection) private var layoutDirection
     let carDisplay: CarDisplayMapOptions?
     let headerBottom: CGFloat
     let tripFrame: CGRect
@@ -160,9 +168,13 @@ struct MapboxDriveMap: View {
             let phoneInset = driving && !tripFrame.isEmpty ? min(bounds.height, max(0, bounds.maxY - tripFrame.minY)) : 0
             let panel: CGFloat = carDisplay == nil ? phoneInset : min(65, geometry.size.height * 0.24)
             let headerInset = max(8, headerBottom - bounds.minY + 2)
+            let rtl = layoutDirection == .rightToLeft
+            let carFrame = CGRect(x: rtl ? geometry.safeAreaInsets.trailing : geometry.safeAreaInsets.leading, y: 0,
+                                  width: max(0, bounds.width - geometry.safeAreaInsets.leading - geometry.safeAreaInsets.trailing),
+                                  height: bounds.height)
             let anchor = CGPoint(
                 x: carDisplay == nil ? (tripFrame.isEmpty ? bounds.width / 2 : min(bounds.width * 0.9, max(bounds.width * 0.1, tripFrame.midX - bounds.minX))) :
-                    bounds.width / 2 + (geometry.safeAreaInsets.leading - geometry.safeAreaInsets.trailing) / 2,
+                    CarDisplayMapOptions.followX(in: carFrame, dashboard: carDisplay?.dashboard == true, rightToLeft: rtl),
                 y: max(bounds.height * 0.35, bounds.height - panel - (carDisplay == nil ? DrivePositionMarker.barClearance + DrivePositionMarker.diameter / 2 : 18)))
             let dx = 2 * anchor.x - bounds.width, dy = 2 * anchor.y - bounds.height
             let padding = driving ? EdgeInsets(top: max(0, dy), leading: max(0, dx), bottom: max(0, -dy), trailing: max(0, -dx))
@@ -275,9 +287,12 @@ struct MapboxDriveMap: View {
             options.scaleBar.visibility = .hidden
             // Leave the screen edges for CarPlay’s dock and zoom buttons.
             let inset: CGFloat = carDisplay.dashboard ? 8 : 52
-            options.attributionButton.margins = CGPoint(x: inset, y: panel + 6)
-            options.logo.position = .bottomTrailing
-            options.logo.margins = CGPoint(x: inset + 28, y: panel + 6)
+            let edge: OrnamentPosition = carDisplay.dashboard ? .bottomTrailing : .topTrailing
+            let y: CGFloat = carDisplay.dashboard ? panel + 6 : 8
+            options.attributionButton.position = edge
+            options.attributionButton.margins = CGPoint(x: inset, y: y)
+            options.logo.position = edge
+            options.logo.margins = CGPoint(x: inset + 28, y: y)
         } else {
             options.scaleBar.margins = CGPoint(x: 12, y: headerInset)
             options.compass.margins = CGPoint(x: 12, y: headerInset)

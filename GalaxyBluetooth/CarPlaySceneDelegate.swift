@@ -1423,7 +1423,10 @@ private final class CompanionCarPlayMap: UIViewController, MKMapViewDelegate {
             map.setCamera(camera, animated: false)
         }
         let current = map.camera
-        let anchor = CGPoint(x: frame.midX,
+        let safe = map.safeAreaLayoutGuide.layoutFrame
+        let x = CarDisplayMapOptions.followX(in: safe.isEmpty ? frame : safe, dashboard: dashboard,
+                                             rightToLeft: map.effectiveUserInterfaceLayoutDirection == .rightToLeft)
+        let anchor = CGPoint(x: x,
                              y: frame.minY + max(frame.height * 0.45, frame.height - (dashboard ? 30 : min(68, frame.height * 0.26))))
         let ground = map.convert(anchor, toCoordinateFrom: map)
         if CLLocationCoordinate2DIsValid(ground), current.centerCoordinateDistance > 0 {
