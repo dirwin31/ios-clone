@@ -8321,62 +8321,6 @@
         }
       }
     },
-    "Galaxy entry animation": {
-      "localizations": {
-        "es": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Animación de entrada a Galaxy"
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Animation d’ouverture de Galaxy"
-          }
-        },
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Galaxy 진입 애니메이션"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Galaxy 入场动画"
-          }
-        }
-      }
-    },
-    "Sweep stardust across the screen when opening Galaxy": {
-      "localizations": {
-        "es": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Mostrar polvo de estrellas al abrir Galaxy"
-          }
-        },
-        "fr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Afficher de la poussière d’étoiles à l’ouverture de Galaxy"
-          }
-        },
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Galaxy를 열 때 별가루가 화면을 가로지릅니다"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "打开 Galaxy 时让星尘扫过屏幕"
-          }
-        }
-      }
-    },
     "Galaxy toolbar labels": {
       "localizations": {
         "es": {
@@ -8653,6 +8597,62 @@
           "stringUnit": {
             "state": "translated",
             "value": "打开实时视图时保持 iPhone 屏幕常亮"
+          }
+        }
+      }
+    },
+    "Page transitions": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Transiciones de página"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Transitions de page"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "페이지 전환"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "页面过渡"
+          }
+        }
+      }
+    },
+    "Sweep stardust between app pages": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mostrar polvo de estrellas al cambiar de página"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Afficher de la poussière d’étoiles entre les pages"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "페이지를 전환할 때 별가루가 화면을 가로지릅니다"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "切换页面时让星尘扫过屏幕"
           }
         }
       }

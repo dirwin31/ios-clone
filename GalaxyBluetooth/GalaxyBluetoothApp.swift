@@ -999,7 +999,7 @@ struct GalaxyRootView: View {
     var body: some View {
         chrome.environment(\.reduceGalacticalMotion, motionDisabled)
             .overlay {
-                if let arrivalID, requestedPage == .galaxy, !motionDisabled {
+                if let arrivalID, arrivalEnabled, !motionDisabled {
                     GalaxyArrival {
                         guard self.arrivalID == arrivalID else { return }
                         withAnimation(.easeInOut(duration: 0.16)) { departingPage = nil }
@@ -1007,7 +1007,7 @@ struct GalaxyRootView: View {
                         if self.arrivalID == arrivalID { self.arrivalID = nil }
                     }
                     .id(arrivalID)
-                    .ignoresSafeArea().accessibilityHidden(true)
+                    .ignoresSafeArea().allowsHitTesting(false).accessibilityHidden(true)
                 }
             }
             .preferredColorScheme(appearance.scheme)
@@ -1089,15 +1089,19 @@ struct GalaxyRootView: View {
             else { chromeBackground.ignoresSafeArea() }
         }
         .onChange(of: requestedPage) { previous, next in
-            if next == .galaxy, arrivalEnabled, !motionDisabled, model.transport.selectedRoute != nil {
-                departingPage = previous
+            if arrivalEnabled, !motionDisabled {
+                departingPage = departingPage ?? previous
                 arrivalID = UUID()
             } else {
                 departingPage = nil
                 arrivalID = nil
             }
         }
-        .onChange(of: motionDisabled) { _, disabled in
+        .onChange(of: galaxyPage.routeRevision) { _, _ in
+            guard requestedPage == .galaxy, arrivalEnabled, !motionDisabled, departingPage == nil else { return }
+            arrivalID = UUID()
+        }
+        .onChange(of: motionDisabled || !arrivalEnabled) { _, disabled in
             if disabled {
                 departingPage = nil
                 arrivalID = nil
@@ -1112,7 +1116,7 @@ struct GalaxyRootView: View {
             if show { if model.developerMode { select(.live) }; model.showDiagnostics = false }
         }
         .onChange(of: bluetooth.connected) { _, connected in if connected { model.openIfReady() } }
-        .sheet(item: $discordReport, onDismiss: {
+        .pageSheet(item: $discordReport, onDismiss: {
             // Let the native sheet finish closing before animating back to Settings.
             if reportWasSent {
                 reportWasSent = false
@@ -1121,7 +1125,7 @@ struct GalaxyRootView: View {
         }) { capture in
             DiscordReportSheet(logs: capture.logs, captureLogs: captureReportLogs) { reportWasSent = true }
         }
-        .sheet(isPresented: $model.showAudioPairing, onDismiss: { model.audioPairing.dismiss() }) {
+        .pageSheet(isPresented: $model.showAudioPairing, onDismiss: { model.audioPairing.dismiss() }) {
             AudioPairingSheet(pairing: model.audioPairing) { model.showAudioPairing = false }
         }
         .alert("Bluetooth access needed", isPresented: $model.showBluetoothPermission) {
@@ -1252,6 +1256,59 @@ private struct GalaxyArrival: View {
     }
 }
 
+private struct PageDustOverlay: View {
+    @AppStorage(AppPreference.arrival) private var enabled = true
+    @Environment(\.reduceGalacticalMotion) private var reduceMotion
+    let finished: () -> Void
+
+    var body: some View {
+        if enabled && !reduceMotion {
+            GalaxyArrival(reveal: {}, finished: finished)
+                .ignoresSafeArea().allowsHitTesting(false).accessibilityHidden(true)
+        }
+    }
+}
+
+private struct StardustSheet<Item: Identifiable, Panel: View>: ViewModifier {
+    @Binding var item: Item?
+    let onDismiss: (() -> Void)?
+    let panel: (Item) -> Panel
+    @State private var returnWipe: UUID?
+
+    func body(content: Content) -> some View {
+        content.overlay {
+            if let token = returnWipe {
+                PageDustOverlay { if returnWipe == token { returnWipe = nil } }.id(token)
+            }
+        }
+        .sheet(item: $item, onDismiss: {
+            returnWipe = UUID()
+            onDismiss?()
+        }) { value in
+            panel(value).overlay { PageDustOverlay {} }
+        }
+    }
+}
+
+private enum PresentedPage: Identifiable {
+    case visible
+    var id: Self { self }
+}
+
+extension View {
+    func pageSheet<Item: Identifiable, Panel: View>(item: Binding<Item?>, onDismiss: (() -> Void)? = nil,
+                                                     @ViewBuilder content: @escaping (Item) -> Panel) -> some View {
+        modifier(StardustSheet(item: item, onDismiss: onDismiss, panel: content))
+    }
+
+    func pageSheet<Panel: View>(isPresented: Binding<Bool>, onDismiss: (() -> Void)? = nil,
+                                @ViewBuilder content: @escaping () -> Panel) -> some View {
+        let page = Binding<PresentedPage?>(get: { isPresented.wrappedValue ? .visible : nil },
+                                           set: { isPresented.wrappedValue = $0 != nil })
+        return pageSheet(item: page, onDismiss: onDismiss) { _ in content() }
+    }
+}
+
 private struct TabSelectionCapsule: View {
     var body: some View {
         Capsule().fill(Color(red: 0.39, green: 0.23, blue: 0.63))
@@ -1304,15 +1361,15 @@ private struct GalaxyPillMenu: View {
 
     var body: some View {
             Menu {
+                Section("StarPilot BT") {
+                    if model.navigationEnabled { Button { select(.navigation) } label: { Label("Navigation", systemImage: CompanionTab.navigation.icon) } }
+                    Button { select(.connections) } label: { Label("Settings", systemImage: CompanionTab.connections.icon) }
+                }
                 Section("Galaxy") {
                     if !page.deviceStatus.isEmpty { Text(verbatim: page.deviceStatus) }
                     ForEach(page.barItems.filter { DuoLayout.isEnabled || (!$0.primary && $0.id != "back") }) { item in
                         Button { page.activate(item) } label: { Label(item.label, systemImage: item.icon) }.disabled(item.disabled)
                     }
-                }
-                Section("StarPilot BT") {
-                    if model.navigationEnabled { Button { select(.navigation) } label: { Label("Navigation", systemImage: CompanionTab.navigation.icon) } }
-                    Button { select(.connections) } label: { Label("Settings", systemImage: CompanionTab.connections.icon) }
                 }
             } label: {
                 Image(systemName: "ellipsis.circle").font(.title3)
@@ -1765,13 +1822,12 @@ private extension EnvironmentValues {
 @available(iOS 27.1, *)
 private struct AdaptiveCompanionLayout<Content: View>: View {
     @ObservedObject private var galaxyPage = AppModel.shared.galaxyPage
-    @Environment(\.reduceGalacticalMotion) private var reduceMotion
+    @AppStorage(AppPreference.toolbarLabels) private var toolbarLabels = true
     @Environment(\.toolbarVerticalEdge) private var verticalEdge
     @ObservedObject var model: AppModel
     let tab: CompanionTab
     let select: (CompanionTab) -> Void
     @ViewBuilder var content: () -> Content
-    @Namespace private var tabSelection
     private var tabs: [CompanionTab] {
         model.navigationEnabled ? [.galaxy, .navigation, .connections] : [.galaxy, .connections]
     }
@@ -1783,8 +1839,18 @@ private struct AdaptiveCompanionLayout<Content: View>: View {
                     ToolbarItemGroup(placement: .topBarLeading) {
                         ForEach(galaxyPage.barItems.filter { $0.id == "back" || $0.primary }
                             .sorted { $0.id == "back" && $1.id != "back" }) { item in
-                            GalaxyPillButton(page: galaxyPage, item: item, showsText: verticalEdge == nil)
-                                .fixedSize()
+                            Button { galaxyPage.activate(item) } label: {
+                                let label = Label { Text(verbatim: item.label) } icon: { Image(systemName: item.icon) }
+                                if toolbarLabels && item.primary && verticalEdge == nil {
+                                    label.labelStyle(.titleAndIcon)
+                                } else {
+                                    label.labelStyle(.iconOnly)
+                                }
+                            }
+                            .tint(item.selected ? Color.purple : Color.primary)
+                            .disabled(item.disabled)
+                            .accessibilityIdentifier("galaxy-pill-" + item.id)
+                            .accessibilityAddTraits(item.selected ? .isSelected : [])
                         }
                         GalaxyPillMenu(page: galaxyPage, model: model, select: select)
                     }.axisBehavior(.verticalPreferred)
@@ -1793,20 +1859,9 @@ private struct AdaptiveCompanionLayout<Content: View>: View {
                         ForEach(tabs) { item in
                             let selected = tab == item || (tab == .logs && item == .connections)
                             Button { select(item) } label: {
-                                Image(systemName: item.icon)
-                                    .font(.system(size: 17, weight: .semibold))
-                                    .foregroundStyle(selected ? Color.white : Color.primary)
-                                    .frame(width: 44, height: 44)
-                                    .background {
-                                        if selected {
-                                            TabSelectionCapsule()
-                                                .padding(4)
-                                                .matchedGeometryEffect(id: "selectedTab", in: tabSelection)
-                                        }
-                                    }
-                                    .contentShape(Rectangle())
+                                Label(LocalizedStringKey(item.rawValue), systemImage: item.icon)
                             }
-                            .buttonStyle(CompanionPressStyle())
+                            .tint(selected ? .purple : .primary)
                             .accessibilityLabel(Text(LocalizedStringKey(item.rawValue)))
                             .accessibilityIdentifier("main-tab-" + item.rawValue)
                             .accessibilityAddTraits(selected ? .isSelected : [])

@@ -214,14 +214,14 @@ private struct StandardNavigationHome: View {
                 .allowsHitTesting(searchPurpose == nil)
                 .accessibilityHidden(searchPurpose != nil)
             })
-            .sheet(item: $searchPurpose) { purpose in
+            .pageSheet(item: $searchPurpose) { purpose in
                 PlaceSearch(navigation: navigation, saved: saved, saveAs: purpose.savedKind, choosingStart: purpose == .start) { place in
                     if purpose == .start { Task { await navigation.preview(from: place) } }
                     else if let kind = purpose.savedKind { saved.save(place, as: kind) }
                     else { selectDestination(place) }
                 }
             }
-            .sheet(isPresented: $showLibrary) {
+            .pageSheet(isPresented: $showLibrary) {
                 SavedPlacesView(saved: saved) { place in
                     showLibrary = false
                     selectDestination(saved.navigationPlace(place))
@@ -646,14 +646,14 @@ private struct DuoNavigationHome: View {
                 .allowsHitTesting(searchPurpose == nil)
                 .accessibilityHidden(searchPurpose != nil)
             })
-            .sheet(item: $searchPurpose) { purpose in
+            .pageSheet(item: $searchPurpose) { purpose in
                 PlaceSearch(navigation: navigation, saved: saved, saveAs: purpose.savedKind, choosingStart: purpose == .start) { place in
                     if purpose == .start { Task { await navigation.preview(from: place) } }
                     else if let kind = purpose.savedKind { saved.save(place, as: kind) }
                     else { selectDestination(place) }
                 }
             }
-            .sheet(isPresented: $showLibrary) {
+            .pageSheet(isPresented: $showLibrary) {
                 SavedPlacesView(saved: saved) { place in
                     showLibrary = false
                     selectDestination(saved.navigationPlace(place))

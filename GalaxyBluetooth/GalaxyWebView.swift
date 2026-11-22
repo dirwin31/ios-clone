@@ -52,6 +52,7 @@ final class GalaxyPageDiagnostics: ObservableObject {
     @Published var darkAppearance: Bool?
     @Published var landscapeEditor = false
     @Published var barItems: [GalaxyBarItem] = []
+    @Published fileprivate(set) var routeRevision = 0
     @Published var deviceStatus = ""
     fileprivate weak var barWebView: WKWebView?
     func activate(_ item: GalaxyBarItem) {
@@ -248,6 +249,32 @@ private struct GalaxyPage: UIViewRepresentable {
           const emit = (kind, path = '', code = 0) => {
             try { window.webkit.messageHandlers.galaxyDiagnostics.postMessage({kind, path, code}); } catch (_) {}
           };
+          if (window === window.top) {
+            const route = () => location.pathname + (location.hash || '#/');
+            let lastRoute = route();
+            let scheduled = false;
+            const routeChanged = () => {
+              if (scheduled) return;
+              scheduled = true;
+              requestAnimationFrame(() => {
+                scheduled = false;
+                const next = route();
+                if (next === lastRoute) return;
+                lastRoute = next;
+                if (nativeVisible) emit('routeChanged');
+              });
+            };
+            for (const name of ['pushState', 'replaceState']) {
+              const original = history[name];
+              history[name] = function(...args) {
+                const result = original.apply(this, args);
+                routeChanged();
+                return result;
+              };
+            }
+            window.addEventListener('hashchange', routeChanged);
+            window.addEventListener('popstate', routeChanged);
+          }
           // Keep this native presentation independent of downloaded Galaxy assets.
           // A portrait keyboard can make the web viewport report landscape.
           // Only use the two-column editor when there is room for both panels.
@@ -645,13 +672,18 @@ private struct GalaxyPage: UIViewRepresentable {
                   let body = message.body as? [String: Any], let kind = body["kind"] as? String else { return }
             let path = LoopbackServer.reportPath(body["path"] as? String ?? "")
             switch kind {
+            case "routeChanged":
+                guard message.frameInfo.isMainFrame, isVisible, let webView = message.webView,
+                      diagnostics.barWebView === webView else { return }
+                diagnostics.routeRevision &+= 1
             case "bar":
                 guard message.frameInfo.isMainFrame, let webView = message.webView, diagnostics.barWebView === webView,
                       let items = body["items"] as? [[String: Any]], items.count <= 12,
                       let data = try? JSONSerialization.data(withJSONObject: items),
                       let bar = try? JSONDecoder().decode([GalaxyBarItem].self, from: data) else { return }
-                diagnostics.barItems = bar
-                diagnostics.deviceStatus = body["status"] as? String ?? ""
+                if diagnostics.barItems != bar { diagnostics.barItems = bar }
+                let status = body["status"] as? String ?? ""
+                if diagnostics.deviceStatus != status { diagnostics.deviceStatus = status }
                 webView.evaluateJavaScript("window.__galaxyBarReady?.()", completionHandler: nil)
             case "language":
                 guard message.frameInfo.isMainFrame,
