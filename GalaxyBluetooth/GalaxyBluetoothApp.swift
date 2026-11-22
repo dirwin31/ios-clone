@@ -1001,7 +1001,7 @@ struct GalaxyRootView: View {
         chrome.environment(\.reduceGalacticalMotion, motionDisabled)
             .overlay {
                 if let arrivalID, arrivalEnabled, !motionDisabled {
-                    GalaxyArrival {
+                    GalaxyArrival(wipesOutgoingPage: departingPage != nil) {
                         guard self.arrivalID == arrivalID else { return }
                         var handoff = Transaction(animation: nil)
                         handoff.disablesAnimations = true
@@ -1231,12 +1231,14 @@ struct CompanionPressStyle: ButtonStyle {
 }
 
 private struct GalaxyArrival: UIViewRepresentable {
+    var wipesOutgoingPage = false
     let reveal: () -> Void
     let finished: () -> Void
 
     func makeUIView(context: Context) -> DustView { DustView() }
 
     func updateUIView(_ view: DustView, context: Context) {
+        view.wipesOutgoingPage = wipesOutgoingPage
         view.reveal = reveal
         view.finished = finished
     }
@@ -1253,6 +1255,8 @@ private struct GalaxyArrival: UIViewRepresentable {
         private let dust = CALayer()
         private let cloud = CAGradientLayer()
         private let stars = CALayer()
+        var wipesOutgoingPage = false
+        private var outgoing: UIView?
         private var started = false
         private var revealed = false
 
@@ -1261,9 +1265,9 @@ private struct GalaxyArrival: UIViewRepresentable {
             isOpaque = false
             isUserInteractionEnabled = false
             clipsToBounds = true
-            // The PNG supplies the wispy edges. A solid nebula core hides the page handoff.
-            let violet = UIColor(red: 0.12, green: 0.07, blue: 0.21, alpha: 1)
-            let indigo = UIColor(red: 0.08, green: 0.08, blue: 0.17, alpha: 1)
+            // Color only the feathered seam between the two pages.
+            let violet = UIColor(red: 0.35, green: 0.19, blue: 0.55, alpha: 0.72)
+            let indigo = UIColor(red: 0.29, green: 0.22, blue: 0.52, alpha: 0.88)
             cloud.startPoint = CGPoint(x: 0, y: 0.5)
             cloud.endPoint = CGPoint(x: 1, y: 0.5)
             cloud.colors = [violet.withAlphaComponent(0).cgColor, violet.cgColor, indigo.cgColor,
@@ -1272,6 +1276,7 @@ private struct GalaxyArrival: UIViewRepresentable {
             dust.addSublayer(cloud)
             stars.contents = Self.texture
             dust.addSublayer(stars)
+            dust.zPosition = 1
             layer.addSublayer(dust)
         }
 
@@ -1284,11 +1289,12 @@ private struct GalaxyArrival: UIViewRepresentable {
 
         override func layoutSubviews() {
             super.layoutSubviews()
-            guard let screen = window?.screen, !bounds.isEmpty else { return }
-            let travel = bounds.width * 1.6
+            guard let window, !bounds.isEmpty else { return }
+            let bandWidth = bounds.width * 0.46
+            let travel = (bounds.width + bandWidth) / 2
             CATransaction.begin()
             CATransaction.setDisableActions(true)
-            dust.bounds = CGRect(origin: .zero, size: CGSize(width: bounds.width * 2.2, height: bounds.height))
+            dust.bounds = CGRect(origin: .zero, size: CGSize(width: bandWidth, height: bounds.height))
             cloud.frame = dust.bounds
             stars.frame = dust.bounds
             dust.position = CGPoint(x: bounds.midX + travel, y: bounds.midY)
@@ -1301,14 +1307,31 @@ private struct GalaxyArrival: UIViewRepresentable {
             sweep.toValue = bounds.midX + travel
             sweep.duration = Self.duration
             sweep.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-            let maximum = Float(min(120, screen.maximumFramesPerSecond))
+            let maximum = Float(min(120, window.screen.maximumFramesPerSecond))
             sweep.preferredFrameRateRange = CAFrameRateRange(minimum: min(60, maximum), maximum: maximum, preferred: maximum)
+            // Keep the departing pixels ahead of the dust while the live destination is revealed behind it.
+            if wipesOutgoingPage, let snapshot = window.resizableSnapshotView(
+                from: convert(bounds, to: window), afterScreenUpdates: false, withCapInsets: .zero
+            ) {
+                snapshot.frame = bounds
+                snapshot.isUserInteractionEnabled = false
+                addSubview(snapshot)
+                outgoing = snapshot
+
+                let mask = CALayer()
+                mask.anchorPoint = CGPoint(x: 0, y: 0.5)
+                mask.bounds = CGRect(x: 0, y: 0, width: bounds.width + bandWidth, height: bounds.height)
+                mask.position = CGPoint(x: bounds.midX + travel, y: bounds.midY)
+                mask.backgroundColor = UIColor.white.cgColor
+                snapshot.layer.mask = mask
+                mask.add(sweep, forKey: "reveal")
+            }
             sweep.delegate = self
             dust.add(sweep, forKey: "sweep")
         }
 
         func animationDidStart(_ anim: CAAnimation) {
-            DispatchQueue.main.asyncAfter(deadline: .now() + Self.duration / 2) { [weak self] in
+            DispatchQueue.main.asyncAfter(deadline: .now() + (outgoing == nil ? Self.duration / 2 : 0)) { [weak self] in
                 self?.revealPage()
             }
         }
@@ -1322,12 +1345,16 @@ private struct GalaxyArrival: UIViewRepresentable {
         func animationDidStop(_ anim: CAAnimation, finished completed: Bool) {
             guard completed else { return }
             revealPage()
+            outgoing?.removeFromSuperview()
+            outgoing = nil
             finished?()
         }
 
         func cancel() {
             reveal = nil
             finished = nil
+            outgoing?.removeFromSuperview()
+            outgoing = nil
             dust.removeAllAnimations()
         }
     }
