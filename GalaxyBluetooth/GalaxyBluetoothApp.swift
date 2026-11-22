@@ -948,6 +948,7 @@ struct GalaxyRootView: View {
     @State private var hasVisitedGalaxy = false
     @State private var appTabsExpanded = true
     @Namespace private var galaxySelection
+    @State private var arrivalRoute: ConnectionRoute?
     private var motionDisabled: Bool { reduceMotion || !galacticalAnimations || scenePhase != .active }
     @AppStorage("galaxy.galacticalAnimations") private var galacticalAnimations = true
     private var page: CompanionTab { model.tab == .galaxy && !model.opened ? .connections : model.tab }
@@ -956,10 +957,7 @@ struct GalaxyRootView: View {
         let dark = (galaxyColorScheme ?? systemColorScheme) == .dark
         let edge = Color(uiColor: StarPilotTheme.toolbarColor(dark: dark))
         if page == .galaxy {
-            let farEdge = DuoLayout.isEnabled
-                ? (dark ? Color(red: 0.085, green: 0.09, blue: 0.14) : Color(red: 0.88, green: 0.91, blue: 0.96))
-                : edge
-            return LinearGradient(colors: [edge, farEdge], startPoint: .top, endPoint: .bottom)
+            return LinearGradient(colors: [edge, edge], startPoint: .top, endPoint: .bottom)
         }
         let farEdge = dark ? Color(red: 0.13, green: 0.07, blue: 0.22) : Color(red: 0.87, green: 0.81, blue: 0.96)
         return LinearGradient(colors: [edge, farEdge], startPoint: .topLeading, endPoint: .bottomTrailing)
@@ -1054,6 +1052,20 @@ struct GalaxyRootView: View {
             if DuoLayout.isEnabled && model.tab == .navigation { Color.clear }
             else { chromeBackground.ignoresSafeArea() }
         }
+        .overlay {
+            if let arrivalRoute, page == .galaxy, !motionDisabled {
+                GalaxyArrival(route: arrivalRoute)
+                    .allowsHitTesting(false).accessibilityHidden(true)
+                    .task {
+                        do { try await Task.sleep(for: .milliseconds(1120)) } catch { return }
+                        self.arrivalRoute = nil
+                    }
+            }
+        }
+        .onChange(of: page) { _, next in
+            arrivalRoute = next == .galaxy && !motionDisabled ? model.transport.selectedRoute : nil
+        }
+        .onChange(of: motionDisabled) { _, disabled in if disabled { arrivalRoute = nil } }
         .preferredColorScheme(galaxyColorScheme)
         .ignoresSafeArea(.container, edges: editorFocused ? .all : [])
         .statusBarHidden(editorFocused)
@@ -1172,6 +1184,69 @@ struct CompanionPressStyle: ButtonStyle {
             .animation(reduceMotion ? nil : (pressed ? .easeOut(duration: 0.08) : CompanionMotion.selection),
                        value: pressed)
             .contentShape(Rectangle())
+    }
+}
+
+private struct GalaxyArrival: View {
+    let route: ConnectionRoute
+    @State private var start = Date()
+
+    var body: some View {
+        GeometryReader { bounds in
+            let width = bounds.size.width
+            let height = bounds.size.height
+            let side = min(136, min(width, height) * 0.32)
+            let center = CGPoint(x: width * 0.5, y: height * 0.5)
+            let angle: Double = route == .lan ? 155 : route == .bluetooth ? 110 : -25
+            let radians = angle * .pi / 180
+            let target = CGPoint(x: center.x + cos(radians) * side * 0.92,
+                                 y: center.y + sin(radians) * side * 0.59)
+            let symbol = route == .lan ? "ConnectionWiFi" : route == .bluetooth ? "ConnectionBluetooth" : "ConnectionNetwork"
+            TimelineView(.animation(minimumInterval: 1.0 / 60)) { clock in
+                let elapsed = max(0, clock.date.timeIntervalSince(start))
+                let flight = min(1, elapsed / 0.72)
+                let burst = min(1, max(0, (elapsed - 0.72) / 0.38))
+                ZStack {
+                    RadialGradient(colors: [StarPilotTheme.background.opacity(0.94), .clear], center: .center,
+                                   startRadius: side * 0.55, endRadius: side * 2.0)
+                    Ellipse().stroke(.purple.opacity(0.7), lineWidth: 1)
+                        .frame(width: side * 2, height: side * 1.2).position(center)
+                    Image("StarPilotMark").resizable().scaledToFit()
+                        .frame(width: side, height: side).clipShape(RoundedRectangle(cornerRadius: side * 0.22))
+                        .scaleEffect(1 + 0.24 * burst).position(center)
+                    Image(symbol).renderingMode(.template).resizable().scaledToFit().padding(9)
+                        .frame(width: 44, height: 44).foregroundStyle(.white)
+                        .background(StarPilotTheme.guidance, in: Circle())
+                        .scaleEffect(1 + 0.5 * sin(.pi * burst)).position(target)
+                    Canvas { context, size in
+                        func point(_ t: Double) -> CGPoint {
+                            let u = 1 - t
+                            return CGPoint(x: u*u * (-20) + 2*u*t * size.width * 0.42 + t*t * target.x,
+                                           y: u*u * size.height * 0.85 + 2*u*t * size.height * 0.14 + t*t * target.y)
+                        }
+                        if flight < 1 {
+                            for i in 0..<22 {
+                                let strength = Double(i + 1) / 22
+                                let p = point(max(0, flight - (1 - strength) * 0.22))
+                                let radius = 1 + 4 * strength
+                                context.fill(Path(ellipseIn: CGRect(x: p.x-radius, y: p.y-radius, width: 2*radius, height: 2*radius)),
+                                             with: .color(i == 21 ? .white : .purple.opacity(strength)))
+                            }
+                        } else {
+                            let radius = side * (0.1 + 1.2 * burst)
+                            for i in 0..<16 {
+                                let a = Double(i) * .pi / 8
+                                var ray = Path()
+                                ray.move(to: CGPoint(x: target.x + cos(a)*radius, y: target.y + sin(a)*radius))
+                                let tip = radius + 16 * (1-burst)
+                                ray.addLine(to: CGPoint(x: target.x + cos(a)*tip, y: target.y + sin(a)*tip))
+                                context.stroke(ray, with: .color(i.isMultiple(of: 2) ? .white : .purple), lineWidth: 2.5)
+                            }
+                        }
+                    }
+                }.opacity(1 - burst * burst)
+            }
+        }
     }
 }
 
@@ -1739,6 +1814,7 @@ private struct AdaptiveCompanionLayout<Content: View>: View {
                     AdaptiveConnectionStatus(model: model, openSettings: { select(.connections) })
                 }.axisBehavior(.verticalPreferred)
             }
+            .toolbarBackground(.hidden, for: .navigationBar)
             .toolbarVerticalBehavior(.automatic)
     }
 

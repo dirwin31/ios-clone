@@ -172,7 +172,7 @@ struct ConnectionSettingsView: View {
                 Spacer(minLength: 0)
                 if !dynamicTypeSize.isAccessibilitySize {
                     ConnectionOrbit(route: connected ? model.transport.label : "", pairing: pairing)
-                        .scaleEffect(0.46).frame(width: 124, height: 48)
+                        .scaleEffect(0.62).frame(width: 164, height: 64)
                 }
             }
             let layout = wide ? AnyLayout(HStackLayout(alignment: .top, spacing: 22)) : AnyLayout(VStackLayout(spacing: 20))
@@ -629,7 +629,7 @@ private struct ConnectionOrbit: View {
             Image("StarPilotMark").resizable().scaledToFit()
                 .clipShape(RoundedRectangle(cornerRadius: 14))
                 .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color.white.opacity(0.6)))
-                .shadow(color: purple.opacity(0.5), radius: 16).frame(width: 60, height: 60).position(x: 132, y: 43)
+                .shadow(color: purple.opacity(0.5), radius: 12).frame(width: 86, height: 86).position(x: 132, y: 43)
             node("ConnectionWiFi", angle: 155, active: route == "Local Wi-Fi")
             node("ConnectionBluetooth", angle: 110, active: route == "Bluetooth" || pairing)
             node("ConnectionNetwork", angle: -25, active: route == "Tunnel")

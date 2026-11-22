@@ -255,6 +255,11 @@ private struct GalaxyPage: UIViewRepresentable {
                           linear-gradient(to right, black calc(100% - 96px), transparent);
               mask-composite: intersect;
             }
+            @media (orientation: landscape) {
+              html.native-galaxy-pill:not(.native-layout-editor) #galaxy-app .gx-app {
+                background-image: linear-gradient(to left, var(--toolbar-edge), color-mix(in srgb, var(--toolbar-edge) 60%, transparent) 48px, transparent 148px) !important;
+              }
+            }
 
             """ : """
             /* Blend only the decorative backdrop; never fade the Galaxy controls. */
@@ -285,6 +290,14 @@ private struct GalaxyPage: UIViewRepresentable {
               }
             }
 
+            /* Blend the shell itself, including Galaxy versions without a #galaxy-bg canvas. */
+            html.native-galaxy-pill { --toolbar-edge: rgb(2.6% 2.2% 5.8%); }
+            html.native-galaxy-pill[data-theme="light"] { --toolbar-edge: rgb(89.5% 85.5% 94.5%); }
+            html.native-galaxy-pill:not(.native-layout-editor) .gx-app {
+              background-color: transparent !important;
+              background-image: linear-gradient(to bottom, var(--toolbar-edge), color-mix(in srgb, var(--toolbar-edge) 85%, transparent) 22px,
+                color-mix(in srgb, var(--toolbar-edge) 35%, transparent) 76px, transparent 148px) !important;
+            }
             html.native-galaxy-pill { --bottomnav-height: 0px; --bottomnav-clearance: env(safe-area-inset-bottom, 0px); }
             html.native-galaxy-pill .gx-app > .blur-nav { display: none !important; }
             html.native-galaxy-pill:not(.native-layout-editor) .gx-app > .gx-appbar:not(:has(.gx-searchbox.open)) { display: none !important; }
