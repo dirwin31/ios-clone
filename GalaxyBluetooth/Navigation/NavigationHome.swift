@@ -187,11 +187,7 @@ private struct StandardNavigationHome: View {
                         .id(navigation.destination == nil ? "browse" : "destination")
                     }
                 }
-                .background {
-                    GeometryReader { panel in
-                        Color.clear.preference(key: NavigationPanelFrameKey.self, value: panel.frame(in: .global))
-                    }
-                }
+
                 .background {
                     if !navigation.navigating {
                         UnevenRoundedRectangle(topLeadingRadius: 24, topTrailingRadius: 24)
@@ -199,10 +195,11 @@ private struct StandardNavigationHome: View {
                     }
                 }
                 .modifier(TripBarGlass(active: navigation.navigating))
+                .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { tripFrame = $0 }
+                .overlay(alignment: .top) { TripBarFollowMarker(navigation: navigation) }
                 .shadow(color: .black.opacity(navigation.navigating ? 0.06 : 0.12), radius: 12, y: -2)
                 .padding(navigation.navigating ? 12 : 0)
             })
-            .onPreferenceChange(NavigationPanelFrameKey.self) { tripFrame = $0 }
             .sheet(item: $searchPurpose) { purpose in
                 PlaceSearch(navigation: navigation, saved: saved, saveAs: purpose.savedKind) { place in
                     if let kind = purpose.savedKind { saved.save(place, as: kind) }
@@ -443,9 +440,26 @@ private struct ManeuverDistance: View {
     }
 }
 
-private struct NavigationPanelFrameKey: PreferenceKey {
-    static var defaultValue: CGRect { .zero }
-    static func reduce(value: inout CGRect, nextValue: () -> CGRect) { value = nextValue() }
+private struct TripBarFollowMarker: View {
+    @ObservedObject var navigation: NavigationModel
+    @AppStorage(NavigationMapPreference.enabledKey) private var useMapbox = true
+    @AppStorage(NavigationMapPreference.tokenKey) private var token = ""
+
+    var body: some View {
+        if useMapbox && token.hasPrefix("pk.") && navigation.navigating && navigation.followsUser {
+            TimelineView(.periodic(from: .now, by: 1)) { clock in
+                let fresh = navigation.usingComma
+                    ? navigation.commaFeedReady && navigation.commaPosition != nil &&
+                        clock.date.timeIntervalSince(navigation.commaPositionSampleDate) <= 4
+                    : navigation.goodLocation != nil
+                if fresh {
+                    DrivePositionMarker(following: true, comma: navigation.usingComma)
+                        .offset(y: -DrivePositionMarker.barClearance - DrivePositionMarker.diameter)
+                        .allowsHitTesting(false)
+                }
+            }
+        }
+    }
 }
 
 private struct TripBarGlass: ViewModifier {
@@ -458,7 +472,9 @@ private struct TripBarGlass: ViewModifier {
         } else if reduceTransparency {
             content.background(Color(uiColor: .secondarySystemBackground), in: Capsule())
         } else if #available(iOS 26.0, *) {
-            content.glassEffect(.clear, in: Capsule())
+            content
+                .background(.ultraThinMaterial, in: Capsule())
+                .glassEffect(.clear, in: Capsule())
         } else {
             content.background(.ultraThinMaterial, in: Capsule())
         }
@@ -573,22 +589,19 @@ private struct DuoNavigationHome: View {
                     }
                 }
                 .frame(maxWidth: navigation.navigating ? .infinity : 600)
-                .background {
-                    GeometryReader { panel in
-                        Color.clear.preference(key: NavigationPanelFrameKey.self, value: panel.frame(in: .global))
-                    }
-                }
+
                 .background {
                     if !navigation.navigating {
                         RoundedRectangle(cornerRadius: 24).fill(.regularMaterial)
                     }
                 }
                 .modifier(TripBarGlass(active: navigation.navigating))
+                .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { tripFrame = $0 }
+                .overlay(alignment: .top) { TripBarFollowMarker(navigation: navigation) }
                 .shadow(color: .black.opacity(navigation.navigating ? 0.06 : 0.12), radius: 12, y: -2)
                 .frame(maxWidth: .infinity, alignment: .center)
                 .padding(12)
             })
-            .onPreferenceChange(NavigationPanelFrameKey.self) { tripFrame = $0 }
             .sheet(item: $searchPurpose) { purpose in
                 PlaceSearch(navigation: navigation, saved: saved, saveAs: purpose.savedKind) { place in
                     if let kind = purpose.savedKind { saved.save(place, as: kind) }

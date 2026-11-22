@@ -75,6 +75,21 @@ struct NavigationMapSettings: View {
 }
 
 /// Uses the same navigation state and controls as the standard iPhone map.
+struct DrivePositionMarker: View {
+    static let diameter: CGFloat = 32
+    static let barClearance: CGFloat = 8
+    let following: Bool
+    let comma: Bool
+
+    var body: some View {
+        Image(systemName: following ? "location.north.fill" : "circle.fill")
+            .font(.callout.bold()).foregroundStyle(.white)
+            .frame(width: Self.diameter, height: Self.diameter).background(StarPilotTheme.accent, in: Circle())
+            .overlay { Circle().stroke(.white, lineWidth: 2) }
+            .accessibilityLabel(comma ? "Comma location" : "Your location")
+    }
+}
+
 struct CarDisplayMapOptions: Equatable {
     let overview: Bool
     let zoomFactor: Double
@@ -147,7 +162,7 @@ struct MapboxDriveMap: View {
             let anchor = CGPoint(
                 x: carDisplay == nil ? (tripFrame.isEmpty ? bounds.width / 2 : min(bounds.width * 0.9, max(bounds.width * 0.1, tripFrame.midX - bounds.minX))) :
                     bounds.width * (carDisplay?.dashboard == true ? 0.5 : carX),
-                y: max(bounds.height * 0.35, bounds.height - panel - (carDisplay == nil ? 22 : 18)))
+                y: max(bounds.height * 0.35, bounds.height - panel - (carDisplay == nil ? DrivePositionMarker.barClearance + DrivePositionMarker.diameter / 2 : 18)))
             let dx = 2 * anchor.x - bounds.width, dy = 2 * anchor.y - bounds.height
             let padding = driving ? EdgeInsets(top: max(0, dy), leading: max(0, dx), bottom: max(0, -dy), trailing: max(0, -dx))
                                   : EdgeInsets(top: top, leading: 0, bottom: panel, trailing: 0)
@@ -189,9 +204,9 @@ struct MapboxDriveMap: View {
                                 .foregroundStyle(.white, StarPilotTheme.accent).accessibilityLabel("Starting point: \(start.name)")
                         }
                     }
-                    if !anchored, let point = position(at: clock.date) {
+                    if !(driving && following && carDisplay == nil) && !anchored, let point = position(at: clock.date) {
                         MapViewAnnotation(coordinate: aligned(point)) {
-                            positionMarker(following: false)
+                            DrivePositionMarker(following: false, comma: commaTrip)
                         }
                     }
                 }
@@ -208,8 +223,8 @@ struct MapboxDriveMap: View {
                     }
                 }
                 .overlay {
-                    if anchored, position(at: clock.date) != nil {
-                        positionMarker(following: true)
+                    if carDisplay != nil, anchored, position(at: clock.date) != nil {
+                        DrivePositionMarker(following: true, comma: commaTrip)
                             .position(anchor)
                             .allowsHitTesting(false)
                     }
@@ -252,14 +267,6 @@ struct MapboxDriveMap: View {
             }
             .onChange(of: padding) { _, _ in follow(padding: padding, layoutChanged: true) }
         }
-    }
-
-    private func positionMarker(following: Bool) -> some View {
-        Image(systemName: following ? "location.north.fill" : "circle.fill")
-            .font(.callout.bold()).foregroundStyle(.white)
-            .frame(width: 32, height: 32).background(StarPilotTheme.accent, in: Circle())
-            .overlay { Circle().stroke(.white, lineWidth: 2) }
-            .accessibilityLabel(commaTrip ? "Comma location" : "Your location")
     }
 
     private func destinationFeature(_ destination: NavigationPlace) -> Feature {
