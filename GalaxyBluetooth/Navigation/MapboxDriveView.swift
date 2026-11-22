@@ -5,6 +5,9 @@ import MapboxMaps
 enum NavigationMapPreference {
     static let enabledKey = "navigation.mapboxEnabled"
     static let tokenKey = "navigation.mapboxPublicToken"
+    static let poiKey = "navigation.mapboxPointLabels"
+    static let placesKey = "navigation.mapboxPlaceLabels"
+    static let trafficKey = "navigation.mapboxTraffic"
     static var activeToken: String? {
         let defaults = UserDefaults.standard
         guard defaults.object(forKey: enabledKey) as? Bool != false,
@@ -13,11 +16,25 @@ enum NavigationMapPreference {
     }
 }
 
+private enum PointLabels: String {
+    case automatic, browsing, always, off
+
+    func visible(driving: Bool) -> Bool {
+        self != .off && (self != .browsing || !driving)
+    }
+}
+
 struct NavigationMapSettings: View {
     @Environment(\.dismiss) private var dismiss
     @AppStorage(NavigationMapPreference.tokenKey) private var token = ""
     @AppStorage(NavigationMapPreference.enabledKey) private var enabled = true
     @State private var entry = ""
+    @AppStorage(NavigationMapPreference.poiKey) private var savedLabels = PointLabels.always
+    @AppStorage(NavigationMapPreference.placesKey) private var savedPlaces = true
+    @AppStorage(NavigationMapPreference.trafficKey) private var savedTraffic = false
+    @State private var labels = PointLabels.always
+    @State private var places = true
+    @State private var traffic = false
     private var trimmed: String { entry.trimmingCharacters(in: .whitespacesAndNewlines) }
 
     var body: some View {
@@ -28,6 +45,9 @@ struct NavigationMapSettings: View {
                         .textInputAutocapitalization(.never).autocorrectionDisabled()
                     Button("Use Mapbox 3D") {
                         token = trimmed
+                        savedLabels = labels
+                        savedPlaces = places
+                        savedTraffic = traffic
                         enabled = true
                         dismiss()
                     }.disabled(!trimmed.hasPrefix("pk.") || trimmed.count < 4)
@@ -35,10 +55,22 @@ struct NavigationMapSettings: View {
                 } footer: {
                     Text("Mapbox displays the iPhone navigation map and calculates iPhone-guided routes. Comma-guided trips use the route from your comma.")
                 }
+                Section {
+                    Picker("Stores & points of interest", selection: $labels) {
+                        Text("Always").tag(PointLabels.always)
+                        Text("Fewer during guidance").tag(PointLabels.automatic)
+                        Text("Only while browsing").tag(PointLabels.browsing)
+                        Text("Off").tag(PointLabels.off)
+                    }
+                    Toggle("City & neighborhood names", isOn: $places)
+                    Toggle("Traffic congestion", isOn: $traffic)
+                } header: { Text("Mapbox display") } footer: {
+                    Text("Traffic shows reported slowdowns from amber to dark red. Choose Use Mapbox 3D to save.")
+                }
             }
             .navigationTitle("Navigation map").navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } } }
-        }.onAppear { entry = token }
+        }.onAppear { entry = token; labels = savedLabels; places = savedPlaces; traffic = savedTraffic }
     }
 }
 
@@ -54,6 +86,9 @@ struct MapboxDriveMap: View {
         }
     }()
     @ObservedObject var navigation: NavigationModel
+    @AppStorage(NavigationMapPreference.poiKey) private var labels = PointLabels.always
+    @AppStorage(NavigationMapPreference.placesKey) private var showPlaces = true
+    @AppStorage(NavigationMapPreference.trafficKey) private var showTraffic = false
     let bottomInset: CGFloat
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -96,6 +131,19 @@ struct MapboxDriveMap: View {
             let top = min(driving ? 190.0 : 90.0, geometry.size.height * 0.32)
             TimelineView(.periodic(from: .now, by: 1)) { clock in
                 MapboxMaps.Map(viewport: $viewport) {
+                    if showTraffic {
+                        VectorSource(id: "galaxy-traffic").url("mapbox://mapbox.mapbox-traffic-v1")
+                        LineLayer(id: "galaxy-congestion", source: "galaxy-traffic")
+                            .sourceLayer("traffic").slot(.middle)
+                            .lineWidth(2.5).lineOffset(5.5).lineCap(.round).lineEmissiveStrength(1)
+                            .lineColor(Exp(.match) {
+                                Exp(.get) { "congestion" }
+                                "moderate"; "#FFB020"
+                                "heavy"; "#EF493D"
+                                "severe"; "#AD1834"
+                                "rgba(0,0,0,0)"
+                            })
+                    }
                     if let routeShape {
                         GeoJSONSource(id: "galaxy-route").data(.geometry(.lineString(routeShape)))
                         LineLayer(id: "galaxy-selected-route", source: "galaxy-route")
@@ -125,7 +173,10 @@ struct MapboxDriveMap: View {
                         }
                     }
                 }
-                .mapStyle(.standard(lightPreset: colorScheme == .dark ? .night : .day))
+                .mapStyle(.standard(lightPreset: colorScheme == .dark ? .night : .day,
+                                    showPointOfInterestLabels: labels.visible(driving: driving),
+                                    showPlaceLabels: showPlaces,
+                                    densityPointOfInterestLabels: labels == .automatic && driving ? 1 : 3))
                 .usesSafeAreaInsetsAsPadding(!anchored)
                 .ornamentOptions(.init(logo: .init(margins: .init(x: 8, y: panel + 6)),
                                        attributionButton: .init(margins: .init(x: 8, y: panel + 6))))
