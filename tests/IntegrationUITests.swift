@@ -152,6 +152,51 @@ final class IntegrationUITests: XCTestCase {
         XCTAssertTrue(app.cells["Save to Files"].waitForExistence(timeout: 10))
         let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "Share diagnostics text file"; shot.lifetime = .keepAlways; add(shot)
     }
+    func testDuoNavigationPlannerAndDrive() throws {
+        try XCTSkipUnless(ProcessInfo.processInfo.environment["SIMULATOR_MODEL_IDENTIFIER"] == "iPhone19,4", "Duo layout")
+        let app = XCUIApplication()
+        XCUIDevice.shared.orientation = .portrait
+        defer { XCUIDevice.shared.orientation = .portrait }
+        func capture(_ name: String) {
+            let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            attachment.name = name
+            attachment.lifetime = .keepAlways
+            add(attachment)
+        }
+        app.launchArguments = ["--preview-navigation-planner", "--ui-testing", "-navigation.offerPhoneTrip", "YES"]
+        app.launch()
+        let field = app.textFields["map-search"]
+        XCTAssertTrue(field.waitForExistence(timeout: 20))
+        capture("Duo destination planner")
+        field.tap()
+        field.typeText("Test")
+        let result = app.buttons["place-search-result"].firstMatch
+        XCTAssertTrue(result.waitForExistence(timeout: 5))
+        capture("Duo inline search")
+        result.tap()
+        let directions = app.buttons["Start Route"]
+        XCTAssertTrue(directions.waitForExistence(timeout: 5))
+        XCTAssertTrue(directions.isHittable)
+        XCTAssertFalse(app.segmentedControls.buttons["Comma"].exists)
+        capture("Duo route preview")
+        XCUIDevice.shared.orientation = .landscapeLeft
+        XCTAssertTrue(directions.isHittable)
+        XCTAssertTrue(app.buttons["Close destination"].isHittable)
+        let alternate = app.buttons["duo-route-1"]
+        for _ in 0..<3 where !alternate.isHittable { app.scrollViews["duo-itinerary"].swipeUp() }
+        XCTAssertTrue(alternate.isHittable)
+        alternate.tap()
+        XCTAssertTrue(alternate.isSelected)
+        capture("Duo landscape planner")
+        app.terminate()
+        XCUIDevice.shared.orientation = .portrait
+        app.launchArguments = ["--preview-route"]
+        app.launch()
+        XCTAssertTrue(app.buttons["End route"].waitForExistence(timeout: 12))
+        XCTAssertTrue(app.buttons["Navigation options"].isHittable)
+        capture("Duo active guidance")
+    }
+
     func testActiveRoutePreview() {
         let app = XCUIApplication(); app.launchArguments = ["--preview-route"]; app.launch()
         XCTAssertTrue(app.staticTexts["Turn right onto Bremner Boulevard"].waitForExistence(timeout: 15))

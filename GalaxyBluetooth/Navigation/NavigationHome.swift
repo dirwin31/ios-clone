@@ -1,7 +1,7 @@
 import SwiftUI
 import MapKit
 
-private struct NavigationMapLayer: View {
+struct NavigationMapLayer: View {
     @ObservedObject var navigation: NavigationModel
     @AppStorage("navigation.appleStyle") private var appleStyle = GalaxyAppleMap.streets
     let markerPerspective: DriveMarkerPerspective
@@ -442,7 +442,7 @@ private struct ManeuverDistance: View {
     }
 }
 
-private struct TripBarFollowMarker: View {
+struct TripBarFollowMarker: View {
     let markerPerspective: DriveMarkerPerspective
     @ObservedObject var navigation: NavigationModel
     @AppStorage(NavigationMapPreference.enabledKey) private var useMapbox = true
@@ -589,334 +589,7 @@ struct NavigationHome: View {
     }
 }
 
-private struct DuoNavigationHome: View {
-    @AppStorage(NavigationDistanceUnits.key) private var distanceUnits = NavigationDistanceUnits.system
-    @ObservedObject var connection: CommaConnection
-    @ObservedObject var navigation: NavigationModel
-    @ObservedObject var saved: SavedPlacesStore
-    @ObservedObject private var bluetooth: BluetoothTransport
-    @Environment(\.reduceGalacticalMotion) private var reduceMotion
-    @Environment(\.scenePhase) private var scenePhase
-    var submitReport: () -> Void
-    var openSettings: () -> Void
-    var selectAppTab: (CompanionTab) -> Void
-    @State private var searchPurpose: PlaceSearchPurpose?
-    @State private var showLibrary = false
-    @State private var markerPerspective = DriveMarkerPerspective()
-    @State private var headerBottom: CGFloat = 0
-    @State private var tripFrame = CGRect.zero
-    @State private var panelLevel: PlacePanelLevel = .standard
-    @GestureState private var panelDrag: CGFloat = 0
-    private var expanded: Bool { panelLevel == .expanded }
-    @State private var appTabsExpanded = true
-    init(connection: CommaConnection, navigation: NavigationModel, saved: SavedPlacesStore, selectAppTab: @escaping (CompanionTab) -> Void, submitReport: @escaping () -> Void, openSettings: @escaping () -> Void) {
-        self.submitReport = submitReport
-        self.openSettings = openSettings
-        self.selectAppTab = selectAppTab
-        self.connection = connection; self.navigation = navigation; self.saved = saved
-        bluetooth = connection.bluetooth
-    }
-    var body: some View {
-        GeometryReader { geometry in
-            NavigationMapLayer(navigation: navigation, markerPerspective: markerPerspective,
-                               headerBottom: headerBottom, tripFrame: tripFrame)
-            .modifier(NavigationMapBackground())
-            .overlay(alignment: .top) {
-                mapHeader.padding(12)
-                    .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).maxY } action: { headerBottom = $0 }
-            }
-            .modifier(PlacePanelLayout(guiding: navigation.navigating) {
-                VStack(spacing: 0) {
-                    if !navigation.navigating {
-                        PlacePanelHandle(level: $panelLevel, drag: $panelDrag)
-                    }
-                    if !navigation.error.isEmpty {
-                        Text(LocalizedStringKey(navigation.error)).font(.callout).foregroundStyle(.red)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.horizontal, 20).padding(.bottom, 12)
-                            .accessibilityIdentifier("navigation-error-banner")
-                    }
-                    if !navigation.notice.isEmpty {
-                        HStack(alignment: .top, spacing: 8) {
-                            Text(LocalizedStringKey(navigation.notice)).font(.callout)
-                            Spacer(minLength: 0)
-                            Button { navigation.notice = "" } label: { Image(systemName: "xmark.circle.fill") }
-                                .accessibilityLabel("Dismiss navigation message")
-                        }.foregroundStyle(.primary)
-                            .padding(.horizontal, 14).padding(.vertical, 8)
-                    }
-                    if !navigation.navigating {
-                        searchBar.padding(.horizontal, 20).padding(.bottom, 12)
-                            .simultaneousGesture(panelLevel.dragGesture(level: $panelLevel, offset: $panelDrag))
-                    }
-                    if navigation.navigating {
-                        VStack(alignment: .leading, spacing: 6) {
-                            tripPanel
-                            messages
-                        }
-                        .padding(12)
-                    } else {
-                        PlacePanelScroll(level: $panelLevel) {
-                            VStack(alignment: .leading, spacing: 16) {
-                                QueuedPlaceStatus()
-                                if navigation.destination != nil { destinationPanel }
-                                else { browsePanel(width: min(600, geometry.size.width - 24) - 40) }
-                                messages
-                            }.padding(.horizontal, 20).padding(.bottom, 18)
-                        }
-                        .scrollIndicators(.hidden)
-                        .frame(height: panelContentHeight(available: geometry.size.height), alignment: .top)
-                        .clipped()
-                        .accessibilityHidden(panelLevel == .collapsed)
-                        .id(navigation.destination == nil ? "browse" : "destination")
-                    }
-                }
-                .frame(maxWidth: navigation.navigating ? 430 : 600)
-
-                .background {
-                    if !navigation.navigating {
-                        RoundedRectangle(cornerRadius: 24).fill(.regularMaterial)
-                    }
-                }
-                .modifier(TripBarGlass(active: navigation.navigating))
-                .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { tripFrame = $0 }
-                .overlay(alignment: .top) { TripBarFollowMarker(markerPerspective: markerPerspective, navigation: navigation) }
-                .shadow(color: .black.opacity(navigation.navigating ? 0.06 : 0.12), radius: 12, y: -2)
-                .frame(maxWidth: .infinity, alignment: .center)
-                .padding(12)
-                .opacity(searchPurpose == nil ? 1 : 0)
-                .allowsHitTesting(searchPurpose == nil)
-                .accessibilityHidden(searchPurpose != nil)
-            })
-            .pageSheet(item: $searchPurpose) { purpose in
-                PlaceSearch(navigation: navigation, saved: saved, saveAs: purpose.savedKind, choosingStart: purpose == .start) { place in
-                    if purpose == .start { Task { await navigation.preview(from: place) } }
-                    else if let kind = purpose.savedKind { saved.save(place, as: kind) }
-                    else { selectDestination(place) }
-                }
-            }
-            .pageSheet(isPresented: $showLibrary) {
-                SavedPlacesView(saved: saved) { place in
-                    showLibrary = false
-                    selectDestination(saved.navigationPlace(place))
-                }
-            }
-            .onChange(of: navigation.navigating) { _, active in
-                panelLevel = .standard
-                if active {
-                    if let place = navigation.destination { saved.rememberDestination(place) }
-                    navigation.followLocation()
-                }
-            }
-            .tint(StarPilotTheme.accent)
-        }
-    }
-    private var mapHeader: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            if !navigation.navigating {
-            HStack(spacing: 8) {
-                    if #available(iOS 27.1, *) {
-                        // App switching and status are hosted by the system toolbar.
-                    } else {
-                    CompanionNavigationBar(tab: .navigation, developerMode: connection.app.developerMode,
-                        navigation: navigation, expanded: $appTabsExpanded, compactIconOnly: true,
-                        statusModel: connection.app, select: selectAppTab)
-                    }
-                    navigationOptions
-                }.frame(height: 54)
-            }
-            HStack(alignment: .top, spacing: 12) {
-                if navigation.navigating {
-                    HStack(alignment: .center, spacing: 18) {
-                        Image(systemName: turnSymbol).font(.system(size: 42, weight: .bold)).frame(width: 52)
-                            .contentTransition(reduceMotion ? .identity : .symbolEffect(.replace))
-                            .animation(reduceMotion ? nil : .easeInOut(duration: 0.24), value: turnSymbol)
-                        VStack(alignment: .leading, spacing: 4) {
-                            ManeuverDistance(label: navigation.usingComma && !navigation.commaFeedReady ? "—" : distance(navigation.distanceToTurn))
-                            Text(LocalizedStringKey(navigation.instruction)).font(.title3.weight(.semibold)).lineLimit(3)
-                            if let junction = navigation.mappedJunction {
-                                Text("Mapped at junction · \(junction.labels) · \(distance(Double(junction.meters)))")
-                                    .font(.subheadline).fixedSize(horizontal: false, vertical: true)
-                            }
-                        }
-                        Spacer(minLength: 0)
-                    }
-                    .foregroundStyle(.primary).padding(20)
-                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 24))
-                    .accessibilityElement(children: .combine)
-                } else { Spacer() }
-                if !navigation.navigating {
-                VStack(spacing: 10) {
-                    mapButton("scope", label: "Follow my location") { navigation.followLocation() }
-                    if navigation.navigating {
-                        mapButton("arrow.up.left.and.arrow.down.right", label: "Show full route") { navigation.showOverview() }
-                    }
-                }
-            }
-            }
-        }
-    }
-    private var navigationOptions: some View {
-        Menu {
-            if navigation.navigating {
-                Button("Follow my location", systemImage: "scope") { navigation.followLocation() }
-                Button("Show full route", systemImage: "arrow.up.left.and.arrow.down.right") {
-                    navigation.showOverview()
-                }
-            }
-            Button("Submit report", systemImage: "bubble.left.and.exclamationmark.bubble.right") {
-                submitReport()
-            }
-            Button("Reset navigation", systemImage: "arrow.counterclockwise", role: .destructive) {
-                Task { await connection.app.navigationServices.resetNavigation() }
-            }
-        } label: {
-            Image(systemName: "ellipsis").font(.title3.weight(.semibold)).frame(width: 44, height: 44)
-        }.accessibilityLabel("Navigation options")
-    }
-    private func mapButton(_ symbol: String, label: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) { Image(systemName: symbol).font(.title3.weight(.semibold)).frame(width: 44, height: 44) }
-            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 13))
-            .shadow(color: .black.opacity(0.08), radius: 4, y: 2).accessibilityLabel(label)
-    }
-    private func panelContentHeight(available: CGFloat) -> CGFloat {
-        let count = saved.recentDestinations.count
-        func height(expanded: Bool) -> CGFloat {
-            if navigation.destination != nil {
-                return min(available * (expanded ? 0.58 : 0.42), expanded ? 520 : 360)
-            }
-            let rows = min(count, expanded ? 10 : 3)
-            return min(available * (expanded ? 0.55 : 0.42), rows == 0 ? 252 : 222 + CGFloat(rows) * 66)
-        }
-        let maximum = height(expanded: true)
-        let base = panelLevel == .collapsed ? 0 : height(expanded: expanded)
-        return min(maximum, max(0, base - panelDrag))
-    }
-    private var searchBar: some View {
-        Button { search() } label: {
-                HStack(spacing: 12) {
-                    Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                    Text("Search Maps").foregroundStyle(.secondary)
-                    Spacer()
-                }.font(.title3).padding(14).background(.secondary.opacity(0.1), in: RoundedRectangle(cornerRadius: 12))
-            }.buttonStyle(.plain).accessibilityIdentifier("map-search")
-    }
-    private func browsePanel(width: CGFloat) -> some View {
-        VStack(alignment: .leading, spacing: 18) {
-            HStack {
-                Text("Favorites").font(.title3.bold())
-                Spacer()
-                Button("See All") { showLibrary = true }.font(.subheadline.weight(.medium))
-            }
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(alignment: .top, spacing: 20) {
-                    shortcut(.home, icon: "house.fill", title: "Home")
-                    shortcut(.work, icon: "briefcase.fill", title: "Work")
-                    ForEach(saved.library.places.filter { $0.kind == .favorite }.prefix(6)) { place in
-                        favoriteShortcut(place)
-                    }
-                    Button { search(as: .favorite) } label: {
-                        shortcutLabel(icon: "plus", title: "Add", subtitle: "Favorite", tint: StarPilotTheme.accent)
-                    }.buttonStyle(.plain).accessibilityLabel("Add favorite")
-                }.padding(.vertical, 2)
-                    .frame(minWidth: max(0, width), alignment: .center)
-            }
-            HStack {
-                Text("Recent Destinations").font(.headline)
-                Spacer()
-                if !saved.recentDestinations.isEmpty {
-                    Button("Clear") { saved.clearRecentDestinations() }.font(.subheadline)
-                }
-            }
-            if saved.recentDestinations.isEmpty {
-                Text("Destinations you select will appear here.").font(.subheadline).foregroundStyle(.secondary)
-            } else {
-                ForEach(saved.recentDestinations.prefix(expanded ? 10 : 3)) { place in
-                    RecentDestinationRow(place: place) {
-                        selectDestination(saved.navigationPlace(place))
-                    }.disabled(navigation.busy)
-                }
-            }
-            Label(connection.connected ? "Comma connected · \(connection.connectionLabel)" : "Connect comma in Settings", systemImage: "link")
-                .font(.caption).foregroundStyle(.secondary)
-        }
-    }
-    private func shortcut(_ kind: SavedPlaceKind, icon: String, title: String) -> some View {
-        let place = saved.library.place(kind)
-        return Button {
-            if let place { selectDestination(saved.navigationPlace(place)) }
-            else { search(as: kind) }
-        } label: {
-            shortcutLabel(icon: icon, title: title, subtitle: place == nil ? "Set address" : place!.name, tint: StarPilotTheme.accent)
-        }
-        .buttonStyle(.plain).disabled(place != nil && navigation.busy)
-        .accessibilityIdentifier(kind == .home ? "home-shortcut" : "work-shortcut")
-        .contextMenu {
-            Button("Edit address") { search(as: kind) }
-            if let place { Button("Remove", role: .destructive) { saved.remove(place) } }
-        }
-    }
-    private func favoriteShortcut(_ place: SavedPlace) -> some View {
-        Button { selectDestination(saved.navigationPlace(place)) } label: {
-            shortcutLabel(icon: "star.fill", title: place.name, subtitle: "", tint: StarPilotTheme.accent)
-        }
-        .buttonStyle(.plain).disabled(navigation.busy)
-        .contextMenu { Button("Remove favorite", role: .destructive) { saved.remove(place) } }
-    }
-    private func shortcutLabel(icon: String, title: String, subtitle: String, tint: Color) -> some View {
-        VStack(spacing: 8) {
-            Image(systemName: icon).font(.system(size: 25, weight: .semibold)).foregroundStyle(tint)
-                .frame(width: 60, height: 60).background(tint.opacity(0.12), in: Circle())
-            Text(title).font(.subheadline.weight(.semibold)).lineLimit(1)
-            if !subtitle.isEmpty { Text(subtitle).font(.caption).foregroundStyle(.secondary).lineLimit(1) }
-        }.frame(width: 78)
-    }
-    private var destinationPanel: some View {
-        NavigationDestinationPanel(chooseStart: { searchPurpose = .start }, navigation: navigation, connection: connection, saved: saved)
-    }
-    private var tripPanel: some View {
-        TripSummaryRow(navigation: navigation, connection: connection, units: distanceUnits) { navigationOptions }
-    }
-    private var messages: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            if !navigation.sendToComma, !navigation.locationMessage.isEmpty {
-                Button(navigation.locationMessage) { navigation.requestLocation() }.font(.caption)
-            }
-            if navigation.usingComma, !navigation.commaFeedMessage.isEmpty {
-                Text(LocalizedStringKey(navigation.commaFeedMessage)).font(.caption).foregroundStyle(.orange)
-                if !connection.app.transport.connected {
-                    Button("Open Settings to reconnect", action: openSettings).font(.caption.weight(.medium))
-                } else if !navigation.error.isEmpty {
-                    Text("If this continues, open ••• → Reset navigation, then choose your destination again.").font(.caption).foregroundStyle(.secondary)
-                }
-            }
-            if !navigation.navigating, !saved.message.isEmpty { Text(LocalizedStringKey(saved.message)).font(.caption).foregroundStyle(.secondary) }
-        }.fixedSize(horizontal: false, vertical: true)
-    }
-    private var turnSymbol: String {
-        if navigation.usingComma && !navigation.commaFeedReady { return "antenna.radiowaves.left.and.right" }
-        let text = (navigation.usingComma ? navigation.commaManeuverType + " " + navigation.commaManeuverModifier : navigation.instruction).lowercased()
-        if text.contains("roundabout") { return "arrow.triangle.2.circlepath" }
-        if text.contains("u-turn") { return "arrow.uturn.down" }
-        if text.contains("left") { return "arrow.turn.up.left" }
-        if text.contains("right") { return "arrow.turn.up.right" }
-        return "arrow.up"
-    }
-    private func search(as kind: SavedPlaceKind? = nil) {
-        searchPurpose = kind == .home ? .home : kind == .work ? .work : kind == .favorite ? .favorite : .destination
-    }
-    private func selectDestination(_ place: NavigationPlace) {
-        guard !navigation.busy, !navigation.navigating else { return }
-        panelLevel = .standard
-        saved.rememberDestination(place)
-        Task { await navigation.select(place) }
-    }
-    private func distance(_ meters: Double) -> String {
-        distanceUnits.text(meters)
-    }
-}
-
-private struct QueuedPlaceStatus: View {
+struct QueuedPlaceStatus: View {
     @ObservedObject private var inbox = ShareInbox.shared
     var body: some View {
         if let pending = inbox.waiting, let place = pending.place {
@@ -931,19 +604,9 @@ private struct QueuedPlaceStatus: View {
 
 private struct NavigationDestinationPanel: View {
     @AppStorage("navigation.offerPhoneTrip") private var offerPhoneTrip = false
-    @AppStorage("navigation.parkedPhonePreview") private var parkedPreview = false
     @AppStorage("navigation.phoneRouter") private var router = "Automatic"
-    @AppStorage(NavigationMapPreference.tokenKey) private var mapToken = ""
-    @State private var navigatorTrip: NavigatorTrip?
-    private struct NavigatorTrip: Identifiable {
-        let id = UUID()
-        let origin: CLLocationCoordinate2D
-        let destination: CLLocationCoordinate2D
-        let token: String
-    }
-
+    @AppStorage("navigation.parkedPhonePreview") private var parkedPreview = false
     @AppStorage(NavigationDistanceUnits.key) private var distanceUnits = NavigationDistanceUnits.system
-    @ObservedObject private var inbox = ShareInbox.shared
     let chooseStart: () -> Void
     @ObservedObject var navigation: NavigationModel
     @ObservedObject var connection: CommaConnection
@@ -1005,54 +668,8 @@ private struct NavigationDestinationPanel: View {
                     .font(.footnote).foregroundStyle(.secondary)
             }
 
-            if navigation.sendToComma && !offerPhoneTrip {
-                let queued = inbox.waiting?.place
-                let samePlace = queued != nil && queued?.latitude == navigation.destination?.coordinate.latitude
-                    && queued?.longitude == navigation.destination?.coordinate.longitude
-                Button {
-                    if connection.connected {
-                        if let pending = inbox.waiting { inbox.cancelQueuedPlace(pending.id) }
-                        Task { await navigation.start(connection: connection) }
-                    } else if let place = navigation.destination { inbox.queuePlace(place) }
-                } label: {
-                    Text(navigation.busy ? "Sending destination…" : samePlace ? "Queued for comma" :
-                            connection.connected ? "Send to comma" : queued == nil ? "Send when connected" : "Replace queued destination")
-                        .font(.headline).frame(maxWidth: .infinity).padding(.vertical, 5)
-                }
-                .buttonStyle(.borderedProminent)
-                .disabled(navigation.busy || samePlace)
-                Text(connection.connected ? "Your comma calculates the turns. Choose iPhone above to get directions using your phone instead." : "Send when connected queues the destination for your comma. Choose iPhone above for directions now.")
-                    .font(.footnote).foregroundStyle(.secondary)
-            } else if !offerPhoneTrip, let external = ExternalNavigator(rawValue: router), let place = navigation.destination,
-                      let url = external.directions(to: place.coordinate) {
-                Link("Open destination in " + external.rawValue, destination: url)
-                    .buttonStyle(.borderedProminent)
-                Text("The selected service opens with your destination and handles guidance from your location.")
-                    .font(.footnote).foregroundStyle(.secondary)
-            } else if !offerPhoneTrip && router == "Mapbox Navigator" && navigation.plannedStart == nil {
-                Button("Start Mapbox Navigator on iPhone") {
-                    guard let place = navigation.destination else { return }
-                    guard mapToken.hasPrefix("pk.") else {
-                        navigation.error = "Save a Mapbox public token in Navigation settings."
-                        return
-                    }
-                    guard let origin = navigation.goodLocation else {
-                        navigation.requestLocation()
-                        navigation.error = "Waiting for an accurate current location."
-                        return
-                    }
-                    navigatorTrip = NavigatorTrip(origin: origin.coordinate, destination: place.coordinate, token: mapToken)
-                }
-                .buttonStyle(.borderedProminent)
-                .fullScreenCover(item: $navigatorTrip) { trip in
-                    MapboxNavigatorScreen(origin: trip.origin, destination: trip.destination, token: trip.token)
-                }
-            } else if navigation.busy {
-                ProgressView("Getting directions…")
-            } else if navigation.routes.isEmpty {
-                Button("Get directions") { Task { await navigation.calculateRoutes(refresh: false) } }
-                    .buttonStyle(.borderedProminent)
-            } else {
+            if (offerPhoneTrip || !navigation.sendToComma), !navigation.busy, !navigation.routes.isEmpty,
+               offerPhoneTrip || ExternalNavigator(rawValue: router) == nil && (router != "Mapbox Navigator" || navigation.plannedStart != nil) {
                 ForEach(Array(navigation.routes.enumerated()), id: \.offset) { index, route in
                     Button { navigation.chooseRoute(index) } label: {
                         HStack {
@@ -1085,41 +702,97 @@ private struct NavigationDestinationPanel: View {
                         Text("Preview with comma supports short Mapbox Driving and Traffic routes.").font(.footnote)
                     }
                 }
-                if navigation.plannedStart == nil {
-                    Button(offerPhoneTrip ? "Start Route" : "Start on iPhone") {
-                        Task { await navigation.start(connection: connection, phoneRouteOnComma: offerPhoneTrip) }
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(offerPhoneTrip && (!connection.connected || navigation.route?.commaPreview == nil))
-                    if offerPhoneTrip {
-                        Text(!connection.connected ? "Connect to your paired comma to start." : navigation.route?.commaPreview == nil
-                             ? "This route exceeds the comma’s route transfer limit. Choose a shorter trip."
-                             : "Uses the selected iPhone route on your comma.").font(.footnote)
-                    }
-                } else {
-                    Text("Preview from your chosen starting point. Use your current location to start guidance.")
-                        .font(.footnote).foregroundStyle(.secondary)
+            }
+            RouteStartAction(navigation: navigation, connection: connection)
+                .buttonStyle(.borderedProminent)
+        }
+    }
+}
+
+struct RouteStartAction: View {
+    @ObservedObject var navigation: NavigationModel
+    @ObservedObject var connection: CommaConnection
+    @ObservedObject private var inbox = ShareInbox.shared
+    @AppStorage("navigation.offerPhoneTrip") private var offerPhoneTrip = false
+    var compact = false
+    @AppStorage("navigation.phoneRouter") private var router = "Automatic"
+    @AppStorage(NavigationMapPreference.tokenKey) private var mapToken = ""
+    @State private var navigatorTrip: NavigatorTrip?
+    private struct NavigatorTrip: Identifiable {
+        let id = UUID()
+        let origin: CLLocationCoordinate2D
+        let destination: CLLocationCoordinate2D
+        let token: String
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            if navigation.sendToComma && !offerPhoneTrip {
+                let queued = inbox.waiting?.place
+                let samePlace = queued != nil && queued?.latitude == navigation.destination?.coordinate.latitude
+                    && queued?.longitude == navigation.destination?.coordinate.longitude
+                Button {
+                    if connection.connected {
+                        if let pending = inbox.waiting { inbox.cancelQueuedPlace(pending.id) }
+                        Task { await navigation.start(connection: connection) }
+                    } else if let place = navigation.destination { inbox.queuePlace(place) }
+                } label: {
+                    Text(navigation.busy ? "Sending destination…" : samePlace ? "Queued for comma" :
+                            connection.connected ? "Send to comma" : queued == nil ? "Send when connected" : "Replace queued destination")
+                        .font(.headline).frame(maxWidth: .infinity).padding(.vertical, 5)
                 }
+                .disabled(navigation.busy || samePlace)
+                if !compact {
+                    Text(connection.connected ? "Your comma calculates the turns. Choose iPhone above to get directions using your phone instead." : "Send when connected queues the destination for your comma. Choose iPhone above for directions now.")
+                    .font(.footnote).foregroundStyle(.secondary)
+                }
+            } else if !offerPhoneTrip, let external = ExternalNavigator(rawValue: router), let place = navigation.destination,
+                      let url = external.directions(to: place.coordinate) {
+                Link("Open destination in " + external.rawValue, destination: url)
+                if !compact {
+                    Text("The selected service opens with your destination and handles guidance from your location.")
+                    .font(.footnote).foregroundStyle(.secondary)
+                }
+            } else if !offerPhoneTrip && router == "Mapbox Navigator" && navigation.plannedStart == nil {
+                Button("Start Mapbox Navigator on iPhone") {
+                    guard let place = navigation.destination else { return }
+                    guard mapToken.hasPrefix("pk.") else {
+                        navigation.error = "Save a Mapbox public token in Navigation settings."
+                        return
+                    }
+                    guard let origin = navigation.goodLocation else {
+                        navigation.requestLocation()
+                        navigation.error = "Waiting for an accurate current location."
+                        return
+                    }
+                    navigatorTrip = NavigatorTrip(origin: origin.coordinate, destination: place.coordinate, token: mapToken)
+                }
+                .fullScreenCover(item: $navigatorTrip) { trip in
+                    MapboxNavigatorScreen(origin: trip.origin, destination: trip.destination, token: trip.token)
+                }
+            } else if navigation.busy {
+                ProgressView("Getting directions…")
+            } else if navigation.routes.isEmpty {
+                Button("Get directions") { Task { await navigation.calculateRoutes(refresh: false) } }
+            } else if navigation.plannedStart == nil {
+                Button(offerPhoneTrip ? "Start Route" : "Start on iPhone") {
+                    Task { await navigation.start(connection: connection, phoneRouteOnComma: offerPhoneTrip) }
+                }
+                .disabled(offerPhoneTrip && (!connection.connected || navigation.route?.commaPreview == nil))
+                if offerPhoneTrip && (!compact || !connection.connected || navigation.route?.commaPreview == nil) {
+                    Text(!connection.connected ? "Connect to your paired comma to start." : navigation.route?.commaPreview == nil
+                         ? "This route exceeds the comma’s route transfer limit. Choose a shorter trip."
+                         : "Uses the selected iPhone route on your comma.").font(.footnote)
+                }
+            } else {
+                Text("Preview from your chosen starting point. Use your current location to start guidance.")
+                    .font(.footnote).foregroundStyle(.secondary)
             }
         }
     }
 }
 
-private struct NavigationMapBackground: ViewModifier {
-    func body(content: Content) -> some View {
-        content
-            .ignoresSafeArea(.container)
-            .overlay {
-                LinearGradient(colors: [Color.purple.opacity(0.035), Color.purple.opacity(0.01), .clear],
-                               startPoint: .topTrailing, endPoint: .bottomLeading)
-                    .ignoresSafeArea(.container)
-                    .allowsHitTesting(false)
-                    .accessibilityHidden(true)
-            }
-    }
-}
-
-private struct ParkedPhoneRoutePreview: View {
+struct ParkedPhoneRoutePreview: View {
     let bodyData: Data
     @ObservedObject var connection: CommaConnection
     @State private var loading = false

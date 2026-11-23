@@ -612,7 +612,23 @@ final class NavigationModel: NSObject, ObservableObject, @preconcurrency CLLocat
     }
     func calculateRoutes(refresh: Bool) async {
         #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("--ui-testing") { return }
+        if ProcessInfo.processInfo.arguments.contains("--ui-testing") {
+            #if targetEnvironment(simulator)
+            if ProcessInfo.processInfo.arguments.contains("--preview-navigation-planner"), let destination {
+                let end = destination.coordinate
+                let origin = CLLocationCoordinate2D(latitude: end.latitude - 0.014, longitude: end.longitude - 0.008)
+                routes = [("Front Street", 600.0, 2300.0), ("King Street", 720.0, 2750.0)].enumerated().map { index, sample in
+                    let corner = index == 0 ? CLLocationCoordinate2D(latitude: origin.latitude, longitude: end.longitude)
+                                            : CLLocationCoordinate2D(latitude: end.latitude, longitude: origin.longitude)
+                    let line = MKPolyline(coordinates: [origin, corner, end], count: 3)
+                    return PhoneRoute(name: sample.0, distance: sample.2, expectedTravelTime: sample.1, polyline: line, steps: [])
+                }
+                chooseRoute(0)
+                locationMessage = ""
+            }
+            #endif
+            return
+        }
         #endif
         onEvent?("Route calculation requested; refresh: \(refresh); destination: \(destination != nil); active: \(foreground); calculating: \(recalculating)")
         guard let destination, foreground, !sendToComma, !commandRunning, !recalculating else { onEvent?("Route calculation skipped by current state"); return }

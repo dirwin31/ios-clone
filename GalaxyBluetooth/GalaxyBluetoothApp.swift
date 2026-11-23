@@ -1152,6 +1152,11 @@ struct GalaxyRootView: View {
         }
         .task(id: scenePhase) {
 #if targetEnvironment(simulator)
+            if ProcessInfo.processInfo.arguments.contains("--preview-navigation-planner") {
+                model.navigationEnabled = true
+                model.tab = .navigation
+                return
+            }
             if ProcessInfo.processInfo.arguments.contains("--preview-route") {
                 model.developerMode = true; model.navigationEnabled = true
                 let nav = model.navigationServices.navigation
