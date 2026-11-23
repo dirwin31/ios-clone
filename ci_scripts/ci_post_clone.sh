@@ -65,6 +65,11 @@ else
 fi
 
 # Integrated navigation uses the existing destination API and never replays writes.
+sed -n '/^struct PhoneRoute {/,/^import CoreLocation/{ /^import CoreLocation/!p; }' GalaxyBluetooth/Navigation/NavigationModel.swift > "$test_dir/phone-route-body"
+{ echo 'import MapKit'; cat "$test_dir/phone-route-body"; } > "$test_dir/PhoneRoute.swift"
+swiftc -module-cache-path "$test_dir/module-cache" -swift-version 5 -parse-as-library "$test_dir/PhoneRoute.swift" tests/MappedJunctionRegression.swift -o "$test_dir/junction-tests"
+"$test_dir/junction-tests"
+
 swiftc -module-cache-path "$test_dir/module-cache" -swift-version 5 -parse-as-library GalaxyBluetooth/Wire.swift GalaxyBluetooth/GalaxyRequestTransport.swift GalaxyBluetooth/Navigation/NavigationContract.swift GalaxyBluetooth/Navigation/CommaRoute.swift GalaxyBluetooth/Navigation/NativeNavigationAPI.swift tests/NativeNavigationRegression.swift -o "$test_dir/native-navigation-tests"
 "$test_dir/native-navigation-tests"
 

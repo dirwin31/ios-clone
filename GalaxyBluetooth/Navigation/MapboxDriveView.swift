@@ -114,6 +114,7 @@ struct NavigationMapSettings: View {
     @AppStorage(AppPreference.rememberDestinations) private var remember = true
     @AppStorage(NavigationDistanceUnits.key) private var units = NavigationDistanceUnits.system
     @AppStorage("navigation.phoneRouter") private var router = "Automatic"
+    @AppStorage("navigation.mappedJunctions") private var mappedJunctions = false
     @AppStorage("navigation.offerAlternatives") private var alternatives = true
     @AppStorage("navigation.avoidTolls") private var tolls = false
     @AppStorage("navigation.avoidFerries") private var ferries = false
@@ -254,6 +255,10 @@ struct NavigationMapSettings: View {
                 ForEach(["Automatic", "Apple Maps", "Mapbox Driving", "Mapbox Traffic", "Mapbox Navigator"] + ExternalNavigator.allCases.map(\.rawValue), id: \.self) { Text($0).tag($0) }
             }
             if ExternalNavigator(rawValue: router) == nil { Toggle("Offer alternative routes", isOn: $alternatives) }
+            if ["Mapbox Driving", "Mapbox Traffic"].contains(router) || (router == "Automatic" && enabled && token.hasPrefix("pk.")) {
+                Toggle("Show mapped intersections on iPhone", isOn: $mappedJunctions)
+                Text("During iPhone guidance, see signs, lights and rail crossings mapped at an upcoming junction. A sign may face another road. The navigation log records when a label appears or clears for drive review.").font(.footnote)
+            }
             if router.hasPrefix("Mapbox") || (router == "Automatic" && enabled && token.hasPrefix("pk.")) {
                 NavigationLink("Roads and vehicle preferences") {
                     Form {

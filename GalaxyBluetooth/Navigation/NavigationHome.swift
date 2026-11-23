@@ -255,6 +255,10 @@ private struct StandardNavigationHome: View {
                         VStack(alignment: .leading, spacing: 4) {
                             ManeuverDistance(label: navigation.usingComma && !navigation.commaFeedReady ? "—" : distance(navigation.distanceToTurn))
                             Text(LocalizedStringKey(navigation.instruction)).font(.title3.weight(.semibold)).lineLimit(3)
+                            if let junction = navigation.mappedJunction {
+                                Text("Mapped at junction · \(junction.labels) · \(distance(Double(junction.meters)))")
+                                    .font(.subheadline).fixedSize(horizontal: false, vertical: true)
+                            }
                         }
                         Spacer(minLength: 0)
                     }
@@ -730,6 +734,10 @@ private struct DuoNavigationHome: View {
                         VStack(alignment: .leading, spacing: 4) {
                             ManeuverDistance(label: navigation.usingComma && !navigation.commaFeedReady ? "—" : distance(navigation.distanceToTurn))
                             Text(LocalizedStringKey(navigation.instruction)).font(.title3.weight(.semibold)).lineLimit(3)
+                            if let junction = navigation.mappedJunction {
+                                Text("Mapped at junction · \(junction.labels) · \(distance(Double(junction.meters)))")
+                                    .font(.subheadline).fixedSize(horizontal: false, vertical: true)
+                            }
                         }
                         Spacer(minLength: 0)
                     }
@@ -992,7 +1000,9 @@ private struct NavigationDestinationPanel: View {
             .disabled(navigation.busy)
 
             if !navigation.sendToComma {
-                Text("Your phone handles directions for this trip. Starting it leaves any route on your comma alone.")
+                Text(offerPhoneTrip && ["Mapbox Driving", "Mapbox Traffic", "Automatic"].contains(router)
+                    ? "Your iPhone calculates the route. Choose Start this route on comma to send a compatible route to your parked device, or Start on iPhone for phone guidance."
+                    : "Your phone handles directions for this trip. Starting it leaves any route on your comma alone.")
                     .font(.footnote).foregroundStyle(.secondary)
             }
 
@@ -1083,6 +1093,11 @@ private struct NavigationDestinationPanel: View {
                         }
                         .buttonStyle(.bordered)
                         .disabled(!connection.connected)
+                        if !connection.connected {
+                            Text("Connect to your paired comma to send this route.").font(.footnote)
+                        }
+                    } else if offerPhoneTrip {
+                        Text("To send the route itself, choose Mapbox Driving or Mapbox Traffic and try a shorter trip.").font(.footnote)
                     }
                     Button("Start on iPhone") { Task { await navigation.start(connection: connection) } }
                         .buttonStyle(.borderedProminent)

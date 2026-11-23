@@ -24,6 +24,34 @@ enum ExternalNavigator: String, CaseIterable {
 }
 
 struct PhoneRoute {
+    // A junction annotation describes the map. It doesn't assign right of way.
+    struct Intersection: Decodable {
+        let geometry_index: Int?
+        let location: [Double]?
+        let stop_sign, traffic_signal, yield_sign, railway_crossing: Bool?
+
+        var labels: [String] {
+            var result: [String] = []
+            if stop_sign == true { result.append("stop sign") }
+            if traffic_signal == true { result.append("traffic light") }
+            if yield_sign == true { result.append("yield sign") }
+            if railway_crossing == true { result.append("rail crossing") }
+            return result
+        }
+    }
+
+    struct MappedJunction {
+        let index: Int
+        let labels: String
+        let point: MKMapPoint
+    }
+
+    struct JunctionObservation: Equatable {
+        let index: Int
+        let labels: String
+        let meters: Int
+    }
+
     struct Step {
         var maneuverType: String? = nil
         var modifier: String? = nil
@@ -37,6 +65,40 @@ struct PhoneRoute {
     let polyline: MKPolyline
     let steps: [Step]
     var commaPreview: Data? = nil
+    var junctions: [MappedJunction] = []
+
+    func upcomingJunction(at fix: CLLocation) -> JunctionObservation? {
+        guard fix.horizontalAccuracy >= 0, fix.horizontalAccuracy <= 15,
+              abs(fix.timestamp.timeIntervalSinceNow) <= 3, fix.speed >= 2, fix.course >= 0 else { return nil }
+        let position = MKMapPoint(fix.coordinate)
+        let points = polyline.points()
+        var closest: JunctionObservation?
+        for junction in junctions where position.distance(to: junction.point) <= 130 {
+            var downstream = 0.0
+            for index in stride(from: junction.index, to: 0, by: -1) {
+                let a = points[index - 1], b = points[index]
+                let length = a.distance(to: b)
+                if length < 0.1 { continue }
+                let dx = b.x - a.x, dy = b.y - a.y
+                let fraction = ((position.x - a.x) * dx + (position.y - a.y) * dy) / (dx * dx + dy * dy)
+                let heading = atan2(dx, -dy) * 180 / .pi
+                if (0...1).contains(fraction),
+                   cos((fix.course - heading) * .pi / 180) >= cos(30 * .pi / 180) {
+                    let projected = MKMapPoint(x: a.x + fraction * dx, y: a.y + fraction * dy)
+                    let ahead = downstream + (1 - fraction) * length
+                    if position.distance(to: projected) <= 12, (5...120).contains(ahead) {
+                        let meters = Int(ahead.rounded())
+                        if meters < (closest?.meters ?? Int.max) {
+                            closest = JunctionObservation(index: junction.index, labels: junction.labels, meters: meters)
+                        }
+                    }
+                }
+                downstream += length
+                if downstream > 120 { break }
+            }
+        }
+        return closest
+    }
 }
 
 extension PhoneRoute {
@@ -68,6 +130,23 @@ extension PhoneRoute {
                 let distance: Double
                 let maneuver: Maneuver
                 let duration: Double
+                // Optional map annotations must never prevent decoding normal directions.
+                let intersections: [Intersection]
+                private struct Entry: Decodable {
+                    let value: Intersection?
+                    init(from decoder: Decoder) { value = try? Intersection(from: decoder) }
+                }
+                enum CodingKeys: String, CodingKey {
+                    case geometry, distance, maneuver, duration, intersections
+                }
+                init(from decoder: Decoder) throws {
+                    let fields = try decoder.container(keyedBy: CodingKeys.self)
+                    geometry = try fields.decode(Geometry.self, forKey: .geometry)
+                    distance = try fields.decode(Double.self, forKey: .distance)
+                    maneuver = try fields.decode(Maneuver.self, forKey: .maneuver)
+                    duration = try fields.decode(Double.self, forKey: .duration)
+                    intersections = (try? fields.decode([Entry].self, forKey: .intersections))?.compactMap(\.value) ?? []
+                }
             }
             let steps: [Segment]
             let summary: String
@@ -104,6 +183,10 @@ extension PhoneRoute {
         guard let endpoint = url.url else { throw URLError(.badURL) }
         let (data, response) = try await URLSession.shared.data(from: endpoint)
         guard (response as? HTTPURLResponse)?.statusCode == 200 else { throw URLError(.badServerResponse) }
+        return try decodeMapboxRoutes(data)
+    }
+
+    static func decodeMapboxRoutes(_ data: Data) throws -> [PhoneRoute] {
         return try JSONDecoder().decode(Response.self, from: data).routes.map { route in
             let segments = route.legs.flatMap(\.steps)
             // Mapbox maneuvers describe the start of each segment. Galaxy announces
@@ -124,8 +207,21 @@ extension PhoneRoute {
                 if let encoded = try? JSONSerialization.data(withJSONObject: ["version": 1, "route": document]),
                    encoded.count <= 65536 { preview = encoded }
             }
+            let line = try route.geometry.line()
+            var labelsByIndex: [Int: Set<String>] = [:]
+            if route.legs.count == 1 {
+                for feature in segments.flatMap(\.intersections) {
+                    guard let index = feature.geometry_index, index > 0, index < line.pointCount,
+                          let location = feature.location, location.count == 2,
+                          location == route.geometry.coordinates[index], !feature.labels.isEmpty else { continue }
+                    labelsByIndex[index, default: []].formUnion(feature.labels)
+                }
+            }
+            let junctions = labelsByIndex.map { index, labels in
+                MappedJunction(index: index, labels: labels.sorted().joined(separator: ", "), point: line.points()[index])
+            }.sorted { $0.index < $1.index }
             return PhoneRoute(name: route.legs.map(\.summary).joined(separator: ", "), distance: route.distance,
-                             expectedTravelTime: route.duration, polyline: try route.geometry.line(), steps: steps, commaPreview: preview)
+                             expectedTravelTime: route.duration, polyline: line, steps: steps, commaPreview: preview, junctions: junctions)
         }
     }
 }
@@ -151,8 +247,18 @@ final class NavigationModel: NSObject, ObservableObject, @preconcurrency CLLocat
     @Published var results: [NavigationPlace] = []
     @Published var destination: NavigationPlace?
     @Published private(set) var plannedStart: NavigationPlace?
-    @Published var routes: [PhoneRoute] = []
-    @Published var selectedRoute = 0
+    @Published var routes: [PhoneRoute] = [] { didSet { updateJunction(nil) } }
+    @Published var selectedRoute = 0 { didSet { if oldValue != selectedRoute { updateJunction(nil) } } }
+    @Published private(set) var mappedJunction: PhoneRoute.JunctionObservation?
+    private func updateJunction(_ next: PhoneRoute.JunctionObservation?) {
+        guard next != mappedJunction else { return }
+        if next?.index != mappedJunction?.index || next?.labels != mappedJunction?.labels {
+            if let next {
+                onEvent?("Mapped junction: \(next.labels), route vertex \(next.index), \(next.meters) m ahead")
+            } else { onEvent?("Mapped junction cleared") }
+        }
+        mappedJunction = next
+    }
     @Published var usingComma = false
     @Published var commaPolyline: MKPolyline?
     @Published private(set) var positionDisplayGeneration = 0
@@ -247,6 +353,7 @@ final class NavigationModel: NSObject, ObservableObject, @preconcurrency CLLocat
         foreground = active
         if active, [.authorizedWhenInUse, .authorizedAlways].contains(manager.authorizationStatus) { manager.startUpdatingLocation() }
         if !active {
+            updateJunction(nil)
             if usingComma { clearCommaDisplay("Reconnecting to comma…") }
             manager.stopUpdatingLocation()
             directions?.cancel(); cancelPlaceSearch()
@@ -273,6 +380,9 @@ final class NavigationModel: NSObject, ObservableObject, @preconcurrency CLLocat
     func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
         guard foreground, let latest = locations.last else { return }
         location = latest
+        if navigating, !usingComma, UserDefaults.standard.bool(forKey: "navigation.mappedJunctions") {
+            updateJunction(route?.upcomingJunction(at: latest))
+        } else { updateJunction(nil) }
         guard let fresh = goodLocation else { locationMessage = "Waiting for a reliable GPS location."; return }
         locationMessage = ""
         guard navigating, !usingComma, let route else { return }
@@ -542,7 +652,7 @@ final class NavigationModel: NSObject, ObservableObject, @preconcurrency CLLocat
                 guard generation == commandGeneration else { return }
                 onEvent?("Destination confirmed by comma")
                 commaDestination = destination.coordinate; commaIdentity = identity
-                notice = ""
+                notice = phoneRouteOnComma ? "Your comma accepted the route calculated on iPhone." : ""
             } catch {
                 guard generation == commandGeneration else { return }
                 onEvent?("Go failed; send phase: \(sending); \(LANTransport.failureCode(error))")
@@ -706,6 +816,11 @@ final class NavigationModel: NSObject, ObservableObject, @preconcurrency CLLocat
     }
     private var commaPositionExpires: Date?
     func checkCommaFreshness() {
+        if mappedJunction != nil,
+           !UserDefaults.standard.bool(forKey: "navigation.mappedJunctions") ||
+           abs(location?.timestamp.timeIntervalSinceNow ?? .infinity) > 3 {
+            updateJunction(nil)
+        }
         if let expires = commaPositionExpires, Date() >= expires { commaPosition = nil }
         if usingComma, commaFeedReady, Date().timeIntervalSince(lastCommaSample) >= guidanceMaxAge {
             clearCommaDisplay("Comma navigation is stale. Reconnecting…")
