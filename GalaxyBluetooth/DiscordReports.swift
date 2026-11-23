@@ -442,7 +442,7 @@ struct DiscordReportSheet: View {
                         }.tint(.blue).disabled(discord.busy || (discord.threadURL == nil && (!discord.connected || description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || description.count > 1000)))
                     }
                 }
-                .pageSheet(isPresented: $showDestination, onDismiss: {
+                .sheet(isPresented: $showDestination, onDismiss: {
                     guard sendAfterDestination else { return }
                     sendAfterDestination = false
                     submitReport()

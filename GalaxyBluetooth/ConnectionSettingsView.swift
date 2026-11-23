@@ -22,7 +22,6 @@ struct ConnectionSettingsView: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @SceneStorage("settings.navigationExpanded") private var navigationExpanded = false
     @AppStorage(AppPreference.openGalaxy) private var autoOpenGalaxy = true
-    @AppStorage(AppPreference.arrival) private var showArrival = true
     @AppStorage(AppPreference.toolbarLabels) private var toolbarLabels = true
     @AppStorage(AppPreference.liveScreenAwake) private var keepLiveAwake = true
     @AppStorage(AppPreference.rememberDestinations) private var rememberDestinations = true
@@ -107,7 +106,7 @@ struct ConnectionSettingsView: View {
                 .init(color: model.navigationEnabled ? panel.opacity(0.8) : background, location: 1)
             ], startPoint: .top, endPoint: .bottom).ignoresSafeArea()
         }.foregroundStyle(Color.primary)
-            .pageSheet(isPresented: $showMapSettings) {
+            .sheet(isPresented: $showMapSettings) {
                 NavigationMapSettings()
             }
             .alert("Enable navigation alpha?", isPresented: $confirmNavigationAlpha) {
@@ -120,7 +119,7 @@ struct ConnectionSettingsView: View {
             .onChange(of: pairing) { _, value in if value { openAfterReconnect = false } }
             .onChange(of: model.opened) { _, _ in openReconnectedGalaxy() }
             .onChange(of: model.wantsConnection) { _, value in if !value { openAfterReconnect = false } }
-            .pageSheet(isPresented: $showOrder) {
+            .sheet(isPresented: $showOrder) {
                 NavigationStack {
                     List {
                         Section {
@@ -137,7 +136,7 @@ struct ConnectionSettingsView: View {
                         .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { showOrder = false } } }
                 }.presentationDetents([.medium, .large])
             }
-            .pageSheet(isPresented: $showTunnel) { TunnelSetupView(model: model) }
+            .sheet(isPresented: $showTunnel) { TunnelSetupView(model: model) }
             .tint(accent)
             .alert("Join comma’s hotspot", isPresented: $showHotspotJoin) {
                 Button("OK", role: .cancel) {}
@@ -504,10 +503,6 @@ struct ConnectionSettingsView: View {
                 separator
                 toggleRow("sparkles", title: "Galactical Animations", subtitle: "Animate button presses, tab selection, and connection changes", isOn: $galacticalAnimations)
                 separator
-                if galacticalAnimations {
-                    toggleRow("sparkle", title: "Page transitions", subtitle: "Sweep stardust between app pages", isOn: $showArrival)
-                    separator
-                }
                 toggleRow("textformat", title: "Galaxy toolbar labels", subtitle: "Show names below icons when the toolbar has room", isOn: $toolbarLabels)
                 separator
                 row("rectangle.on.rectangle", title: "Galaxy screens", subtitle: pairing ? "Waiting for pairing" : checking ? "Checking version…" : assets.status == "Galaxy matches comma." ? "Up to date · just checked" : assets.status.contains("screens have changed") ? "Update available · connect over Wi-Fi or Tunnel" : assets.readyRoot != nil ? "Saved from your comma" : "Not downloaded · needs Local Wi-Fi or Tunnel") {

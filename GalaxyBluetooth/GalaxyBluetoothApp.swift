@@ -946,7 +946,6 @@ final class AppModel: ObservableObject {
 
 enum AppPreference {
     static let openGalaxy = "galaxy.app.openAfterConnection"
-    static let arrival = "galaxy.app.arrival"
     static let toolbarLabels = "galaxy.app.toolbarLabels"
     static let rememberDestinations = "galaxy.app.rememberDestinations"
     static let liveScreenAwake = "galaxy.app.liveScreenAwake"
@@ -983,13 +982,9 @@ struct GalaxyRootView: View {
     @State private var hasVisitedGalaxy = false
     @State private var appTabsExpanded = true
     @State private var showingAppTabsInGalaxy = false
-    @AppStorage(AppPreference.arrival) private var arrivalEnabled = true
-    @State private var arrivalID: UUID?
-    @State private var departingPage: CompanionTab?
     private var motionDisabled: Bool { reduceMotion || !galacticalAnimations || scenePhase != .active }
     @AppStorage("galaxy.galacticalAnimations") private var galacticalAnimations = true
-    private var page: CompanionTab { departingPage ?? requestedPage }
-    private var requestedPage: CompanionTab { model.tab == .galaxy && !model.opened ? .connections : model.tab }
+    private var page: CompanionTab { model.tab == .galaxy && !model.opened ? .connections : model.tab }
     @Environment(\.colorScheme) private var systemColorScheme
     private var chromeBackground: LinearGradient {
         let dark = systemColorScheme == .dark
@@ -1012,20 +1007,6 @@ struct GalaxyRootView: View {
     }
     var body: some View {
         chrome.environment(\.reduceGalacticalMotion, motionDisabled)
-            .overlay {
-                if let arrivalID, arrivalEnabled, !motionDisabled {
-                    GalaxyArrival(wipesOutgoingPage: departingPage != nil) {
-                        guard self.arrivalID == arrivalID else { return }
-                        var handoff = Transaction(animation: nil)
-                        handoff.disablesAnimations = true
-                        withTransaction(handoff) { departingPage = nil }
-                    } finished: {
-                        if self.arrivalID == arrivalID { self.arrivalID = nil }
-                    }
-                    .id(arrivalID)
-                    .ignoresSafeArea().allowsHitTesting(false).accessibilityHidden(true)
-                }
-            }
             .preferredColorScheme(appearance.scheme)
     }
     @ViewBuilder private var chrome: some View {
@@ -1118,22 +1099,7 @@ struct GalaxyRootView: View {
             if DuoLayout.isEnabled && page == .navigation { Color.clear }
             else { chromeBackground.ignoresSafeArea() }
         }
-        .onChange(of: requestedPage) { previous, next in
-            showingAppTabsInGalaxy = false
-            if arrivalEnabled, !motionDisabled {
-                departingPage = departingPage ?? previous
-                arrivalID = UUID()
-            } else {
-                departingPage = nil
-                arrivalID = nil
-            }
-        }
-        .onChange(of: motionDisabled || !arrivalEnabled) { _, disabled in
-            if disabled {
-                departingPage = nil
-                arrivalID = nil
-            }
-        }
+        .onChange(of: page) { _, _ in showingAppTabsInGalaxy = false }
         .ignoresSafeArea(.container, edges: editorFocused ? .all : [])
         .statusBarHidden(editorFocused)
         .onChange(of: model.showConnections) { _, show in
@@ -1143,7 +1109,7 @@ struct GalaxyRootView: View {
             if show { if model.developerMode { select(.live) }; model.showDiagnostics = false }
         }
         .onChange(of: bluetooth.connected) { _, connected in if connected { model.openIfReady() } }
-        .pageSheet(item: $discordReport, onDismiss: {
+        .sheet(item: $discordReport, onDismiss: {
             // Let the native sheet finish closing before animating back to Settings.
             if reportWasSent {
                 reportWasSent = false
@@ -1152,7 +1118,7 @@ struct GalaxyRootView: View {
         }) { capture in
             DiscordReportSheet(logs: capture.logs, captureLogs: captureReportLogs) { reportWasSent = true }
         }
-        .pageSheet(isPresented: $model.showAudioPairing, onDismiss: { model.audioPairing.dismiss() }) {
+        .sheet(isPresented: $model.showAudioPairing, onDismiss: { model.audioPairing.dismiss() }) {
             AudioPairingSheet(pairing: model.audioPairing) { model.showAudioPairing = false }
         }
         .alert("Bluetooth access needed", isPresented: $model.showBluetoothPermission) {
@@ -1256,198 +1222,6 @@ struct CompanionPressStyle: ButtonStyle {
             .animation(reduceMotion ? nil : (pressed ? .easeOut(duration: 0.08) : CompanionMotion.selection),
                        value: pressed)
             .contentShape(Rectangle())
-    }
-}
-
-private struct GalaxyArrival: UIViewRepresentable {
-    var wipesOutgoingPage = false
-    let reveal: () -> Void
-    let finished: () -> Void
-
-    func makeUIView(context: Context) -> DustView { DustView() }
-
-    func updateUIView(_ view: DustView, context: Context) {
-        view.wipesOutgoingPage = wipesOutgoingPage
-        view.reveal = reveal
-        view.finished = finished
-    }
-
-    static func dismantleUIView(_ view: DustView, coordinator: ()) {
-        view.cancel()
-    }
-
-    final class DustView: UIView, CAAnimationDelegate {
-        var reveal: (() -> Void)?
-        var finished: (() -> Void)?
-        private static let duration: CFTimeInterval = 0.48
-        private static let texture: CGImage? = {
-            guard let original = UIImage(named: "GalaxyDust")?.cgImage else { return nil }
-            let mist = CIImage(cgImage: original).applyingFilter("CIColorControls",
-                                                                parameters: [kCIInputSaturationKey: 0.28])
-            return CIContext().createCGImage(mist, from: mist.extent) ?? original
-        }()
-        private let dust = CALayer()
-        private let cloud = CAGradientLayer()
-        private let stars = CALayer()
-        var wipesOutgoingPage = false
-        private var outgoing: UIView?
-        private var started = false
-        private var revealed = false
-
-        override init(frame: CGRect) {
-            super.init(frame: frame)
-            isOpaque = false
-            isUserInteractionEnabled = false
-            clipsToBounds = true
-            // Color only the feathered seam between the two pages.
-            let haze = UIColor(red: 0.42, green: 0.45, blue: 0.51, alpha: 0.60)
-            let core = UIColor(red: 0.32, green: 0.35, blue: 0.41, alpha: 0.84)
-            cloud.startPoint = CGPoint(x: 0, y: 0.5)
-            cloud.endPoint = CGPoint(x: 1, y: 0.5)
-            cloud.colors = [haze.withAlphaComponent(0).cgColor, haze.cgColor, core.cgColor,
-                            haze.cgColor, haze.withAlphaComponent(0).cgColor]
-            cloud.locations = [0, 0.14, 0.5, 0.86, 1]
-            dust.addSublayer(cloud)
-            stars.contents = Self.texture
-            dust.addSublayer(stars)
-            dust.zPosition = 1
-            layer.addSublayer(dust)
-        }
-
-        required init?(coder: NSCoder) { nil }
-
-        override func didMoveToWindow() {
-            super.didMoveToWindow()
-            if window != nil { setNeedsLayout() }
-        }
-
-        override func layoutSubviews() {
-            super.layoutSubviews()
-            guard let window, !bounds.isEmpty else { return }
-            let bandWidth = bounds.width * 0.46
-            let slant = CGAffineTransform(a: 1, b: 0, c: -0.65, d: 1, tx: 0, ty: 0)
-            let diagonalSpan = abs(slant.c) * bounds.height
-            let travel = (bounds.width + bandWidth + diagonalSpan) / 2
-            CATransaction.begin()
-            CATransaction.setDisableActions(true)
-            dust.bounds = CGRect(origin: .zero, size: CGSize(width: bandWidth, height: bounds.height))
-            dust.setAffineTransform(slant)
-            cloud.frame = dust.bounds
-            stars.frame = dust.bounds
-            dust.position = CGPoint(x: bounds.midX + travel, y: bounds.midY)
-            CATransaction.commit()
-            guard !started else { return }
-            started = true
-
-            let sweep = CABasicAnimation(keyPath: "position.x")
-            sweep.fromValue = bounds.midX - travel
-            sweep.toValue = bounds.midX + travel
-            sweep.duration = Self.duration
-            sweep.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-            let maximum = Float(min(120, window.screen.maximumFramesPerSecond))
-            sweep.preferredFrameRateRange = CAFrameRateRange(minimum: min(60, maximum), maximum: maximum, preferred: maximum)
-            // Keep the departing pixels ahead of the dust while the live destination is revealed behind it.
-            if wipesOutgoingPage, let snapshot = window.resizableSnapshotView(
-                from: convert(bounds, to: window), afterScreenUpdates: false, withCapInsets: .zero
-            ) {
-                snapshot.frame = bounds
-                snapshot.isUserInteractionEnabled = false
-                addSubview(snapshot)
-                outgoing = snapshot
-
-                let mask = CALayer()
-                mask.anchorPoint = CGPoint(x: 0, y: 0.5)
-                mask.bounds = CGRect(x: 0, y: 0, width: 2 * travel, height: bounds.height)
-                mask.position = CGPoint(x: bounds.midX + travel, y: bounds.midY)
-                mask.setAffineTransform(slant)
-                mask.backgroundColor = UIColor.white.cgColor
-                snapshot.layer.mask = mask
-                mask.add(sweep, forKey: "reveal")
-            }
-            sweep.delegate = self
-            dust.add(sweep, forKey: "sweep")
-        }
-
-        func animationDidStart(_ anim: CAAnimation) {
-            DispatchQueue.main.asyncAfter(deadline: .now() + (outgoing == nil ? Self.duration / 2 : 0)) { [weak self] in
-                self?.revealPage()
-            }
-        }
-
-        private func revealPage() {
-            guard !revealed else { return }
-            revealed = true
-            reveal?()
-        }
-
-        func animationDidStop(_ anim: CAAnimation, finished completed: Bool) {
-            guard completed else { return }
-            revealPage()
-            outgoing?.removeFromSuperview()
-            outgoing = nil
-            finished?()
-        }
-
-        func cancel() {
-            reveal = nil
-            finished = nil
-            outgoing?.removeFromSuperview()
-            outgoing = nil
-            dust.removeAllAnimations()
-        }
-    }
-}
-
-private struct PageDustOverlay: View {
-    @AppStorage(AppPreference.arrival) private var enabled = true
-    @Environment(\.reduceGalacticalMotion) private var reduceMotion
-    let finished: () -> Void
-
-    var body: some View {
-        if enabled && !reduceMotion {
-            GalaxyArrival(reveal: {}, finished: finished)
-                .ignoresSafeArea().allowsHitTesting(false).accessibilityHidden(true)
-        }
-    }
-}
-
-private struct StardustSheet<Item: Identifiable, Panel: View>: ViewModifier {
-    @Binding var item: Item?
-    let onDismiss: (() -> Void)?
-    let panel: (Item) -> Panel
-    @State private var returnWipe: UUID?
-
-    func body(content: Content) -> some View {
-        content.overlay {
-            if let token = returnWipe {
-                PageDustOverlay { if returnWipe == token { returnWipe = nil } }.id(token)
-            }
-        }
-        .sheet(item: $item, onDismiss: {
-            returnWipe = UUID()
-            onDismiss?()
-        }) { value in
-            panel(value).overlay { PageDustOverlay {} }
-        }
-    }
-}
-
-private enum PresentedPage: Identifiable {
-    case visible
-    var id: Self { self }
-}
-
-extension View {
-    func pageSheet<Item: Identifiable, Panel: View>(item: Binding<Item?>, onDismiss: (() -> Void)? = nil,
-                                                     @ViewBuilder content: @escaping (Item) -> Panel) -> some View {
-        modifier(StardustSheet(item: item, onDismiss: onDismiss, panel: content))
-    }
-
-    func pageSheet<Panel: View>(isPresented: Binding<Bool>, onDismiss: (() -> Void)? = nil,
-                                @ViewBuilder content: @escaping () -> Panel) -> some View {
-        let page = Binding<PresentedPage?>(get: { isPresented.wrappedValue ? .visible : nil },
-                                           set: { isPresented.wrappedValue = $0 != nil })
-        return pageSheet(item: page, onDismiss: onDismiss) { _ in content() }
     }
 }
 
