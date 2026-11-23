@@ -16,6 +16,6 @@ Open a place in Apple Maps, Google Maps, or Waze and tap **Share → StarPilot**
 
 ## CarPlay and navigation
 
-CarPlay shows Overview, Memory, CPU, and Toggles. In Toggles, tap **Increase** or **Decrease** to apply one step and see the updated value. Enable **Navigation alpha testing** in Developer mode to add the iPhone navigation interface and a Navigation entry on CarPlay. On displays with room for four tabs, open Navigation from Overview. CarPlay Live View is available for testing on the testing branch. The dev branch also includes notification mirroring.
+CarPlay shows Overview, Memory, CPU, and Toggles. In Toggles, tap **Increase** or **Decrease** to apply one step and see the updated value. Open **Settings → Navigation → Navigation settings** to configure iPhone and CarPlay navigation. On displays with room for four tabs, open Navigation from Overview. CarPlay Live View is available for testing on the testing branch. The dev branch also includes notification mirroring.
 
 For help with a connection, open **Logs & support** in the app. [Connection testing guide](TESTER-GUIDE.md) · [Privacy](docs/privacy.md)

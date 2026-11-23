@@ -24,56 +24,148 @@ private enum PointLabels: String {
     }
 }
 
+
+enum GalaxyAppleMap: String, CaseIterable {
+    case streets = "Street map", hybrid = "Satellite with labels", imagery = "Satellite imagery"
+    var style: MapKit.MapStyle {
+        switch self {
+        case .streets: .standard(elevation: .realistic)
+        case .hybrid: .hybrid(elevation: .realistic)
+        case .imagery: .imagery(elevation: .realistic)
+        }
+    }
+    var configuration: MKMapConfiguration {
+        switch self {
+        case .streets: MKStandardMapConfiguration(elevationStyle: .realistic)
+        case .hybrid: MKHybridMapConfiguration(elevationStyle: .realistic)
+        case .imagery: MKImageryMapConfiguration(elevationStyle: .realistic)
+        }
+    }
+}
+enum GalaxyBasemap: String, CaseIterable {
+    case standard = "Standard", standardSatellite = "Standard Satellite", streets = "Streets", outdoors = "Outdoors", light = "Light", dark = "Dark", satellite = "Satellite", satelliteStreets = "Satellite Streets"
+    var uri: StyleURI {
+        switch self {
+        case .standard: .standard
+        case .standardSatellite: .standardSatellite
+        case .streets: .streets
+        case .outdoors: .outdoors
+        case .light: .light
+        case .dark: .dark
+        case .satellite: .satellite
+        case .satelliteStreets: .satelliteStreets
+        }
+    }
+}
+
 struct NavigationMapSettings: View {
+    @ObservedObject var model: AppModel
     @Environment(\.dismiss) private var dismiss
     @AppStorage(NavigationMapPreference.tokenKey) private var token = ""
     @AppStorage(NavigationMapPreference.enabledKey) private var enabled = true
+    @AppStorage("navigation.appleStyle") private var appleStyle = GalaxyAppleMap.streets
+    @AppStorage("navigation.standardOptions") private var styleData = Data()
+    @AppStorage("navigation.basemap") private var basemap = GalaxyBasemap.standard
+    @AppStorage(NavigationMapPreference.trafficKey) private var traffic = false
+    @AppStorage(AppPreference.rememberDestinations) private var remember = true
+    @AppStorage(NavigationDistanceUnits.key) private var units = NavigationDistanceUnits.system
+    @AppStorage("navigation.phoneRouter") private var router = "Automatic"
+    @AppStorage("navigation.offerAlternatives") private var alternatives = true
+    @AppStorage("navigation.avoidTolls") private var tolls = false
+    @AppStorage("navigation.avoidFerries") private var ferries = false
+    @AppStorage("navigation.avoidMotorways") private var motorways = false
+    @AppStorage("navigation.cameraPitch") private var pitch = 68.0
+    @AppStorage("navigation.zoomAdjustment") private var zoom = 0.0
+    @AppStorage("navigation.sdkSpeedLimits") private var speedLimits = true
+    @AppStorage("navigation.sdkIntersections") private var intersections = true
+    @AppStorage("navigation.sdkDarkTunnels") private var darkTunnels = true
+    @AppStorage("navigation.sdkFadeRoute") private var fadeRoute = true
     @State private var entry = ""
-    @AppStorage(NavigationMapPreference.poiKey) private var savedLabels = PointLabels.always
-    @AppStorage(NavigationMapPreference.placesKey) private var savedPlaces = true
-    @AppStorage(NavigationMapPreference.trafficKey) private var savedTraffic = false
-    @State private var labels = PointLabels.always
-    @State private var places = true
-    @State private var traffic = false
-    private var trimmed: String { entry.trimmingCharacters(in: .whitespacesAndNewlines) }
-
     var body: some View {
         NavigationStack {
             Form {
                 Section {
-                    SecureField("Mapbox public token (pk.…)", text: $entry)
-                        .textInputAutocapitalization(.never).autocorrectionDisabled()
-                    Button("Use Mapbox 3D") {
-                        token = trimmed
-                        savedLabels = labels
-                        savedPlaces = places
-                        savedTraffic = traffic
-                        enabled = true
-                        dismiss()
-                    }.disabled(!trimmed.hasPrefix("pk.") || trimmed.count < 4)
-                    Button("Use Apple Maps") { enabled = false; dismiss() }
-                } footer: {
-                    Text("Mapbox displays the iPhone navigation map and calculates iPhone-guided routes. Comma-guided trips use the route from your comma.")
+                    Toggle("Enable navigation", isOn: $model.navigationEnabled)
+                    Picker("Distance units", selection: $units) {
+                        Text("System").tag(NavigationDistanceUnits.system)
+                        Text("Metric").tag(NavigationDistanceUnits.metric)
+                        Text("Imperial").tag(NavigationDistanceUnits.imperial)
+                    }
+                    Toggle("Remember destinations", isOn: $remember)
+                } header: { Text("Trips") } footer: { Text("Recents are stored on this iPhone.") }
+                Section {
+                    Picker("Directions provider", selection: $router) {
+                        ForEach(["Automatic", "Apple Maps", "Mapbox Driving", "Mapbox Traffic", "Mapbox Navigator"], id: \.self) { Text($0).tag($0) }
+                    }
+                    Toggle("Offer alternative routes", isOn: $alternatives)
+                    if router.hasPrefix("Mapbox") || (router == "Automatic" && enabled && token.hasPrefix("pk.")) {
+                        Toggle("Avoid toll roads", isOn: $tolls)
+                        Toggle("Avoid ferries", isOn: $ferries)
+                        Toggle("Avoid motorways", isOn: $motorways)
+                    }
+                } header: { Text("iPhone directions") } footer: {
+                    Text("Automatic follows the selected map. Mapbox Traffic uses reported road speeds when calculating a drive. These preferences apply when you choose iPhone on the destination card. Comma guidance uses your comma’s routing settings and internet connection.")
                 }
                 Section {
-                    Picker("Stores & points of interest", selection: $labels) {
-                        Text("Always").tag(PointLabels.always)
-                        Text("Fewer during guidance").tag(PointLabels.automatic)
-                        Text("Only while browsing").tag(PointLabels.browsing)
-                        Text("Off").tag(PointLabels.off)
+                    Picker("Display map", selection: $enabled) {
+                        Text("Apple Maps").tag(false)
+                        Text("Mapbox").tag(true)
                     }
-                    Toggle("City & neighborhood names", isOn: $places)
-                    Toggle("Traffic congestion", isOn: $traffic)
-                } header: { Text("Mapbox display") } footer: {
-                    Text("Traffic shows reported slowdowns from amber to dark red. Choose Use Mapbox 3D to save.")
+                    if !enabled {
+                        Picker("Apple map style", selection: $appleStyle) {
+                            ForEach(GalaxyAppleMap.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+                        }
+                    }
+                    SecureField("Mapbox public token (pk.…)", text: $entry)
+                        .textInputAutocapitalization(.never).autocorrectionDisabled()
+                    if entry != token {
+                        Button("Save public token") { token = entry.trimmingCharacters(in: .whitespacesAndNewlines); entry = token }
+                            .disabled(!entry.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("pk."))
+                    }
+                    if enabled && !token.hasPrefix("pk.") { Text("Add a Mapbox public token to display this map. Apple Maps is available in the meantime.").font(.footnote) }
+                    if enabled {
+                        Picker("Basemap", selection: $basemap) {
+                            ForEach(GalaxyBasemap.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+                        }
+                        if [.standard, .standardSatellite].contains(basemap) {
+                            NavigationLink("Labels, theme and colors") {
+                                StandardMapSettings(satellite: basemap == .standardSatellite, settings: Binding(get: { BasemapOptions.decode(styleData) },
+                                    set: { if let data = try? JSONEncoder().encode($0) { styleData = data } }))
+                            }
+                        }
+                        Toggle("Show traffic congestion", isOn: $traffic)
+                    }
+                } header: { Text("Map appearance") } footer: { Text("The display map is shared by iPhone and CarPlay. The traffic overlay shows reported slowdowns.") }
+                if router == "Mapbox Navigator" {
+                    Section {
+                        Toggle("Show speed limits", isOn: $speedLimits)
+                        Toggle("Show signals and stop signs", isOn: $intersections)
+                        Toggle("Use night colors in tunnels", isOn: $darkTunnels)
+                        Toggle("Fade the road already traveled", isOn: $fadeRoute)
+                    } header: { Text("Mapbox Navigator") } footer: {
+                        Text("Choose iPhone on the destination card to open Mapbox’s turn-by-turn screen with spoken guidance and rerouting. This screen runs on iPhone. Galaxy guidance also appears on CarPlay.")
+                    }
+                }
+                if token.hasPrefix("pk.") {
+                    Section("Downloads") {
+                        NavigationLink("Offline maps and routing") {
+                            OfflineNavigationAreas(token: token, style: basemap, navigation: model.navigationServices.navigation)
+                        }
+                    }
+                }
+                if enabled {
+                    Section("Mapbox driving camera") {
+                        Stepper("Cruising tilt · \(Int(pitch))°", value: $pitch, in: 0...80, step: 2)
+                        Stepper("Zoom adjustment · \(zoom.formatted())", value: $zoom, in: -2...2, step: 0.25)
+                        Text("Higher tilt looks farther down the road. Positive zoom shows a closer view. The camera still adapts as you approach turns.").font(.footnote)
+                    }
                 }
             }
-            .navigationTitle("Navigation map").navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } } }
-        }.onAppear { entry = token; labels = savedLabels; places = savedPlaces; traffic = savedTraffic }
+            .navigationTitle("Navigation settings").navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
+        }.onAppear { entry = token }
     }
 }
-
 final class DriveMarkerPerspective: ObservableObject {
     @Published private(set) var pitch = 0.0
 
@@ -151,6 +243,10 @@ struct MapboxDriveMap: View {
     let tripFrame: CGRect
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @AppStorage("navigation.standardOptions") private var styleData = Data()
+    @AppStorage("navigation.basemap") private var basemap = GalaxyBasemap.standard
+    @AppStorage("navigation.cameraPitch") private var cruisingPitch = 68.0
+    @AppStorage("navigation.zoomAdjustment") private var zoomAdjustment = 0.0
     @State private var viewport: Viewport
     @State private var routeShape: LineString?
     @State private var routePoints: [RoutePoint] = []
@@ -260,10 +356,7 @@ struct MapboxDriveMap: View {
                         }
                     }
                 }
-                .mapStyle(.standard(lightPreset: colorScheme == .dark ? .night : .day,
-                                    showPointOfInterestLabels: labels.visible(driving: driving),
-                                    showPlaceLabels: showPlaces,
-                                    densityPointOfInterestLabels: labels == .automatic && driving ? 1 : 3))
+                .mapStyle(BasemapOptions.decode(styleData).style(basemap: basemap, dark: colorScheme == .dark, labels: labels, places: showPlaces, driving: driving))
                 .usesSafeAreaInsetsAsPadding(!anchored)
                 .ornamentOptions(mapOrnaments(headerInset: headerInset, scaleInset: 2 - max(0, phoneSafeTop - bounds.minY), panel: panel))
                 .onCameraChanged { event in
@@ -362,7 +455,7 @@ struct MapboxDriveMap: View {
         let distance = NavigationMapMotion.cameraDistance(speed: speed, distanceToTurn: navigation.distanceToTurn)
         // Restrict the guide camera to street-level detail while keeping lookahead on faster roads.
         let drivingZoom = carDisplay == nil ? 18.0 : 17.6
-        let zoom = driving ? drivingZoom - 0.8 * log2(distance / 1200) : 16.8
+        let zoom = driving ? drivingZoom + zoomAdjustment - 0.8 * log2(distance / 1200) : 16.8
         let measuredBearing = commaTrip ? navigation.commaHeading : navigation.location?.course ?? -1
         let validBearing = measuredBearing.isFinite && (0..<360).contains(measuredBearing)
         let moving = speed >= 1.2 || displacement >= 6
@@ -371,7 +464,7 @@ struct MapboxDriveMap: View {
                 fraction: continuous ? 1 - exp(-dt / 0.5) : 1)
         }
         cameraZoom += (zoom - cameraZoom) * (continuous ? 1 - exp(-dt / 2) : 1)
-        let targetPitch = driving ? navigation.followPitch(cruising: 68, speed: speed) : 48
+        let targetPitch = driving ? navigation.followPitch(cruising: cruisingPitch, speed: speed) : 48
         cameraPitch += (targetPitch - cameraPitch) * (continuous ? 1 - exp(-dt / 1.2) : 1)
         let accepted = continuous && !moving ? previous?.coordinate ?? point : point
         let center = aligned(accepted)
@@ -407,5 +500,155 @@ struct MapboxDriveMap: View {
         else if let destination = navigation.destination {
             viewport = .camera(center: destination.coordinate, zoom: 16.8, pitch: 50)
         } else { follow(padding: padding) }
+    }
+}
+private struct BasemapOptions: Codable, Equatable {
+    var showTransitLabels = true
+    var showRoadLabels = true
+    var showPedestrianRoads = true
+    var show3dObjects = true
+    var showAdminBoundaries = true
+    var showLandmarkIconLabels = true
+    var showLandmarkIcons = true
+    var theme = "default"
+    var light = "automatic"
+    var font = "DIN Pro"
+    var back = "circle"
+    var mode = "default"
+    var colors: [String: String] = [:]
+    var density = 3.0
+    var brightness = 0.4
+    var themeData = ""
+    static func decode(_ data: Data) -> Self {
+        (try? JSONDecoder().decode(Self.self, from: data)) ?? Self()
+    }
+    var showRoadsAndTransit = true
+    func style(basemap: GalaxyBasemap, dark: Bool, labels: PointLabels, places: Bool, driving: Bool) -> MapboxMaps.MapStyle {
+        if basemap == .standardSatellite {
+            return .standardSatellite(lightPreset: .init(rawValue: light == "automatic" ? (dark ? "night" : "day") : light),
+            font: .init(rawValue: font), showPointOfInterestLabels: labels.visible(driving: driving),
+            showTransitLabels: showTransitLabels, showPlaceLabels: places, showRoadLabels: showRoadLabels,
+            showRoadsAndTransit: showRoadsAndTransit, showPedestrianRoads: showPedestrianRoads,
+            backgroundPointOfInterestLabels: .init(rawValue: back),
+            colorAdminBoundaries: colors["AdminBoundaries"].map { StyleColor(rawValue: $0) },
+            colorModePointOfInterestLabels: .init(rawValue: mode),
+            colorMotorways: colors["Motorways"].map { StyleColor(rawValue: $0) },
+            colorPlaceLabelHighlight: colors["PlaceLabelHighlight"].map { StyleColor(rawValue: $0) },
+            colorPlaceLabels: colors["PlaceLabels"].map { StyleColor(rawValue: $0) },
+            colorPlaceLabelSelect: colors["PlaceLabelSelect"].map { StyleColor(rawValue: $0) },
+            colorPointOfInterestLabels: colors["PointOfInterestLabels"].map { StyleColor(rawValue: $0) },
+            colorRoadLabels: colors["RoadLabels"].map { StyleColor(rawValue: $0) },
+            colorRoads: colors["Roads"].map { StyleColor(rawValue: $0) },
+            colorTrunks: colors["Trunks"].map { StyleColor(rawValue: $0) },
+            densityPointOfInterestLabels: labels == .automatic && driving ? min(1, density) : density,
+            roadsBrightness: brightness, showAdminBoundaries: showAdminBoundaries)
+        }
+        guard basemap == .standard else { return MapboxMaps.MapStyle(uri: basemap.uri) }
+        return .standard(theme: .init(rawValue: theme),
+            lightPreset: .init(rawValue: light == "automatic" ? (dark ? "night" : "day") : light),
+            font: .init(rawValue: font), showPointOfInterestLabels: labels.visible(driving: driving),
+            showTransitLabels: showTransitLabels, showPlaceLabels: places, showRoadLabels: showRoadLabels,
+            showPedestrianRoads: showPedestrianRoads, show3dObjects: show3dObjects,
+            backgroundPointOfInterestLabels: .init(rawValue: back),
+            colorAdminBoundaries: colors["AdminBoundaries"].map { StyleColor(rawValue: $0) },
+            colorBuildingHighlight: colors["BuildingHighlight"].map { StyleColor(rawValue: $0) },
+            colorBuildingSelect: colors["BuildingSelect"].map { StyleColor(rawValue: $0) },
+            colorGreenspace: colors["Greenspace"].map { StyleColor(rawValue: $0) },
+            colorModePointOfInterestLabels: .init(rawValue: mode),
+            colorMotorways: colors["Motorways"].map { StyleColor(rawValue: $0) },
+            colorPlaceLabelHighlight: colors["PlaceLabelHighlight"].map { StyleColor(rawValue: $0) },
+            colorPlaceLabels: colors["PlaceLabels"].map { StyleColor(rawValue: $0) },
+            colorPlaceLabelSelect: colors["PlaceLabelSelect"].map { StyleColor(rawValue: $0) },
+            colorPointOfInterestLabels: colors["PointOfInterestLabels"].map { StyleColor(rawValue: $0) },
+            colorRoadLabels: colors["RoadLabels"].map { StyleColor(rawValue: $0) },
+            colorRoads: colors["Roads"].map { StyleColor(rawValue: $0) },
+            colorTrunks: colors["Trunks"].map { StyleColor(rawValue: $0) },
+            colorWater: colors["Water"].map { StyleColor(rawValue: $0) },
+            densityPointOfInterestLabels: labels == .automatic && driving ? min(1, density) : density,
+            roadsBrightness: brightness, showAdminBoundaries: showAdminBoundaries,
+            showLandmarkIconLabels: showLandmarkIconLabels, showLandmarkIcons: showLandmarkIcons,
+            themeData: theme == "custom" && !themeData.isEmpty ? themeData : nil)
+    }
+}
+
+private struct StandardMapSettings: View {
+    let satellite: Bool
+    @Binding var settings: BasemapOptions
+    @AppStorage(NavigationMapPreference.poiKey) private var labels = PointLabels.always
+    @AppStorage(NavigationMapPreference.placesKey) private var places = true
+    var body: some View {
+        Form {
+            Section("Appearance") {
+                if !satellite { choice("Color theme", $settings.theme, ["default","faded","monochrome","custom"]) }
+                choice("Lighting", $settings.light, ["automatic","dawn","day","dusk","night"])
+                choice("Label typeface", $settings.font, ["DIN Pro","Alegreya","Alegreya SC","Asap","Barlow","EB Garamond","Faustina","Frank Ruhl Libre","Heebo","Inter","Lato","League Mono","Montserrat","Manrope","Noto Sans CJK JP","Open Sans","Poppins","Raleway","Roboto","Roboto Mono","Rubik","Source Code Pro","Source Sans Pro","Spectral","Ubuntu"])
+                if !satellite && settings.theme == "custom" {
+                    TextField("Mapbox theme LUT data", text: $settings.themeData)
+                        .textInputAutocapitalization(.never).autocorrectionDisabled()
+                }
+                LabeledContent("Road brightness", value: settings.brightness.formatted(.percent.precision(.fractionLength(0))))
+                Slider(value: $settings.brightness, in: 0...1, step: 0.05).accessibilityLabel("Road brightness")
+            }
+            Section("Map detail") {
+                if satellite { Toggle("Road and transit overlay", isOn: $settings.showRoadsAndTransit) }
+                Toggle("Transit stops and stations", isOn: $settings.showTransitLabels)
+                Toggle("Street names and highway shields", isOn: $settings.showRoadLabels)
+                Toggle("Walking paths and trails", isOn: $settings.showPedestrianRoads)
+                if !satellite { Toggle("3D buildings, trees and landmarks", isOn: $settings.show3dObjects) }
+                Toggle("Administrative boundaries", isOn: $settings.showAdminBoundaries)
+                if !satellite { Toggle("Landmark names", isOn: $settings.showLandmarkIconLabels) }
+                if !satellite { Toggle("Landmark icons", isOn: $settings.showLandmarkIcons) }
+                Toggle("City and neighborhood names", isOn: $places)
+            }
+            Section("Points of interest") {
+                Picker("Visibility", selection: $labels) {
+                    Text("Always").tag(PointLabels.always)
+                    Text("Fewer during guidance").tag(PointLabels.automatic)
+                    Text("Only while browsing").tag(PointLabels.browsing)
+                    Text("Off").tag(PointLabels.off)
+                }
+                choice("Point of interest badges", $settings.back, ["circle","none"])
+                choice("Point of interest colors", $settings.mode, ["default","single"])
+                Stepper("Label density · \(settings.density.formatted())", value: $settings.density, in: 1...5, step: 0.5)
+            }
+            Section {
+                palette("AdminBoundaries", "Admin boundaries")
+                if !satellite { palette("BuildingHighlight", "Building highlight") }
+                if !satellite { palette("BuildingSelect", "Building select") }
+                if !satellite { palette("Greenspace", "Greenspace") }
+                palette("Motorways", "Motorways")
+                palette("PlaceLabelHighlight", "Place label highlight")
+                palette("PlaceLabels", "Place labels")
+                palette("PlaceLabelSelect", "Place label select")
+                palette("PointOfInterestLabels", "Point of interest labels")
+                palette("RoadLabels", "Road labels")
+                palette("Roads", "Roads")
+                palette("Trunks", "Trunks")
+                if !satellite { palette("Water", "Water") }
+            } header: { Text("Custom colors") } footer: {
+                Text("Each color overrides the theme for that feature. Use the reset arrow to restore its theme color. Highlight and selection colors appear when a feature has that state.")
+            }
+        }.navigationTitle(satellite ? "Satellite map style" : "Standard map style")
+    }
+    private func choice(_ title: String, _ selection: Binding<String>, _ values: [String]) -> some View {
+        Picker(title, selection: selection) {
+            ForEach(values, id: \.self) { Text($0.prefix(1).uppercased() + String($0.dropFirst())).tag($0) }
+        }
+    }
+    private func palette(_ key: String, _ title: String) -> some View {
+        HStack {
+            ColorPicker(title, selection: Binding(get: {
+                let hex = settings.colors[key].flatMap { UInt32($0.dropFirst(), radix: 16) } ?? 0x808080
+                return Color(red: Double(hex >> 16) / 255, green: Double((hex >> 8) & 255) / 255, blue: Double(hex & 255) / 255)
+            }, set: { value in
+                var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+                guard UIColor(value).getRed(&r, green: &g, blue: &b, alpha: &a) else { return }
+                settings.colors[key] = String(format: "#%02X%02X%02X", Int((255*r).rounded()), Int((255*g).rounded()), Int((255*b).rounded()))
+            }), supportsOpacity: false)
+            if settings.colors[key] != nil {
+                Button { settings.colors.removeValue(forKey: key) } label: { Image(systemName: "arrow.uturn.backward") }
+                    .buttonStyle(.borderless).accessibilityLabel("Restore theme color for " + title)
+            }
+        }
     }
 }

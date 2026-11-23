@@ -3,6 +3,7 @@ import MapKit
 
 private struct NavigationMapLayer: View {
     @ObservedObject var navigation: NavigationModel
+    @AppStorage("navigation.appleStyle") private var appleStyle = GalaxyAppleMap.streets
     let markerPerspective: DriveMarkerPerspective
     let safeTop: CGFloat
     let headerBottom: CGFloat
@@ -34,7 +35,7 @@ private struct NavigationMapLayer: View {
                         Marker(destination.name, coordinate: destination.coordinate).tint(.red)
                     }
                 }
-                .mapStyle(.standard(elevation: .realistic))
+                .mapStyle(appleStyle.style)
                 .mapControls { MapCompass(); MapScaleView() }
                 .onChange(of: navigation.camera.positionedByUser) { _, moved in
                     if moved { navigation.followsUser = false }
@@ -922,6 +923,16 @@ private struct QueuedPlaceStatus: View {
 }
 
 private struct NavigationDestinationPanel: View {
+    @AppStorage("navigation.phoneRouter") private var router = "Automatic"
+    @AppStorage(NavigationMapPreference.tokenKey) private var mapToken = ""
+    @State private var navigatorTrip: NavigatorTrip?
+    private struct NavigatorTrip: Identifiable {
+        let id = UUID()
+        let origin: CLLocationCoordinate2D
+        let destination: CLLocationCoordinate2D
+        let token: String
+    }
+
     @AppStorage(NavigationDistanceUnits.key) private var distanceUnits = NavigationDistanceUnits.system
     @ObservedObject private var inbox = ShareInbox.shared
     let chooseStart: () -> Void
@@ -997,6 +1008,24 @@ private struct NavigationDestinationPanel: View {
                 .disabled(navigation.busy || samePlace)
                 Text(connection.connected ? "Your comma will calculate the route." : "Galaxy will send the destination when your comma connects.")
                     .font(.footnote).foregroundStyle(.secondary)
+            } else if router == "Mapbox Navigator" && navigation.plannedStart == nil {
+                Button("Start Mapbox Navigator on iPhone") {
+                    guard let place = navigation.destination else { return }
+                    guard mapToken.hasPrefix("pk.") else {
+                        navigation.error = "Save a Mapbox public token in Navigation settings."
+                        return
+                    }
+                    guard let origin = navigation.goodLocation else {
+                        navigation.requestLocation()
+                        navigation.error = "Waiting for an accurate current location."
+                        return
+                    }
+                    navigatorTrip = NavigatorTrip(origin: origin.coordinate, destination: place.coordinate, token: mapToken)
+                }
+                .buttonStyle(.borderedProminent)
+                .fullScreenCover(item: $navigatorTrip) { trip in
+                    MapboxNavigatorScreen(origin: trip.origin, destination: trip.destination, token: trip.token)
+                }
             } else if navigation.busy {
                 ProgressView("Getting directions…")
             } else if navigation.routes.isEmpty {

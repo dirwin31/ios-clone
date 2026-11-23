@@ -62,9 +62,14 @@ extension PhoneRoute {
         var url = URLComponents()
         url.scheme = "https"
         url.host = "api.mapbox.com"
-        url.path = "/directions/v5/mapbox/driving/\(from.longitude),\(from.latitude);\(to.longitude),\(to.latitude)"
+        let preferences = UserDefaults.standard
+        let profile = preferences.string(forKey: "navigation.phoneRouter") == "Mapbox Traffic" ? "driving-traffic" : "driving"
+        url.path = "/directions/v5/mapbox/\(profile)/\(from.longitude),\(from.latitude);\(to.longitude),\(to.latitude)"
         url.queryItems = ["access_token": token, "alternatives": String(alternatives), "steps": "true",
                           "geometries": "geojson", "overview": "full"].map { URLQueryItem(name: $0.key, value: $0.value) }
+        let avoidances = [("navigation.avoidTolls", "toll"), ("navigation.avoidFerries", "ferry"), ("navigation.avoidMotorways", "motorway")]
+            .filter { preferences.bool(forKey: $0.0) }.map { $0.1 }
+        if !avoidances.isEmpty { url.queryItems?.append(URLQueryItem(name: "exclude", value: avoidances.joined(separator: ","))) }
         guard let endpoint = url.url else { throw URLError(.badURL) }
         let (data, response) = try await URLSession.shared.data(from: endpoint)
         guard (response as? HTTPURLResponse)?.statusCode == 200 else { throw URLError(.badServerResponse) }
@@ -373,6 +378,7 @@ final class NavigationModel: NSObject, ObservableObject, @preconcurrency CLLocat
         #endif
         onEvent?("Route calculation requested; refresh: \(refresh); destination: \(destination != nil); active: \(foreground); calculating: \(recalculating)")
         guard let destination, foreground, !sendToComma, !commandRunning, !recalculating else { onEvent?("Route calculation skipped by current state"); return }
+        if !refresh, plannedStart == nil, UserDefaults.standard.string(forKey: "navigation.phoneRouter") == "Mapbox Navigator" { return }
         let token = UUID(); revision = token
         directions?.cancel()
         recalculating = true
@@ -410,13 +416,19 @@ final class NavigationModel: NSObject, ObservableObject, @preconcurrency CLLocat
         request.source = MKMapItem(placemark: MKPlacemark(coordinate: origin.coordinate))
         request.destination = destination.item
         request.transportType = .automobile
-        request.requestsAlternateRoutes = !refresh
+        request.requestsAlternateRoutes = !refresh && UserDefaults.standard.object(forKey: "navigation.offerAlternatives") as? Bool != false
         lastCalculation = Date()
         do {
             let choices: [PhoneRoute]
-            if let accessToken = NavigationMapPreference.activeToken {
+            let router = UserDefaults.standard.string(forKey: "navigation.phoneRouter") ?? "Automatic"
+            let savedToken = UserDefaults.standard.string(forKey: NavigationMapPreference.tokenKey)
+            if router.hasPrefix("Mapbox") && savedToken?.hasPrefix("pk.") != true {
+                error = "Save a Mapbox public token in Navigation settings to use Mapbox directions."
+                return
+            }
+            if let accessToken = router == "Automatic" ? NavigationMapPreference.activeToken : (router.hasPrefix("Mapbox") ? savedToken : nil) {
                 choices = try await PhoneRoute.mapbox(from: origin.coordinate, to: destination.coordinate,
-                                                      alternatives: !refresh, token: accessToken)
+                                                      alternatives: request.requestsAlternateRoutes, token: accessToken)
             } else {
                 let service = MKDirections(request: request)
                 directions = service

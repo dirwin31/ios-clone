@@ -90,7 +90,7 @@ final class CarPlaySceneDelegate: NSObject, CPTemplateApplicationSceneDelegate, 
         sessionConfiguration = CPSessionConfiguration(delegate: self)
         let model = AppModel.shared
         model.setCarPlayActive(true)
-        model.$navigationAlpha.combineLatest(model.$developerMode)
+        model.$navigationEnabled
             .receive(on: RunLoop.main).sink { [weak self] _ in self?.configureMode() }
             .store(in: &subscriptions)
         model.navigationServices.navigation.$navigating.removeDuplicates()
@@ -1335,7 +1335,7 @@ final class CarPlayDashboardSceneDelegate: NSObject, CPTemplateApplicationDashbo
         self.dashboardController = dashboardController
         dashboardController.shortcutButtons = []
         let model = AppModel.shared
-        model.$navigationAlpha.combineLatest(model.$developerMode)
+        model.$navigationEnabled
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in self?.refresh() }
             .store(in: &subscriptions)
@@ -1450,15 +1450,20 @@ private final class CompanionCarPlayMap: UIViewController, MKMapViewDelegate {
         view = UIView()
     }
 
+    private var appleStyle: GalaxyAppleMap?
     private func installAppleMap() {
+        let style = UserDefaults.standard.string(forKey: "navigation.appleStyle").flatMap(GalaxyAppleMap.init(rawValue:)) ?? .streets
+        if style != appleStyle {
+            let config = style.configuration
+            (config as? MKStandardMapConfiguration)?.pointOfInterestFilter = .excludingAll
+            map.preferredConfiguration = config
+            appleStyle = style
+        }
         guard map.superview == nil else { return }
         map.frame = view.bounds
         map.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         view.addSubview(map)
         map.delegate = self
-        let configuration = MKStandardMapConfiguration(elevationStyle: .realistic)
-        configuration.pointOfInterestFilter = .excludingAll
-        map.preferredConfiguration = configuration
         map.showsCompass = false
         map.isRotateEnabled = false
     }

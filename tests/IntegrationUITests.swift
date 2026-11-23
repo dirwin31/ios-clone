@@ -103,7 +103,7 @@ final class IntegrationUITests: XCTestCase {
     }
     func testTunnelSetupValidation() {
         let app = XCUIApplication()
-        app.launchArguments = ["-galaxy.app.developerMode", "NO", "-galaxy.app.navigationAlpha", "NO"]
+        app.launchArguments = ["-galaxy.app.developerMode", "NO", "-galaxy.app.navigationEnabled", "NO"]
         app.launch()
         let setup = app.buttons["tunnel-setup"]
         XCTAssertTrue(setup.waitForExistence(timeout: 15))
@@ -119,7 +119,7 @@ final class IntegrationUITests: XCTestCase {
     }
     func testConnectionOrderSheet() {
         let app = XCUIApplication()
-        app.launchArguments = ["-galaxy.app.developerMode", "NO", "-galaxy.app.navigationAlpha", "NO", "-galaxy.connection.mode", "automatic"]
+        app.launchArguments = ["-galaxy.app.developerMode", "NO", "-galaxy.app.navigationEnabled", "NO", "-galaxy.connection.mode", "automatic"]
         app.launch()
         XCTAssertTrue(app.buttons["Set order"].waitForExistence(timeout: 15))
         app.buttons["Set order"].tap()
@@ -141,7 +141,7 @@ final class IntegrationUITests: XCTestCase {
     }
     func testDiagnosticsExport() {
         let app = XCUIApplication()
-        app.launchArguments = ["-galaxy.app.developerMode", "YES", "-galaxy.app.navigationAlpha", "YES"]
+        app.launchArguments = ["-galaxy.app.developerMode", "YES", "-galaxy.app.navigationEnabled", "YES"]
         app.launch()
         XCTAssertTrue(app.buttons["Developer options"].waitForExistence(timeout: 10))
         app.buttons["Developer options"].tap()
@@ -161,7 +161,7 @@ final class IntegrationUITests: XCTestCase {
     }
     func testSelectedDestinationWithoutPhoneRoute() {
         let app = XCUIApplication()
-        app.launchArguments = ["--ui-testing", "-galaxy.app.developerMode", "YES", "-galaxy.app.navigationAlpha", "YES"]
+        app.launchArguments = ["--ui-testing", "-galaxy.app.developerMode", "YES", "-galaxy.app.navigationEnabled", "YES"]
         app.launch()
         if app.buttons["expand-app-tabs"].isHittable { app.buttons["expand-app-tabs"].tap() }
         let tab = app.buttons["main-tab-Navigation"]
@@ -192,32 +192,19 @@ final class IntegrationUITests: XCTestCase {
         XCTAssertTrue(app.buttons["Get directions"].waitForExistence(timeout: 5))
         XCTAssertFalse(app.buttons["Start on iPhone"].exists)
     }
-    func testRegularModeAndAlphaOptIn() {
+    func testNavigationSettingsWithoutDeveloperMode() {
         let app = XCUIApplication()
-        app.launchArguments = ["-galaxy.app.developerMode", "NO", "-galaxy.app.navigationAlpha", "NO"]
+        app.launchArguments = ["-galaxy.app.developerMode", "NO", "-galaxy.app.navigationEnabled", "YES"]
         app.launch()
-        XCTAssertTrue(app.staticTexts["Your comma"].waitForExistence(timeout: 15))
-        XCTAssertFalse(app.buttons["main-tab-Navigation"].exists)
-        XCTAssertFalse(app.switches["navigation-alpha-toggle"].exists)
-        let regular = XCTAttachment(screenshot: app.screenshot()); regular.name = "Regular StarPilot BT"; regular.lifetime = .keepAlways; add(regular)
-        let developer = app.switches["developer-mode-toggle"]
-        openSettingsSection("Support & developer", containing: developer, in: app)
-        if !developer.isHittable { app.swipeUp() }
-        developer.tap()
-        let alpha = app.switches["navigation-alpha-toggle"]
-        XCTAssertTrue(alpha.waitForExistence(timeout: 5))
-        if !alpha.isHittable { app.swipeUp() }
-        alpha.tap()
-        app.alerts.buttons["Enable alpha"].tap()
-        XCTAssertTrue(app.buttons["expand-app-tabs"].waitForExistence(timeout: 5))
-        alpha.tap()
-        XCTAssertFalse(app.buttons["expand-app-tabs"].exists)
-        developer.tap()
-        XCTAssertFalse(app.switches["navigation-alpha-toggle"].exists)
+        let settings = app.buttons["navigation-map-settings"]
+        openSettingsSection("Navigation", containing: settings, in: app)
+        settings.tap()
+        XCTAssertTrue(app.navigationBars["Navigation settings"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.switches["Enable navigation"].exists)
     }
     func testNavigationAndSharedSettings() {
         let app = XCUIApplication()
-        app.launchArguments = ["-galaxy.app.developerMode", "YES", "-galaxy.app.navigationAlpha", "YES"]
+        app.launchArguments = ["-galaxy.app.developerMode", "YES", "-galaxy.app.navigationEnabled", "YES"]
         app.launch()
         XCTAssertTrue(app.buttons["main-tab-Navigation"].waitForExistence(timeout: 15))
         XCTAssertTrue(app.staticTexts["Your comma"].exists)

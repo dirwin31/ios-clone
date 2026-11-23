@@ -100,7 +100,6 @@ final class AppModel: ObservableObject {
         didSet {
             UserDefaults.standard.set(developerMode, forKey: "galaxy.app.developerMode")
             if !developerMode {
-                navigationAlpha = false
                 if tab.isDeveloperPage { tab = opened ? .galaxy : .connections }
                 diagnostics.live = false
                 diagnostics.phoneVisible = false
@@ -108,14 +107,13 @@ final class AppModel: ObservableObject {
             }
         }
     }
-    @Published var navigationAlpha = UserDefaults.standard.bool(forKey: "galaxy.app.developerMode") && UserDefaults.standard.bool(forKey: "galaxy.app.navigationAlpha") {
+    @Published var navigationEnabled = UserDefaults.standard.object(forKey: "galaxy.app.navigationEnabled") as? Bool ?? true {
         didSet {
-            UserDefaults.standard.set(navigationAlpha, forKey: "galaxy.app.navigationAlpha")
-            navigationServices.setEnabled(navigationAlpha && developerMode)
-            if !navigationAlpha && tab == .navigation { tab = opened ? .galaxy : .connections }
+            UserDefaults.standard.set(navigationEnabled, forKey: "galaxy.app.navigationEnabled")
+            navigationServices.setEnabled(navigationEnabled)
+            if !navigationEnabled && tab == .navigation { tab = opened ? .galaxy : .connections }
         }
     }
-    var navigationEnabled: Bool { developerMode && navigationAlpha }
     var connectionSetupBusy: Bool { pairingInProgress || offerAudioPairing || showAudioPairing }
     private var galaxyRecoveryTask: Task<Void, Never>?
     private var lastAutomaticGalaxyRecovery: TimeInterval = -.infinity
@@ -1155,7 +1153,7 @@ struct GalaxyRootView: View {
         .task(id: scenePhase) {
 #if targetEnvironment(simulator)
             if ProcessInfo.processInfo.arguments.contains("--preview-route") {
-                model.developerMode = true; model.navigationAlpha = true
+                model.developerMode = true; model.navigationEnabled = true
                 let nav = model.navigationServices.navigation
                 let points = [CLLocationCoordinate2D(latitude: 43.6412, longitude: -79.3894), CLLocationCoordinate2D(latitude: 43.6433, longitude: -79.3894), CLLocationCoordinate2D(latitude: 43.6433, longitude: -79.3850)]
                 nav.commaPolyline = MKPolyline(coordinates: points, count: points.count)
@@ -1841,7 +1839,7 @@ final class ConnectionEventLog: ObservableObject {
         Pairing active: \(model.pairingInProgress); setup busy: \(model.connectionSetupBusy)
         Last pairing failure: \(model.pairingFailure.isEmpty ? "none" : model.pairingFailure)
         Current connection message: \(model.connectionMessage)
-        Navigation alpha: \(model.navigationEnabled)
+        Navigation enabled: \(model.navigationEnabled)
         Retained failure events (may also appear in the timeline; retained=\(failureCount); older failures dropped=\(max(0, totalFailures - failureCount))):
         \(failureEvents.suffix(eventLimit ?? failureCount).joined(separator: "\n"))
         Recent connection events:
