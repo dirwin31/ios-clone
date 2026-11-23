@@ -159,137 +159,208 @@ struct NavigationMapSettings: View {
     var body: some View {
         NavigationStack {
             Form {
+                trips.listRowBackground(menuPanel)
                 Section {
-                    Toggle("Enable navigation", isOn: $model.navigationEnabled)
-                    Picker("Default guidance device", selection: $defaultComma) {
-                        Text("Comma").tag(true)
-                        Text("iPhone").tag(false)
+                    settingLink("iPhone directions", icon: "iphone", detail: router) {
+                        self.directions
+                        self.navigator
                     }
-                    Picker("Distance units", selection: $units) {
-                        Text("System").tag(NavigationDistanceUnits.system)
-                        Text("Metric").tag(NavigationDistanceUnits.metric)
-                        Text("Imperial").tag(NavigationDistanceUnits.imperial)
+                    settingLink("Comma settings", icon: "car.fill", detail: "Device guidance, GPS and parked route preview") {
+                        self.comma
                     }
-                    Toggle("Remember destinations", isOn: $remember)
-                } header: { Text("Trips") } footer: { Text("The default selects a guidance device when you choose a destination. You can switch devices on the destination card before starting. Remember destinations saves recent places on this iPhone.") }
-                Section {
-                    NavigationLink("Comma navigation settings") {
-                        CommaNavigationPreferences(connection: model.navigationServices.connection)
+                    settingLink("Map appearance", icon: "map.fill", detail: "Map style, traffic, camera and Mapbox token") {
+                        self.appearance
+                        self.camera
                     }
-                    Toggle("Preview iPhone routes with comma", isOn: $parkedPreview)
-                    if parkedPreview {
-                        Text("While parked, choose a short Mapbox Driving or Traffic route on iPhone. Tap Preview with comma to see the route your comma reads back. This test requires compatible firmware and leaves driving assistance unchanged.")
-                            .font(.footnote)
-                    }
-                } footer: { Text("Choose the map, directions provider and GPS source used by your comma. These settings are saved on the device. Sharing iPhone GPS supplies your position. The comma still calculates its own turns.") }
-                Section {
-                    Picker("Directions provider", selection: $router) {
-                        ForEach(["Automatic", "Apple Maps", "Mapbox Driving", "Mapbox Traffic", "Mapbox Navigator"] + ExternalNavigator.allCases.map(\.rawValue), id: \.self) { Text($0).tag($0) }
-                    }
-                    if ExternalNavigator(rawValue: router) == nil { Toggle("Offer alternative routes", isOn: $alternatives) }
-                    if router.hasPrefix("Mapbox") || (router == "Automatic" && enabled && token.hasPrefix("pk.")) {
-                        NavigationLink("Roads and vehicle preferences") {
-                            Form {
-                                Section("Roads to avoid") {
-                                    Toggle("Toll roads", isOn: $tolls)
-                                    Toggle("Cash-only tolls", isOn: $cashTolls)
-                                    Toggle("Ferries", isOn: $ferries)
-                                    Toggle("Motorways", isOn: $motorways)
-                                    Toggle("Unpaved roads", isOn: $unpaved)
-                                }
-                                Section {
-                                    Toggle("Use vehicle dimensions", isOn: $limits)
-                                    if limits {
-                                        Stepper("Height · \(height.formatted()) m", value: $height, in: 0.1...10, step: 0.1)
-                                        Stepper("Width · \(width.formatted()) m", value: $width, in: 0.1...10, step: 0.1)
-                                        Stepper("Gross weight · \(weight.formatted()) t", value: $weight, in: 0.1...100, step: 0.1)
-                                    }
-                                } header: { Text("Vehicle clearance") } footer: { Text("Mapbox accounts for known road restrictions. Coverage varies by area.") }
-                            }.navigationTitle("Route preferences")
-                        }
-                    }
-                } header: { Text("iPhone directions") } footer: {
-                    Text(providerExplanation)
-                }
-                Section {
-                    Picker("Display map", selection: $enabled) {
-                        Text("Apple Maps").tag(false)
-                        Text("Mapbox").tag(true)
-                    }
-                    if !enabled {
-                        Picker("Apple map style", selection: $appleStyle) {
-                            ForEach(GalaxyAppleMap.allCases, id: \.self) { Text($0.rawValue).tag($0) }
-                        }
-                    }
-                    SecureField("Mapbox public token (pk.…)", text: $entry)
-                        .textInputAutocapitalization(.never).autocorrectionDisabled()
-                    if !token.isEmpty && entry == token {
-                        Button("Remove saved token", role: .destructive) { entry = ""; token = "" }
-                    }
-                    if entry != token {
-                        Button("Save public token") { token = entry.trimmingCharacters(in: .whitespacesAndNewlines); entry = token }
-                            .disabled(!entry.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("pk."))
-                    }
-                    if enabled && !token.hasPrefix("pk.") { Text("Add a Mapbox public token to display this map. Apple Maps is available in the meantime.").font(.footnote) }
-                    if enabled {
-                        Picker("Basemap", selection: $basemap) {
-                            ForEach(GalaxyBasemap.allCases, id: \.self) { Text($0.rawValue).tag($0) }
-                        }
-                        if basemap == .studio {
-                            TextField("mapbox://styles/owner/style", text: $styleEntry)
-                                .textInputAutocapitalization(.never).autocorrectionDisabled()
-                            Button("Apply Studio style") { studioStyle = styleEntry }
-                                .disabled(GalaxyBasemap.studioURI(styleEntry) == nil || studioStyle == styleEntry)
-                            Text("Paste a published Mapbox Studio style accessible with your public token. Standard is shown until a style is saved.")
-                                .font(.footnote)
-                        }
-                        if [.standard, .standardSatellite].contains(basemap) {
-                            NavigationLink("Labels, theme and colors") {
-                                StandardMapSettings(satellite: basemap == .standardSatellite, settings: Binding(get: { BasemapOptions.decode(styleData) },
-                                    set: { if let data = try? JSONEncoder().encode($0) { styleData = data } }))
-                            }
-                        }
-                        NavigationLink("Route line") { RouteLineSettings() }
-                        Toggle("Show traffic congestion", isOn: $traffic)
-                    }
-                } header: { Text("Map appearance") } footer: { Text("The display map is shared by iPhone and CarPlay. The traffic overlay shows reported slowdowns.") }
-                if router == "Mapbox Navigator" {
-                    Section {
-                        Picker("Routing data", selection: $routeSource) {
-                            Text("Online with offline fallback").tag("Automatic")
-                            Text("Online only").tag("Online")
-                            Text("Downloaded areas only").tag("Offline")
-                        }
-                        Toggle("Use iPhone voices only", isOn: $localVoice)
-                        Toggle("Reroute after a missed turn", isOn: $reroute)
-                        Toggle("Look for faster routes", isOn: $faster)
-                        Toggle("Show speed limits", isOn: $speedLimits)
-                        Toggle("Show signals and stop signs", isOn: $intersections)
-                        Toggle("Use night colors in tunnels", isOn: $darkTunnels)
-                        Toggle("Fade the road already traveled", isOn: $fadeRoute)
-                    } header: { Text("Mapbox Navigator") } footer: {
-                        Text("Choose iPhone on the destination card to open Mapbox’s turn-by-turn screen with spoken guidance and rerouting. This screen runs on iPhone. Galaxy guidance also appears on CarPlay.")
-                    }
-                }
-                if token.hasPrefix("pk.") {
-                    Section("Downloads") {
-                        NavigationLink("Offline maps and routing") {
-                            OfflineNavigationAreas(token: token, style: basemap, navigation: model.navigationServices.navigation)
-                        }
-                    }
-                }
-                if enabled {
-                    Section("Mapbox driving camera") {
-                        Stepper("Cruising tilt · \(Int(pitch))°", value: $pitch, in: 0...80, step: 2)
-                        Stepper("Zoom adjustment · \(zoom.formatted())", value: $zoom, in: -2...2, step: 0.25)
-                        Text("Higher tilt looks farther down the road. Positive zoom shows a closer view. The camera still adapts as you approach turns.").font(.footnote)
-                    }
-                }
+                    downloads
+                }.listRowBackground(menuPanel)
             }
+            .scrollContentBackground(.hidden)
+            .background(menuBackground)
+            .tint(StarPilotTheme.accent)
             .navigationTitle("Navigation settings").navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
         }.onAppear { entry = token; styleEntry = studioStyle }
     }
+    @Environment(\.colorScheme) private var colorScheme
+
+    private var menuBackground: Color {
+        colorScheme == .dark ? StarPilotTheme.background : Color(red: 0.93, green: 0.90, blue: 0.98)
+    }
+
+    private var menuPanel: Color {
+        colorScheme == .dark ? StarPilotTheme.panel : Color(red: 0.88, green: 0.83, blue: 0.95)
+    }
+
+    private func settingLink<Content: View>(_ title: LocalizedStringKey, icon: String, detail: String,
+                                             @ViewBuilder content: @escaping () -> Content) -> some View {
+        NavigationLink {
+            Form { content().listRowBackground(menuPanel) }
+                .scrollContentBackground(.hidden)
+                .background(menuBackground)
+                .navigationTitle(title)
+        } label: {
+            HStack(spacing: 12) {
+                Image(systemName: icon)
+                    .foregroundStyle(StarPilotTheme.accent)
+                    .frame(width: 36, height: 36)
+                    .background(StarPilotTheme.accent.opacity(0.13), in: RoundedRectangle(cornerRadius: 10))
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(title).font(.headline)
+                    Text(detail).font(.subheadline).foregroundStyle(.secondary)
+                }
+            }.padding(.vertical, 4)
+        }
+    }
+
+    @ViewBuilder private var trips: some View {
+        Section {
+            Toggle("Enable navigation", isOn: $model.navigationEnabled)
+            Picker("Default guidance device", selection: $defaultComma) {
+                Text("Comma").tag(true)
+                Text("iPhone").tag(false)
+            }
+            Picker("Distance units", selection: $units) {
+                Text("System").tag(NavigationDistanceUnits.system)
+                Text("Metric").tag(NavigationDistanceUnits.metric)
+                Text("Imperial").tag(NavigationDistanceUnits.imperial)
+            }
+            Toggle("Remember destinations", isOn: $remember)
+        } header: { Text("Trips") } footer: { Text("The default selects a guidance device when you choose a destination. You can switch devices on the destination card before starting. Remember destinations saves recent places on this iPhone.") }
+    }
+
+    @ViewBuilder private var comma: some View {
+        Section {
+            NavigationLink("Map, routing and GPS") {
+                CommaNavigationPreferences(connection: model.navigationServices.connection)
+            }
+            Toggle("Preview iPhone routes with comma", isOn: $parkedPreview)
+            if parkedPreview {
+                Text("Choose iPhone on a destination, then select a short Mapbox Driving or Traffic route. Preview with comma checks that your parked device can read the route and shows the result on your phone.")
+                    .font(.footnote)
+            }
+        } footer: { Text("Choose the map, directions provider and GPS source used by your comma. These settings are saved on the device. Sharing iPhone GPS supplies your position. The comma still calculates its own turns.") }
+    }
+
+    @ViewBuilder private var directions: some View {
+        Section {
+            Picker("Directions provider", selection: $router) {
+                ForEach(["Automatic", "Apple Maps", "Mapbox Driving", "Mapbox Traffic", "Mapbox Navigator"] + ExternalNavigator.allCases.map(\.rawValue), id: \.self) { Text($0).tag($0) }
+            }
+            if ExternalNavigator(rawValue: router) == nil { Toggle("Offer alternative routes", isOn: $alternatives) }
+            if router.hasPrefix("Mapbox") || (router == "Automatic" && enabled && token.hasPrefix("pk.")) {
+                NavigationLink("Roads and vehicle preferences") {
+                    Form {
+                        Section("Roads to avoid") {
+                            Toggle("Toll roads", isOn: $tolls)
+                            Toggle("Cash-only tolls", isOn: $cashTolls)
+                            Toggle("Ferries", isOn: $ferries)
+                            Toggle("Motorways", isOn: $motorways)
+                            Toggle("Unpaved roads", isOn: $unpaved)
+                        }
+                        Section {
+                            Toggle("Use vehicle dimensions", isOn: $limits)
+                            if limits {
+                                Stepper("Height · \(height.formatted()) m", value: $height, in: 0.1...10, step: 0.1)
+                                Stepper("Width · \(width.formatted()) m", value: $width, in: 0.1...10, step: 0.1)
+                                Stepper("Gross weight · \(weight.formatted()) t", value: $weight, in: 0.1...100, step: 0.1)
+                            }
+                        } header: { Text("Vehicle clearance") } footer: { Text("Mapbox accounts for known road restrictions. Coverage varies by area.") }
+                    }.navigationTitle("Route preferences")
+                }
+            }
+        } header: { Text("iPhone directions") } footer: {
+            Text(providerExplanation)
+        }
+    }
+
+    @ViewBuilder private var appearance: some View {
+        Section {
+            Picker("Display map", selection: $enabled) {
+                Text("Apple Maps").tag(false)
+                Text("Mapbox").tag(true)
+            }
+            if !enabled {
+                Picker("Apple map style", selection: $appleStyle) {
+                    ForEach(GalaxyAppleMap.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+                }
+            }
+            SecureField("Mapbox public token (pk.…)", text: $entry)
+                .textInputAutocapitalization(.never).autocorrectionDisabled()
+            if !token.isEmpty && entry == token {
+                Button("Remove saved token", role: .destructive) { entry = ""; token = "" }
+            }
+            if entry != token {
+                Button("Save public token") { token = entry.trimmingCharacters(in: .whitespacesAndNewlines); entry = token }
+                    .disabled(!entry.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("pk."))
+            }
+            if enabled && !token.hasPrefix("pk.") { Text("Add a Mapbox public token to display this map. Apple Maps is available in the meantime.").font(.footnote) }
+            if enabled {
+                Picker("Basemap", selection: $basemap) {
+                    ForEach(GalaxyBasemap.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+                }
+                if basemap == .studio {
+                    TextField("mapbox://styles/owner/style", text: $styleEntry)
+                        .textInputAutocapitalization(.never).autocorrectionDisabled()
+                    Button("Apply Studio style") { studioStyle = styleEntry }
+                        .disabled(GalaxyBasemap.studioURI(styleEntry) == nil || studioStyle == styleEntry)
+                    Text("Paste a published Mapbox Studio style accessible with your public token. Standard is shown until a style is saved.")
+                        .font(.footnote)
+                }
+                if [.standard, .standardSatellite].contains(basemap) {
+                    NavigationLink("Labels, theme and colors") {
+                        StandardMapSettings(satellite: basemap == .standardSatellite, settings: Binding(get: { BasemapOptions.decode(styleData) },
+                            set: { if let data = try? JSONEncoder().encode($0) { styleData = data } }))
+                    }
+                }
+                NavigationLink("Route line") { RouteLineSettings() }
+                Toggle("Show traffic congestion", isOn: $traffic)
+            }
+        } header: { Text("Map appearance") } footer: { Text("The display map is shared by iPhone and CarPlay. The traffic overlay shows reported slowdowns.") }
+    }
+
+    @ViewBuilder private var navigator: some View {
+        if router == "Mapbox Navigator" {
+            Section {
+                Picker("Routing data", selection: $routeSource) {
+                    Text("Online with offline fallback").tag("Automatic")
+                    Text("Online only").tag("Online")
+                    Text("Downloaded areas only").tag("Offline")
+                }
+                Toggle("Use iPhone voices only", isOn: $localVoice)
+                Toggle("Reroute after a missed turn", isOn: $reroute)
+                Toggle("Look for faster routes", isOn: $faster)
+                Toggle("Show speed limits", isOn: $speedLimits)
+                Toggle("Show signals and stop signs", isOn: $intersections)
+                Toggle("Use night colors in tunnels", isOn: $darkTunnels)
+                Toggle("Fade the road already traveled", isOn: $fadeRoute)
+            } header: { Text("Mapbox Navigator") } footer: {
+                Text("Choose iPhone on the destination card to open Mapbox’s turn-by-turn screen with spoken guidance and rerouting. This screen runs on iPhone. Galaxy guidance also appears on CarPlay.")
+            }
+        }
+    }
+
+    @ViewBuilder private var downloads: some View {
+        if token.hasPrefix("pk.") {
+            NavigationLink {
+                OfflineNavigationAreas(token: token, style: basemap, navigation: model.navigationServices.navigation)
+            } label: {
+                Label("Offline maps and routing", systemImage: "arrow.down.circle")
+            }
+        }
+    }
+
+    @ViewBuilder private var camera: some View {
+        if enabled {
+            Section("Mapbox driving camera") {
+                Stepper("Cruising tilt · \(Int(pitch))°", value: $pitch, in: 0...80, step: 2)
+                Stepper("Zoom adjustment · \(zoom.formatted())", value: $zoom, in: -2...2, step: 0.25)
+                Text("Higher tilt looks farther down the road. Positive zoom shows a closer view. The camera still adapts as you approach turns.").font(.footnote)
+            }
+        }
+    }
+
 }
 final class DriveMarkerPerspective: ObservableObject {
     @Published private(set) var pitch = 0.0

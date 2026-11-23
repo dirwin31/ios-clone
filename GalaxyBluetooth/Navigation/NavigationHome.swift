@@ -1058,11 +1058,21 @@ private struct NavigationDestinationPanel: View {
                     }.buttonStyle(.plain)
                     .accessibilityAddTraits(navigation.selectedRoute == index ? .isSelected : [])
                 }
-                if parkedPreview, let selected = navigation.route {
+                if let selected = navigation.route {
                     if let body = selected.commaPreview {
-                        ParkedPhoneRoutePreview(bodyData: body, connection: connection)
-                            .id(body)
-                    } else {
+                        if !parkedPreview {
+                            Button {
+                                parkedPreview = true
+                            } label: {
+                                Label("Enable parked route preview", systemImage: "car.fill")
+                            }
+                            .buttonStyle(.bordered)
+                            .accessibilityHint("Adds a preview button for this and future compatible routes.")
+                        } else {
+                            ParkedPhoneRoutePreview(bodyData: body, connection: connection)
+                                .id(body)
+                        }
+                    } else if parkedPreview {
                         Text("Preview with comma supports short Mapbox Driving and Traffic routes.").font(.footnote)
                     }
                 }
@@ -1107,12 +1117,16 @@ private struct ParkedPhoneRoutePreview: View {
     }
 
     var body: some View {
-        VStack {
-            Button(loading ? "Checking route…" : "Preview with comma") {
+        VStack(alignment: .leading, spacing: 8) {
+            Button {
                 Task { await check() }
+            } label: {
+                Label(loading ? "Checking route…" : "Preview with comma", systemImage: "car.fill")
             }
+            .buttonStyle(.bordered)
             .disabled(loading || !connection.connected)
-            if !connection.connected { Text("Connect to your parked comma to preview this route.").font(.footnote) }
+            Text(connection.connected ? "Check this route on your parked comma and see the result here before starting a trip." : "Connect to your parked comma to preview this route.")
+                .font(.footnote).foregroundStyle(.secondary)
             if !message.isEmpty { Text(message).font(.footnote) }
         }.sheet(item: $preview) { reply in
             NavigationStack {
