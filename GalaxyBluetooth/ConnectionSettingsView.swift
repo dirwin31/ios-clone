@@ -219,7 +219,14 @@ struct ConnectionSettingsView: View {
                 }.frame(maxWidth: .infinity)
             }
             Divider()
-            footerLinks.frame(maxWidth: .infinity)
+            VStack(spacing: 4) {
+                Button(action: submitReport) {
+                    Label("Report a problem on Discord", systemImage: "bubble.left.and.exclamationmark.bubble.right")
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.large)
+                footerLinks
+            }.frame(maxWidth: .infinity)
             versionLabel.frame(maxWidth: .infinity)
         }
         .padding(.horizontal, wide ? 28 : 20).padding(.vertical, 18)
