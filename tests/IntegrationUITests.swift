@@ -169,7 +169,8 @@ final class IntegrationUITests: XCTestCase {
         tab.tap()
         app.buttons["map-search"].tap()
         let search = app.searchFields.firstMatch
-        search.tap(); search.typeText("Test")
+        XCTAssertTrue(search.waitForExistence(timeout: 5))
+        search.typeText("Test")
         let place = app.buttons["place-search-result"].firstMatch
         XCTAssertTrue(place.waitForExistence(timeout: 8))
         place.tap()

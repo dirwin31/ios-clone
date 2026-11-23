@@ -77,7 +77,7 @@ final class CommaConnection: ObservableObject {
         }
         return response.bodyData
     }
-    func startPhoneTrip(destination: NavigationDestination, route: Data, willSend: () -> Void) async throws {
+    func startPhoneTrip(destination: NavigationDestination, route: Data, willSend: () -> Void) async throws -> String {
         let before = session
         guard connected, deviceIdentity != nil, !setupInProgress else { throw BridgeError.message("Connect to your paired comma first.") }
         let status = try await transport.request(path: "/api/navigation/status", method: "GET", headers: [:], body: Data())
@@ -100,7 +100,7 @@ final class CommaConnection: ObservableObject {
                     throw PhoneTripRejection(message: "The active trip changed. Review the route and send it again.")
                 }
                 if reason.hasPrefix("Park and reconnect"), info["phoneRouteTripOnroad"] as? Bool != true {
-                    throw PhoneTripRejection(message: "This comma software accepts iPhone routes while parked. For on-road guidance, choose Comma and send the destination.")
+                    throw PhoneTripRejection(message: "This comma software accepts iPhone routes while parked. For on-road handoff, update the comma to a version that supports it.")
                 }
                 throw PhoneTripRejection(message: "The comma declined this trip. Refresh the route and try again.")
             }
@@ -109,9 +109,10 @@ final class CommaConnection: ObservableObject {
             }
             throw BridgeError.message("Comma returned HTTP \(reply.status) for the iPhone route.")
         }
-        struct Receipt: Decodable { let activeRouteSource: String; let destination: NavigationDestination }
+        struct Receipt: Decodable { let revision: String; let activeRouteSource: String; let destination: NavigationDestination }
         let receipt = try JSONDecoder().decode(Receipt.self, from: reply.bodyData)
-        guard receipt.activeRouteSource == "iphone", receipt.destination.matches(destination) else { throw NavigationContractError.invalidResponse }
+        guard receipt.activeRouteSource == "iphone", !receipt.revision.isEmpty, receipt.destination.matches(destination) else { throw NavigationContractError.invalidResponse }
+        return receipt.revision
     }
 
     func commaIsParked() async -> Bool? {

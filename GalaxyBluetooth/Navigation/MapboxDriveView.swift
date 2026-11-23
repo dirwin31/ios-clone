@@ -219,9 +219,11 @@ struct NavigationMapSettings: View {
     @ViewBuilder private var trips: some View {
         Section {
             Toggle("Enable navigation", isOn: $model.navigationEnabled)
-            Picker("Default guidance device", selection: $defaultComma) {
-                Text("Comma").tag(true)
-                Text("iPhone").tag(false)
+            if !offerPhoneTrip {
+                Picker("Default guidance device", selection: $defaultComma) {
+                    Text("Comma").tag(true)
+                    Text("iPhone").tag(false)
+                }
             }
             Picker("Distance units", selection: $units) {
                 Text("System").tag(NavigationDistanceUnits.system)
@@ -229,7 +231,7 @@ struct NavigationMapSettings: View {
                 Text("Imperial").tag(NavigationDistanceUnits.imperial)
             }
             Toggle("Remember destinations", isOn: $remember)
-        } header: { Text("Trips") } footer: { Text("The default selects a guidance device when you choose a destination. You can switch devices on the destination card before starting. Remember destinations saves recent places on this iPhone.") }
+        } header: { Text("Trips") } footer: { Text("Remember destinations saves recent places on this iPhone.") }
     }
 
     @ViewBuilder private var comma: some View {
@@ -237,16 +239,19 @@ struct NavigationMapSettings: View {
             NavigationLink("Map, routing and GPS") {
                 CommaNavigationPreferences(connection: model.navigationServices.connection)
             }
-            Toggle("Offer iPhone routes for comma assistance", isOn: $offerPhoneTrip)
+            Toggle("Send iPhone routes to comma", isOn: $offerPhoneTrip)
+                .onChange(of: offerPhoneTrip) { _, _ in Task { await model.navigationServices.navigation.refreshTripPreference() } }
             if offerPhoneTrip {
-                Text("Choose a Mapbox route, then select Start this route on comma on iPhone or CarPlay. Your comma tracks the trip using its current assistance settings. Older comma software requires parking for this handoff.").font(.footnote)
+                Text("Start Route sends your selected iPhone route to the paired comma. This uses Mapbox Driving or Mapbox Traffic and requires a public token. Older comma software requires parking for this handoff.").font(.footnote)
             }
-            Toggle("Preview iPhone routes with comma", isOn: $parkedPreview)
-            if parkedPreview {
+            if !offerPhoneTrip {
+                Toggle("Preview iPhone routes with comma", isOn: $parkedPreview)
+            }
+            if parkedPreview && !offerPhoneTrip {
                 Text("Choose iPhone on a destination, then select a short Mapbox Driving or Traffic route. Preview with comma checks that your parked device can read the route and shows the result on your phone.")
                     .font(.footnote)
             }
-        } footer: { Text("Choose the map, directions provider and GPS source used by your comma. These settings are saved on the device. Sharing iPhone GPS supplies your position. The comma still calculates its own turns.") }
+        } footer: { Text("Map, routing and GPS preferences are saved on your comma. Sharing iPhone GPS supplies its location. Sending an iPhone route also supplies the selected path and turns.") }
     }
 
     @ViewBuilder private var directions: some View {
@@ -255,11 +260,11 @@ struct NavigationMapSettings: View {
                 ForEach(["Automatic", "Apple Maps", "Mapbox Driving", "Mapbox Traffic", "Mapbox Navigator"] + ExternalNavigator.allCases.map(\.rawValue), id: \.self) { Text($0).tag($0) }
             }
             if ExternalNavigator(rawValue: router) == nil { Toggle("Offer alternative routes", isOn: $alternatives) }
-            if ["Mapbox Driving", "Mapbox Traffic"].contains(router) || (router == "Automatic" && enabled && token.hasPrefix("pk.")) {
+            if offerPhoneTrip || ["Mapbox Driving", "Mapbox Traffic"].contains(router) || (router == "Automatic" && enabled && token.hasPrefix("pk.")) {
                 Toggle("Show mapped intersections on iPhone", isOn: $mappedJunctions)
                 Text("During iPhone guidance, see signs, lights and rail crossings mapped at an upcoming junction. A sign may face another road. The navigation log records when a label appears or clears for drive review.").font(.footnote)
             }
-            if router.hasPrefix("Mapbox") || (router == "Automatic" && enabled && token.hasPrefix("pk.")) {
+            if offerPhoneTrip || router.hasPrefix("Mapbox") || (router == "Automatic" && enabled && token.hasPrefix("pk.")) {
                 NavigationLink("Roads and vehicle preferences") {
                     Form {
                         Section("Roads to avoid") {
@@ -510,7 +515,7 @@ struct MapboxDriveMap: View {
             let anchor = CGPoint(
                 x: carDisplay == nil ? (tripFrame.isEmpty ? bounds.width / 2 : min(bounds.width * 0.9, max(bounds.width * 0.1, tripFrame.midX - bounds.minX))) :
                     CarDisplayMapOptions.followX(in: carFrame, dashboard: carDisplay?.dashboard == true, rightToLeft: rtl),
-                y: max(bounds.height * 0.35, bounds.height - panel - (carDisplay == nil ? DrivePositionMarker.barClearance + DrivePositionMarker.diameter / 2 : 18)))
+                y: max(bounds.height * 0.35, bounds.height - panel - (carDisplay == nil ? DrivePositionMarker.barClearance + DrivePositionMarker.diameter / 2 : 10)))
             let dx = 2 * anchor.x - bounds.width, dy = 2 * anchor.y - bounds.height
             let padding = driving ? EdgeInsets(top: max(0, dy), leading: max(0, dx), bottom: max(0, -dy), trailing: max(0, -dx))
                                   : EdgeInsets(top: top, leading: 0, bottom: panel, trailing: 0)
@@ -552,14 +557,7 @@ struct MapboxDriveMap: View {
                                 .foregroundStyle(.white, StarPilotTheme.accent).accessibilityLabel("Starting point: \(start.name)")
                         }
                     }
-                    if carDisplay != nil, driving, following, let point = position(at: clock.date) {
-                        GeoJSONSource(id: "galaxy-car-position").data(.geometry(.point(Point(aligned(point)))))
-                        StyleImage(id: "galaxy-car-arrow", image: Self.carArrow)
-                        SymbolLayer(id: "galaxy-car-marker", source: "galaxy-car-position")
-                            .slot(.top).iconImage("galaxy-car-arrow")
-                            .iconPitchAlignment(.viewport).iconRotationAlignment(.viewport)
-                            .iconAllowOverlap(true).iconIgnorePlacement(true).iconOcclusionOpacity(1)
-                    } else if !(driving && following), let point = position(at: clock.date) {
+                    if !(driving && following), let point = position(at: clock.date) {
                         MapViewAnnotation(coordinate: aligned(point)) {
                             DrivePositionMarker(perspective: markerPerspective, following: false, comma: commaTrip)
                         }
@@ -574,6 +572,19 @@ struct MapboxDriveMap: View {
                 .onMapLoadingError {
                     if $0.type == .style {
                         navigation.notice = "Mapbox couldn’t load. Check your internet connection and public token in Navigation map settings."
+                    }
+                }
+                .overlay(alignment: .topLeading) {
+                    if carDisplay != nil, anchored, let fix = cameraFix {
+                        let live = position(at: clock.date) != nil
+                        let recent = commaTrip && navigation.commaFeedReady && (0...4).contains(clock.date.timeIntervalSince(fix.timestamp))
+                        if live || recent {
+                            Image(uiImage: Self.carArrow)
+                                .opacity(live ? 1 : 0.45)
+                                .position(anchor)
+                                .allowsHitTesting(false)
+                                .accessibilityHidden(true)
+                        }
                     }
                 }
             }
@@ -679,7 +690,7 @@ struct MapboxDriveMap: View {
                                      pitch: CGFloat(cameraPitch))
             .padding(padding)
         if reduceMotion || !continuous || layoutChanged { viewport = camera }
-        else { withViewportAnimation(.linear(duration: min(2.5, max(0.1, dt)))) { viewport = camera } }
+        else { withViewportAnimation(.linear(duration: min(carDisplay == nil ? 2.5 : 0.4, max(0.1, dt)))) { viewport = camera } }
     }
 
     private func updateCommaSpeed() {

@@ -13,6 +13,7 @@ enum NativeNavigationAPI {
         return max(0, guidanceDisplayMaxAge - ageUpperBound - elapsed)
     }
     struct State: Decodable {
+        let activeRouteSource: String?
         let revision: String
         let enabled: Bool
         let hasKey: Bool
@@ -145,6 +146,7 @@ enum NativeNavigationAPI {
                 "waitingForLocation": "Destination received. Waiting for GPS on comma.",
                 "routing": "Destination received. Comma is calculating the route.",
                 "routeUnavailable": "Comma couldn’t calculate a route.", "stale": "Waiting for fresh navigation from comma…"][state.status])
+        result.phoneTripRevision = state.activeRouteSource == "iphone" ? state.revision : nil
         result.routePoints = state.route.map { $0.map { RoutePoint(latitude: $0.latitude, longitude: $0.longitude) } }
         result.positionValidForSeconds = live ? (location?.validForMs ?? 0) / 1000 : 0
         try result.validate()

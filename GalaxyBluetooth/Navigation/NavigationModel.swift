@@ -249,6 +249,11 @@ final class NavigationModel: NSObject, ObservableObject, @preconcurrency CLLocat
     @Published private(set) var plannedStart: NavigationPlace?
     @Published var routes: [PhoneRoute] = [] { didSet { updateJunction(nil) } }
     @Published var selectedRoute = 0 { didSet { if oldValue != selectedRoute { updateJunction(nil) } } }
+    private var sentPhoneTripRevision: String?
+    private var confirmedPhoneTripRevision: String?
+    private var showingSentRoute: Bool {
+        commaFeedReady && sentPhoneTripRevision != nil && sentPhoneTripRevision == confirmedPhoneTripRevision
+    }
     @Published private(set) var mappedJunction: PhoneRoute.JunctionObservation?
     private func updateJunction(_ next: PhoneRoute.JunctionObservation?) {
         guard next != mappedJunction else { return }
@@ -380,7 +385,7 @@ final class NavigationModel: NSObject, ObservableObject, @preconcurrency CLLocat
     func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
         guard foreground, let latest = locations.last else { return }
         location = latest
-        if navigating, !usingComma, UserDefaults.standard.bool(forKey: "navigation.mappedJunctions") {
+        if navigating, !usingComma || showingSentRoute, UserDefaults.standard.bool(forKey: "navigation.mappedJunctions") {
             updateJunction(route?.upcomingJunction(at: latest))
         } else { updateJunction(nil) }
         guard let fresh = goodLocation else { locationMessage = "Waiting for a reliable GPS location."; return }
@@ -497,7 +502,8 @@ final class NavigationModel: NSObject, ObservableObject, @preconcurrency CLLocat
         onEvent?("Destination selected; busy: \(busy); navigating: \(navigating)")
         guard !navigating, !busy else { onEvent?("Destination selection blocked by current state"); return }
         plannedStart = nil
-        if let preferred = UserDefaults.standard.object(forKey: "navigation.defaultComma") as? Bool { sendToComma = preferred }
+        if phoneTripPreferred { sendToComma = false }
+        else if let preferred = UserDefaults.standard.object(forKey: "navigation.defaultComma") as? Bool { sendToComma = preferred }
         destination = place; routes = []; selectedRoute = 0; notice = ""; error = ""
         camera = .region(MKCoordinateRegion(center: place.coordinate, latitudinalMeters: 2500, longitudinalMeters: 2500))
         if !sendToComma { await calculateRoutes(refresh: false) }
@@ -513,6 +519,24 @@ final class NavigationModel: NSObject, ObservableObject, @preconcurrency CLLocat
         sendToComma = comma; error = ""
         if comma, plannedStart != nil { plannedStart = nil; routes = []; selectedRoute = 0 }
         if !comma && routes.isEmpty { await calculateRoutes(refresh: false) }
+    }
+    var phoneTripPreferred: Bool { UserDefaults.standard.bool(forKey: "navigation.offerPhoneTrip") }
+
+    func refreshTripPreference() async {
+        guard !navigating, !commandRunning, destination != nil else { return }
+        if phoneTripPreferred || UserDefaults.standard.object(forKey: "navigation.defaultComma") as? Bool == false {
+            await preview(from: nil)
+        } else {
+            revision = UUID()
+            directions?.cancel()
+            recalculating = false
+            busy = false
+            sendToComma = true
+            plannedStart = nil
+            routes = []
+            selectedRoute = 0
+            error = ""
+        }
     }
     func preview(from place: NavigationPlace?) async {
         guard !navigating, !commandRunning, destination != nil else { return }
@@ -532,7 +556,8 @@ final class NavigationModel: NSObject, ObservableObject, @preconcurrency CLLocat
         #endif
         onEvent?("Route calculation requested; refresh: \(refresh); destination: \(destination != nil); active: \(foreground); calculating: \(recalculating)")
         guard let destination, foreground, !sendToComma, !commandRunning, !recalculating else { onEvent?("Route calculation skipped by current state"); return }
-        let preferredRouter = UserDefaults.standard.string(forKey: "navigation.phoneRouter") ?? "Automatic"
+        let savedRouter = UserDefaults.standard.string(forKey: "navigation.phoneRouter") ?? "Automatic"
+        let preferredRouter = phoneTripPreferred && savedRouter != "Mapbox Traffic" ? "Mapbox Driving" : savedRouter
         if !refresh, ExternalNavigator(rawValue: preferredRouter) != nil || (plannedStart == nil && preferredRouter == "Mapbox Navigator") { return }
         let token = UUID(); revision = token
         directions?.cancel()
@@ -575,7 +600,7 @@ final class NavigationModel: NSObject, ObservableObject, @preconcurrency CLLocat
         lastCalculation = Date()
         do {
             let choices: [PhoneRoute]
-            let router = UserDefaults.standard.string(forKey: "navigation.phoneRouter") ?? "Automatic"
+            let router = preferredRouter
             let savedToken = UserDefaults.standard.string(forKey: NavigationMapPreference.tokenKey)
             if router.hasPrefix("Mapbox") && savedToken?.hasPrefix("pk.") != true {
                 error = "Save a Mapbox public token in Navigation settings to use Mapbox directions."
@@ -623,6 +648,7 @@ final class NavigationModel: NSObject, ObservableObject, @preconcurrency CLLocat
         busy = true; commandRunning = true; connection.busy = true
         defer { if generation == commandGeneration { busy = false; commandRunning = false; connection.busy = false } }
         error = ""; notice = ""; commaDestination = nil; commaIdentity = nil
+        sentPhoneTripRevision = nil; confirmedPhoneTripRevision = nil
         if useComma {
             let identity: String
             do { identity = try await connection.ensureDeviceIdentity(); guard generation == commandGeneration else { return } }
@@ -645,7 +671,9 @@ final class NavigationModel: NSObject, ObservableObject, @preconcurrency CLLocat
                 onEvent?("Destination send requested (details omitted)")
                 if phoneRouteOnComma {
                     guard let data = route?.commaPreview else { throw BridgeError.message("Choose a short Mapbox driving route first.") }
-                    try await connection.startPhoneTrip(destination: destinationPayload, route: data) { sending = true }
+                    let acceptedRevision = try await connection.startPhoneTrip(destination: destinationPayload, route: data) { sending = true }
+                    guard generation == commandGeneration else { return }
+                    sentPhoneTripRevision = acceptedRevision
                 } else {
                     _ = try await connection.navigation(.start(destinationPayload)) { sending = true }
                 }
@@ -744,6 +772,8 @@ final class NavigationModel: NSObject, ObservableObject, @preconcurrency CLLocat
                     try await Task.sleep(for: .seconds(2))
                     continue
                 }
+                confirmedPhoneTripRevision = snapshot.phoneTripRevision
+                if !showingSentRoute { updateJunction(nil) }
                 guard snapshot.status == "active", let instructions = snapshot.instruction else {
                     if snapshot.error?.isEmpty == false { clearCommaDisplay(snapshot.error!) }
                     else if snapshot.status == "waiting" {
@@ -818,7 +848,7 @@ final class NavigationModel: NSObject, ObservableObject, @preconcurrency CLLocat
     private var commaPositionExpires: Date?
     func checkCommaFreshness() {
         if mappedJunction != nil,
-           !UserDefaults.standard.bool(forKey: "navigation.mappedJunctions") ||
+           !navigating || (usingComma && !showingSentRoute) || !UserDefaults.standard.bool(forKey: "navigation.mappedJunctions") ||
            abs(location?.timestamp.timeIntervalSinceNow ?? .infinity) > 3 {
             updateJunction(nil)
         }

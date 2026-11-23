@@ -39,6 +39,13 @@ import Foundation
             let mile = NavigationDistanceUnits.imperial.measurement(1609.344)
             precondition(mile.unit == .miles && abs(mile.value - 1) < 0.00001)
         }
+        let status = NativeComma().response
+        let legacyFeed = try NativeNavigationAPI.snapshot(JSONSerialization.data(withJSONObject: status))
+        precondition(legacyFeed.phoneTripRevision == nil)
+        var handoff = status
+        handoff["activeRouteSource"] = "iphone"
+        let phoneFeed = try NativeNavigationAPI.snapshot(JSONSerialization.data(withJSONObject: handoff))
+        precondition(phoneFeed.phoneTripRevision == "a")
         let straight = [RoutePoint(latitude: 43, longitude: -80), RoutePoint(latitude: 43.01, longitude: -80)]
         let beside = RoutePoint(latitude: 43.005, longitude: -79.9999)
         let aligned = NavigationMapMotion.routeAligned(beside, route: straight)

@@ -21,6 +21,7 @@ struct PlaceSearch: View {
     var choosingStart = false
     let onSelect: (NavigationPlace) -> Void
     @State private var query = ""
+    @State private var searchPresented = false
     @Environment(\.dismiss) private var dismiss
     var body: some View {
         NavigationStack {
@@ -76,7 +77,8 @@ struct PlaceSearch: View {
                 .padding(.horizontal, 16).padding(.bottom, 16)
             }
             .navigationTitle(choosingStart ? "Starting point" : saveAs == .home ? "Add Home" : saveAs == .work ? "Add Work" : saveAs == .favorite ? "Add Favorite" : "Search Maps")
-            .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search places or addresses")
+            .searchable(text: $query, isPresented: $searchPresented, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search places or addresses")
+            .onAppear { searchPresented = true }
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } } }
             .onChange(of: query, initial: true) { _, text in navigation.suggest(text, choosingStart: choosingStart) }
             .onDisappear { navigation.cancelPlaceSearch() }

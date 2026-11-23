@@ -990,23 +990,22 @@ private struct NavigationDestinationPanel: View {
                 }
             }
             .font(.subheadline)
-            Picker("Route guidance", selection: Binding(get: { navigation.sendToComma }, set: { useComma in
-                Task { await navigation.selectGuidanceSource(comma: useComma) }
-            })) {
-                Text("Comma").tag(true)
-                Text("iPhone").tag(false)
+            if !offerPhoneTrip {
+                Picker("Route guidance", selection: Binding(get: { navigation.sendToComma }, set: { useComma in
+                    Task { await navigation.selectGuidanceSource(comma: useComma) }
+                })) {
+                    Text("Comma").tag(true)
+                    Text("iPhone").tag(false)
+                }
+                .pickerStyle(.segmented)
+                .disabled(navigation.busy)
             }
-            .pickerStyle(.segmented)
-            .disabled(navigation.busy)
-
-            if !navigation.sendToComma {
-                Text(offerPhoneTrip && ["Mapbox Driving", "Mapbox Traffic", "Automatic"].contains(router)
-                    ? "Your iPhone calculates the route. Choose Start this route on comma to send it to your device, or Start on iPhone for phone guidance."
-                    : "Your phone handles directions for this trip. Starting it leaves any route on your comma alone.")
+            if !navigation.sendToComma && !offerPhoneTrip {
+                Text("Your phone handles directions for this trip. Starting it leaves any route on your comma alone.")
                     .font(.footnote).foregroundStyle(.secondary)
             }
 
-            if navigation.sendToComma {
+            if navigation.sendToComma && !offerPhoneTrip {
                 let queued = inbox.waiting?.place
                 let samePlace = queued != nil && queued?.latitude == navigation.destination?.coordinate.latitude
                     && queued?.longitude == navigation.destination?.coordinate.longitude
@@ -1024,13 +1023,13 @@ private struct NavigationDestinationPanel: View {
                 .disabled(navigation.busy || samePlace)
                 Text(connection.connected ? "Your comma calculates the turns. Choose iPhone above to get directions using your phone instead." : "Send when connected queues the destination for your comma. Choose iPhone above for directions now.")
                     .font(.footnote).foregroundStyle(.secondary)
-            } else if let external = ExternalNavigator(rawValue: router), let place = navigation.destination,
+            } else if !offerPhoneTrip, let external = ExternalNavigator(rawValue: router), let place = navigation.destination,
                       let url = external.directions(to: place.coordinate) {
                 Link("Open destination in " + external.rawValue, destination: url)
                     .buttonStyle(.borderedProminent)
                 Text("The selected service opens with your destination and handles guidance from your location.")
                     .font(.footnote).foregroundStyle(.secondary)
-            } else if router == "Mapbox Navigator" && navigation.plannedStart == nil {
+            } else if !offerPhoneTrip && router == "Mapbox Navigator" && navigation.plannedStart == nil {
                 Button("Start Mapbox Navigator on iPhone") {
                     guard let place = navigation.destination else { return }
                     guard mapToken.hasPrefix("pk.") else {
@@ -1068,7 +1067,7 @@ private struct NavigationDestinationPanel: View {
                     }.buttonStyle(.plain)
                     .accessibilityAddTraits(navigation.selectedRoute == index ? .isSelected : [])
                 }
-                if let selected = navigation.route {
+                if !offerPhoneTrip, let selected = navigation.route {
                     if let body = selected.commaPreview {
                         if !parkedPreview {
                             Button {
@@ -1087,20 +1086,16 @@ private struct NavigationDestinationPanel: View {
                     }
                 }
                 if navigation.plannedStart == nil {
-                    if offerPhoneTrip, navigation.route?.commaPreview != nil {
-                        Button("Start this route on comma") {
-                            Task { await navigation.start(connection: connection, phoneRouteOnComma: true) }
-                        }
-                        .buttonStyle(.bordered)
-                        .disabled(!connection.connected)
-                        if !connection.connected {
-                            Text("Connect to your paired comma to send this route.").font(.footnote)
-                        }
-                    } else if offerPhoneTrip {
-                        Text("To send the route itself, choose Mapbox Driving or Mapbox Traffic and try a shorter trip.").font(.footnote)
+                    Button(offerPhoneTrip ? "Start Route" : "Start on iPhone") {
+                        Task { await navigation.start(connection: connection, phoneRouteOnComma: offerPhoneTrip) }
                     }
-                    Button("Start on iPhone") { Task { await navigation.start(connection: connection) } }
-                        .buttonStyle(.borderedProminent)
+                    .buttonStyle(.borderedProminent)
+                    .disabled(offerPhoneTrip && (!connection.connected || navigation.route?.commaPreview == nil))
+                    if offerPhoneTrip {
+                        Text(!connection.connected ? "Connect to your paired comma to start." : navigation.route?.commaPreview == nil
+                             ? "This route exceeds the comma’s route transfer limit. Choose a shorter trip."
+                             : "Uses the selected iPhone route on your comma.").font(.footnote)
+                    }
                 } else {
                     Text("Preview from your chosen starting point. Use your current location to start guidance.")
                         .font(.footnote).foregroundStyle(.secondary)

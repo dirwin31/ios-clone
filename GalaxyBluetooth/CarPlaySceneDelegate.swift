@@ -227,16 +227,21 @@ final class CarPlaySceneDelegate: NSObject, CPTemplateApplicationSceneDelegate, 
                 let detail = nav.busy ? (nav.sendToComma ? "Sending destination…" : "Getting directions…") : destination.address
                 rows.append(.init(title: destination.name, detail: detail, icon: "mappin.circle.fill", action: .info))
                 if !nav.busy {
-                    if nav.sendToComma && !services.connection.connected {
+                    if nav.phoneTripPreferred {
+                        if !services.connection.connected {
+                            rows.append(.init(title: "Connect to your comma", detail: "Required to start the iPhone route", icon: "car.fill", action: .info))
+                        } else if nav.route == nil {
+                            rows.append(.init(title: "Get directions", detail: "Calculate the iPhone route", icon: "map", action: .directions))
+                        } else if nav.route?.commaPreview == nil || nav.plannedStart != nil {
+                            rows.append(.init(title: "Route unavailable for handoff", detail: "Choose a shorter trip from your current location", icon: "map", action: .info))
+                        } else {
+                            rows.append(.init(title: "Start Route", detail: "Use the selected iPhone route on comma", icon: "car.fill", action: .phoneTrip(destination.id)))
+                        }
+                    } else if nav.sendToComma && !services.connection.connected {
                         rows.append(.init(title: "Get iPhone directions", detail: "Comma is disconnected", icon: "iphone", action: .phone))
                     } else if !nav.sendToComma && nav.route == nil {
                         rows.append(.init(title: "Get directions", detail: "Preview the route on iPhone", icon: "arrow.triangle.turn.up.right.diamond", action: .directions))
                     } else {
-                        if !nav.sendToComma, services.connection.connected, nav.plannedStart == nil,
-                           UserDefaults.standard.bool(forKey: "navigation.offerPhoneTrip"), nav.route?.commaPreview != nil {
-                            rows.append(.init(title: "Start this route on comma", detail: "Use the selected iPhone route",
-                                              icon: "car.fill", action: .phoneTrip(destination.id)))
-                        }
                         rows.append(.init(title: nav.sendToComma ? "Send to comma" : "Start on iPhone",
                                           detail: nav.sendToComma ? "Comma calculates the route" : destination.name,
                                           icon: "location.fill", action: .start(destination.id)))
@@ -1438,7 +1443,7 @@ private final class CompanionCarPlayMap: UIViewController, MKMapViewDelegate {
         let x = CarDisplayMapOptions.followX(in: safe.isEmpty ? frame : safe, dashboard: dashboard,
                                              rightToLeft: map.effectiveUserInterfaceLayoutDirection == .rightToLeft)
         let anchor = CGPoint(x: x,
-                             y: frame.minY + max(frame.height * 0.45, frame.height - (dashboard ? 30 : min(68, frame.height * 0.26))))
+                             y: frame.minY + max(frame.height * 0.45, frame.height - (dashboard ? 26 : min(60, frame.height * 0.23))))
         let ground = map.convert(anchor, toCoordinateFrom: map)
         if CLLocationCoordinate2DIsValid(ground), current.centerCoordinateDistance > 0 {
             let center = MKMapPoint(current.centerCoordinate)
