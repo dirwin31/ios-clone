@@ -1494,7 +1494,12 @@ private final class CompanionCarPlayMap: UIViewController, MKMapViewDelegate {
     func update(_ navigation: NavigationModel) {
         loadViewIfNeeded()
         if let token = NavigationMapPreference.activeToken {
-            let options = CarDisplayMapOptions(overview: showingOverview, zoomFactor: zoomFactor, dashboard: dashboard)
+            let phoneScene = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+                .first { $0.session.role == .windowApplication }
+            let height = view.bounds.height
+            let options = CarDisplayMapOptions(overview: showingOverview, zoomFactor: zoomFactor, dashboard: dashboard,
+                phoneMapHeight: phoneScene?.coordinateSpace.bounds.height ?? height, mapHeight: height,
+                maximumFPS: Float(max(1, min(60, view.window?.screen.maximumFramesPerSecond ?? 60))))
             if lastMapboxToken != token || lastMapboxOptions != options {
                 let screen = MapboxDriveMap(navigation: navigation, token: token,
                                            markerPerspective: markerPerspective, tripFrame: .zero, carDisplay: options)

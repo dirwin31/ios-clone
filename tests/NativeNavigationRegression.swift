@@ -84,6 +84,18 @@ import Foundation
             preconditionFailure("A cancelled trip was sent")
         } catch is CancellationError { }
         precondition(peer.writes.count == 2)
+        precondition(NavigationMapMotion.carPlayAnimationDuration(interval: 1, fixAge: 0) == 1)
+        precondition(NavigationMapMotion.carPlayAnimationDuration(interval: 1, fixAge: 0.75) == 0.25)
+        precondition(NavigationMapMotion.carPlayAnimationDuration(interval: 1, fixAge: 2) == 0.1)
+        let landscapePitch = NavigationMapMotion.carPlayCruisingPitch(68, mapHeight: 300, phoneHeight: 800)
+        precondition((68...76).contains(landscapePitch) && landscapePitch > 68)
+        let ray = atan(1.0 / 3.0)
+        let phoneReach = 800 / cos(68 * .pi / 180 + ray)
+        let carReach = 300 / cos(landscapePitch * .pi / 180 + ray)
+        precondition(abs(carReach / phoneReach - 1) < 0.0001)
+        precondition(NavigationMapMotion.carPlayCruisingPitch(68, mapHeight: 880, phoneHeight: 800) == 68)
+        precondition(NavigationMapMotion.carPlayCruisingPitch(0, mapHeight: 300, phoneHeight: 800) == 0)
+        precondition(NavigationMapMotion.carPlayCruisingPitch(80, mapHeight: 300, phoneHeight: 800) == 80)
         let straight = [RoutePoint(latitude: 43, longitude: -80), RoutePoint(latitude: 43.01, longitude: -80)]
         let beside = RoutePoint(latitude: 43.005, longitude: -79.9999)
         let aligned = NavigationMapMotion.routeAligned(beside, route: straight)

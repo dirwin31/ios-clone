@@ -866,17 +866,14 @@ final class NavigationModel: NSObject, ObservableObject, @preconcurrency CLLocat
                     try await Task.sleep(for: .seconds(2))
                     continue
                 }
-                if let points = snapshot.routePoints {
-                    guard points.count >= 2 else { throw NavigationContractError.invalidResponse }
-                    let coordinates = points.map { CLLocationCoordinate2D(latitude: $0.latitude, longitude: $0.longitude) }
-                    cachedCommaPolyline = MKPolyline(coordinates: coordinates, count: coordinates.count)
-                    commaRouteVersion = snapshot.routeVersion
-                } else if let encoded = snapshot.polyline6 {
-                    let points = try RoutePolyline.decode(encoded)
-                    guard points.count >= 2 else { throw NavigationContractError.invalidResponse }
-                    let coordinates = points.map { CLLocationCoordinate2D(latitude: $0.latitude, longitude: $0.longitude) }
-                    cachedCommaPolyline = MKPolyline(coordinates: coordinates, count: coordinates.count)
-                    commaRouteVersion = snapshot.routeVersion
+                if cachedCommaPolyline == nil || commaRouteVersion != snapshot.routeVersion {
+                    let points = try snapshot.routePoints ?? snapshot.polyline6.map { try RoutePolyline.decode($0) }
+                    if let points {
+                        guard points.count >= 2 else { throw NavigationContractError.invalidResponse }
+                        let coordinates = points.map { CLLocationCoordinate2D(latitude: $0.latitude, longitude: $0.longitude) }
+                        cachedCommaPolyline = MKPolyline(coordinates: coordinates, count: coordinates.count)
+                        commaRouteVersion = snapshot.routeVersion
+                    }
                 }
                 guard cachedCommaPolyline != nil, commaRouteVersion == snapshot.routeVersion else {
                     clearCommaDisplay("Waiting for comma’s updated route…", discardRoute: true)
