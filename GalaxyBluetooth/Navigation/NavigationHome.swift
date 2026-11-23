@@ -990,6 +990,11 @@ private struct NavigationDestinationPanel: View {
             .pickerStyle(.segmented)
             .disabled(navigation.busy)
 
+            if !navigation.sendToComma {
+                Text("Your phone handles directions for this trip. Starting it leaves any route on your comma alone.")
+                    .font(.footnote).foregroundStyle(.secondary)
+            }
+
             if navigation.sendToComma {
                 let queued = inbox.waiting?.place
                 let samePlace = queued != nil && queued?.latitude == navigation.destination?.coordinate.latitude
@@ -1006,7 +1011,7 @@ private struct NavigationDestinationPanel: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .disabled(navigation.busy || samePlace)
-                Text(connection.connected ? "Your comma will calculate the route." : "Galaxy will send the destination when your comma connects.")
+                Text(connection.connected ? "Your comma calculates the turns. Choose iPhone above to get directions using your phone instead." : "Send when connected queues the destination for your comma. Choose iPhone above for directions now.")
                     .font(.footnote).foregroundStyle(.secondary)
             } else if let external = ExternalNavigator(rawValue: router), let place = navigation.destination,
                       let url = external.directions(to: place.coordinate) {

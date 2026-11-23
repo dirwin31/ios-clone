@@ -138,6 +138,23 @@ struct NavigationMapSettings: View {
     @State private var styleEntry = ""
     @AppStorage("navigation.studioStyle") private var studioStyle = ""
     @State private var entry = ""
+
+    private var providerExplanation: String {
+        switch router {
+        case "Apple Maps":
+            return "Apple calculates the route using your iPhone. Galaxy shows the turns on iPhone and CarPlay. You can use this without a comma or a Mapbox key."
+        case "Mapbox Driving":
+            return "Mapbox calculates a driving route using your iPhone’s connection and public token. Galaxy displays the directions on iPhone and CarPlay."
+        case "Mapbox Traffic":
+            return "Mapbox uses reported traffic speeds to choose a route and estimate arrival. The traffic overlay under Map appearance controls which slowdowns you see."
+        case "Mapbox Navigator":
+            return "Opens Mapbox’s spoken turn-by-turn guidance on iPhone. Download an area in advance to use its routing data offline."
+        case "Google Maps app", "Waze app":
+            return "Opens the destination in the selected service. That service calculates the trip and provides the directions."
+        default:
+            return "Galaxy uses Mapbox Driving when the Mapbox display map and a public token are available. Otherwise it uses Apple Maps. Choose iPhone on the destination card to use this provider independently of your comma."
+        }
+    }
     var body: some View {
         NavigationStack {
             Form {
@@ -153,12 +170,12 @@ struct NavigationMapSettings: View {
                         Text("Imperial").tag(NavigationDistanceUnits.imperial)
                     }
                     Toggle("Remember destinations", isOn: $remember)
-                } header: { Text("Trips") } footer: { Text("Recents are stored on this iPhone.") }
+                } header: { Text("Trips") } footer: { Text("The default selects a guidance device when you choose a destination. You can switch devices on the destination card before starting. Remember destinations saves recent places on this iPhone.") }
                 Section {
                     NavigationLink("Comma navigation settings") {
                         CommaNavigationPreferences(connection: model.navigationServices.connection)
                     }
-                } footer: { Text("Read and change the settings stored on your paired comma over the active connection.") }
+                } footer: { Text("Choose the map, directions provider and GPS source used by your comma. These settings are saved on the device. Sharing iPhone GPS supplies your position. The comma still calculates its own turns.") }
                 Section {
                     Picker("Directions provider", selection: $router) {
                         ForEach(["Automatic", "Apple Maps", "Mapbox Driving", "Mapbox Traffic", "Mapbox Navigator"] + ExternalNavigator.allCases.map(\.rawValue), id: \.self) { Text($0).tag($0) }
@@ -186,7 +203,7 @@ struct NavigationMapSettings: View {
                         }
                     }
                 } header: { Text("iPhone directions") } footer: {
-                    Text("Automatic follows the selected map. Mapbox Traffic uses reported road speeds when calculating a drive. These preferences apply when you choose iPhone on the destination card. Comma guidance uses your comma’s routing settings and internet connection.")
+                    Text(providerExplanation)
                 }
                 Section {
                     Picker("Display map", selection: $enabled) {
