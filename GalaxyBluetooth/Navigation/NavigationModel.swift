@@ -588,8 +588,7 @@ final class NavigationModel: NSObject, ObservableObject, @preconcurrency CLLocat
         onEvent?("Destination selected; busy: \(busy); navigating: \(navigating)")
         guard !navigating, !busy else { onEvent?("Destination selection blocked by current state"); return }
         plannedStart = nil
-        if phoneTripPreferred { sendToComma = false }
-        else if let preferred = UserDefaults.standard.object(forKey: "navigation.defaultComma") as? Bool { sendToComma = preferred }
+        sendToComma = !phoneOnlyDirections
         followsUser = false
         destination = place; routes = []; selectedRoute = 0; notice = ""; error = ""
         camera = .region(MKCoordinateRegion(center: place.coordinate, latitudinalMeters: 2500, longitudinalMeters: 2500))
@@ -602,17 +601,12 @@ final class NavigationModel: NSObject, ObservableObject, @preconcurrency CLLocat
         followsUser = false
         camera = .rect(routes[index].polyline.boundingMapRect)
     }
-    func selectGuidanceSource(comma: Bool) async {
-        guard !busy, !navigating, comma != sendToComma else { return }
-        sendToComma = comma; error = ""
-        if comma, plannedStart != nil { plannedStart = nil; routes = []; selectedRoute = 0 }
-        if !comma && routes.isEmpty { await calculateRoutes(refresh: false) }
-    }
-    var phoneTripPreferred: Bool { UserDefaults.standard.bool(forKey: "navigation.offerPhoneTrip") }
+    nonisolated static let phoneOnlyKey = "navigation.usePhoneOnlyDirections"
+    private var phoneOnlyDirections: Bool { UserDefaults.standard.bool(forKey: Self.phoneOnlyKey) }
 
     func refreshTripPreference() async {
         guard !navigating, !commandRunning, destination != nil else { return }
-        if phoneTripPreferred || UserDefaults.standard.object(forKey: "navigation.defaultComma") as? Bool == false {
+        if phoneOnlyDirections {
             await preview(from: nil)
         } else {
             revision = UUID()
@@ -627,7 +621,7 @@ final class NavigationModel: NSObject, ObservableObject, @preconcurrency CLLocat
         }
     }
     func preview(from place: NavigationPlace?) async {
-        guard !navigating, !commandRunning, destination != nil else { return }
+        guard phoneOnlyDirections, !navigating, !commandRunning, destination != nil else { return }
         revision = UUID()
         directions?.cancel()
         recalculating = false
@@ -650,7 +644,7 @@ final class NavigationModel: NSObject, ObservableObject, @preconcurrency CLLocat
                                             : CLLocationCoordinate2D(latitude: end.latitude, longitude: origin.longitude)
                     let line = MKPolyline(coordinates: [origin, corner, end], count: 3)
                     let provider = PhoneRoute.directionsProvider(UserDefaults.standard.string(forKey: "navigation.phoneRouter") ?? "Automatic",
-                                                                sharing: phoneTripPreferred, automaticUsesMapbox: NavigationMapPreference.activeToken != nil)
+                                                                sharing: false, automaticUsesMapbox: NavigationMapPreference.activeToken != nil)
                     return PhoneRoute(directionsProvider: provider, name: sample.0, distance: sample.2, expectedTravelTime: sample.1, polyline: line, steps: [])
                 }
                 chooseRoute(0)
@@ -663,7 +657,7 @@ final class NavigationModel: NSObject, ObservableObject, @preconcurrency CLLocat
         onEvent?("Route calculation requested; refresh: \(refresh); destination: \(destination != nil); active: \(foreground); calculating: \(recalculating)")
         guard let destination, foreground, !sendToComma, !commandRunning, !recalculating else { onEvent?("Route calculation skipped by current state"); return }
         let savedRouter = UserDefaults.standard.string(forKey: "navigation.phoneRouter") ?? "Automatic"
-        let preferredRouter = PhoneRoute.directionsProvider(savedRouter, sharing: phoneTripPreferred, automaticUsesMapbox: NavigationMapPreference.activeToken != nil)
+        let preferredRouter = PhoneRoute.directionsProvider(savedRouter, sharing: false, automaticUsesMapbox: NavigationMapPreference.activeToken != nil)
         if !refresh, ExternalNavigator(rawValue: preferredRouter) != nil || (plannedStart == nil && preferredRouter == "Mapbox Navigator") { return }
         let token = UUID(); revision = token
         directions?.cancel()
@@ -753,7 +747,7 @@ final class NavigationModel: NSObject, ObservableObject, @preconcurrency CLLocat
             error = "Refreshing your location. Tap Go again in a moment."
             return
         }
-        guard !useComma || connection.connected else { onEvent?("Go blocked: comma disconnected"); error = "Connect to comma or choose iPhone for directions."; return }
+        guard !useComma || connection.connected else { onEvent?("Go blocked: comma disconnected"); error = "Connect to your comma to start this trip."; return }
         let generation = commandGeneration
         busy = true; commandRunning = true; connection.busy = true
         defer { if generation == commandGeneration { busy = false; commandRunning = false; connection.busy = false } }

@@ -184,9 +184,7 @@ struct NavigationMapSettings: View {
     @AppStorage("navigation.sdkIntersections") private var intersections = true
     @AppStorage("navigation.sdkDarkTunnels") private var darkTunnels = true
     @AppStorage("navigation.sdkFadeRoute") private var fadeRoute = true
-    @AppStorage("navigation.offerPhoneTrip") private var offerPhoneTrip = false
-    @AppStorage("navigation.parkedPhonePreview") private var parkedPreview = false
-    @AppStorage("navigation.defaultComma") private var defaultComma = true
+    @AppStorage(NavigationModel.phoneOnlyKey) private var phoneOnly = false
     @AppStorage("navigation.avoidCashTolls") private var cashTolls = false
     @AppStorage("navigation.avoidUnpaved") private var unpaved = false
     @AppStorage("navigation.vehicleLimits") private var limits = false
@@ -201,20 +199,17 @@ struct NavigationMapSettings: View {
     @AppStorage("navigation.studioStyle") private var studioStyle = ""
     @State private var entry = ""
     @State private var initialRouteOptions: [AnyHashable] = []
-    @State private var initialDeviceOptions: [Bool] = []
+    @State private var initialPhoneOnly = false
 
     private var routeOptions: [AnyHashable] {
         [router, enabled, token, alternatives, tolls, cashTolls, ferries, motorways, unpaved, limits, height, width, weight]
     }
 
     private var effectiveProvider: String {
-        PhoneRoute.directionsProvider(router, sharing: offerPhoneTrip, automaticUsesMapbox: enabled && token.hasPrefix("pk."))
+        PhoneRoute.directionsProvider(router, sharing: false, automaticUsesMapbox: enabled && token.hasPrefix("pk."))
     }
 
     private var providerExplanation: String {
-        if offerPhoneTrip {
-            return "Your iPhone calculates the route with \(effectiveProvider). Start Route sends your selected path and turns to your paired comma. To use Apple Maps for directions, turn off “Send iPhone routes to comma” in Comma settings."
-        }
         switch router {
         case "Apple Maps":
             return "Apple calculates the route using your iPhone. Galaxy shows the turns on iPhone and CarPlay. You can use this without a comma or a Mapbox key."
@@ -225,11 +220,11 @@ struct NavigationMapSettings: View {
         case "Mapbox Navigator":
             return "Opens Mapbox’s spoken turn-by-turn guidance on iPhone. Download an area in advance to use its routing data offline."
         case "Google Maps app":
-            return "Opens the destination in the Google Maps app on iPhone. For Google Routes on your comma, choose Comma navigation and set its directions provider in Comma settings."
+            return "Opens the destination in the Google Maps app on iPhone. For Google Routes on your comma, turn off iPhone-only directions and select Google Routes in Comma settings."
         case "Waze app":
             return "Opens the destination in the selected service. That service calculates the trip and provides the directions."
         default:
-            return "Galaxy uses Mapbox Driving when the Mapbox display map and a public token are available. Otherwise it uses Apple Maps. Choose iPhone on the destination card to use this provider independently of your comma."
+            return "Galaxy uses Mapbox Driving when the Mapbox display map and a public token are available. Otherwise it uses Apple Maps."
         }
     }
     var body: some View {
@@ -237,12 +232,14 @@ struct NavigationMapSettings: View {
             Form {
                 trips.listRowBackground(menuPanel)
                 Section {
-                    settingLink("iPhone directions", icon: "iphone", detail: offerPhoneTrip ? "\(effectiveProvider) · Sends route to comma" : effectiveProvider) {
-                        self.directions
-                        self.navigator
+                    settingLink("Comma settings", icon: "car.fill", detail: "Google Routes, Mapbox and GPS") {
+                        CommaNavigationPreferences(connection: model.navigationServices.connection)
                     }
-                    settingLink("Comma settings", icon: "car.fill", detail: "Google Routes, Mapbox, route sharing and GPS") {
-                        self.comma
+                    if phoneOnly {
+                        settingLink("iPhone directions", icon: "iphone", detail: effectiveProvider) {
+                            self.directions
+                            self.navigator
+                        }
                     }
                     settingLink("Map appearance", icon: "map.fill", detail: "Map style, traffic, camera and Mapbox token") {
                         self.appearance
@@ -259,12 +256,12 @@ struct NavigationMapSettings: View {
         }.onAppear {
             entry = token; styleEntry = studioStyle
             initialRouteOptions = routeOptions
-            initialDeviceOptions = [offerPhoneTrip, defaultComma]
+            initialPhoneOnly = phoneOnly
         }
         .onDisappear {
             let nav = model.navigationServices.navigation
             guard model.navigationEnabled, !nav.navigating, nav.destination != nil else { return }
-            if initialDeviceOptions != [offerPhoneTrip, defaultComma] {
+            if initialPhoneOnly != phoneOnly {
                 Task { await nav.refreshTripPreference() }
             } else if !nav.sendToComma, routeOptions != initialRouteOptions {
                 Task { await nav.preview(from: nav.plannedStart) }
@@ -306,12 +303,11 @@ struct NavigationMapSettings: View {
     @ViewBuilder private var trips: some View {
         Section {
             Toggle("Enable navigation", isOn: $model.navigationEnabled)
-            if !offerPhoneTrip {
-                Picker("Default trip mode", selection: $defaultComma) {
-                    Text("Comma navigation").tag(true)
-                    Text("iPhone only").tag(false)
-                }
-            }
+            Toggle("Use iPhone-only directions", isOn: $phoneOnly)
+                .accessibilityIdentifier("navigation-phone-only")
+            Text(phoneOnly ? "New trips use your iPhone for directions. Your comma receives no destination."
+                           : "Your iPhone sends the destination to your comma. Choose Mapbox or Google Routes in Comma settings.")
+                .font(.footnote).foregroundStyle(.secondary)
             Picker("Distance units", selection: $units) {
                 Text("System").tag(NavigationDistanceUnits.system)
                 Text("Metric").tag(NavigationDistanceUnits.metric)
@@ -321,45 +317,17 @@ struct NavigationMapSettings: View {
         } header: { Text("Trips") } footer: { Text("Remember destinations saves recent places on this iPhone.") }
     }
 
-    @ViewBuilder private var comma: some View {
-        Section {
-                NavigationLink("Directions provider, map and GPS") {
-                CommaNavigationPreferences(connection: model.navigationServices.connection)
-            }
-                Text("Choose Google Routes or Mapbox for trips started with Comma navigation.").font(.footnote)
-            Toggle("Send iPhone routes to comma", isOn: $offerPhoneTrip)
-            if offerPhoneTrip {
-                Text("Your iPhone uses \(effectiveProvider) and needs a public Mapbox key. Start Route sends the path and turns to your paired comma. Older comma software requires you to park before sending.").font(.footnote)
-                Text("Your comma can use upcoming turns with its enabled driving assistance. You’re responsible for making the turn.").font(.footnote)
-            }
-            if !offerPhoneTrip {
-                Toggle("Preview iPhone routes with comma", isOn: $parkedPreview)
-            }
-            if parkedPreview && !offerPhoneTrip {
-                Text("Choose iPhone on a destination, then select a short Mapbox Driving or Traffic route. Preview with comma checks that your parked device can read the route and shows the result on your phone.")
-                    .font(.footnote)
-            }
-        } footer: { Text("Map, routing and GPS preferences are saved on your comma. Sharing iPhone GPS supplies its location. Sending an iPhone route also supplies the selected path and turns.") }
-    }
-
     @ViewBuilder private var directions: some View {
         Section {
-            if offerPhoneTrip {
-                Picker("Provider for shared routes", selection: Binding(get: { effectiveProvider }, set: { router = $0 })) {
-                    Text("Mapbox Driving").tag("Mapbox Driving")
-                    Text("Mapbox Traffic").tag("Mapbox Traffic")
-                }
-            } else {
-                Picker("Directions provider", selection: $router) {
-                    ForEach(["Automatic", "Apple Maps", "Mapbox Driving", "Mapbox Traffic", "Mapbox Navigator"] + ExternalNavigator.allCases.map(\.rawValue), id: \.self) { Text($0).tag($0) }
-                }
+            Picker("Directions provider", selection: $router) {
+                ForEach(["Automatic", "Apple Maps", "Mapbox Driving", "Mapbox Traffic", "Mapbox Navigator"] + ExternalNavigator.allCases.map(\.rawValue), id: \.self) { Text($0).tag($0) }
             }
             if ExternalNavigator(rawValue: effectiveProvider) == nil { Toggle("Offer alternative routes", isOn: $alternatives) }
-            if offerPhoneTrip || ["Mapbox Driving", "Mapbox Traffic"].contains(router) || (router == "Automatic" && enabled && token.hasPrefix("pk.")) {
+            if ["Mapbox Driving", "Mapbox Traffic"].contains(router) || (router == "Automatic" && enabled && token.hasPrefix("pk.")) {
                 Toggle("Show mapped intersections on iPhone", isOn: $mappedJunctions)
                 Text("During iPhone guidance, see signs, lights and rail crossings mapped at an upcoming junction. A sign may face another road. The navigation log records when a label appears or clears for drive review.").font(.footnote)
             }
-            if offerPhoneTrip || router.hasPrefix("Mapbox") || (router == "Automatic" && enabled && token.hasPrefix("pk.")) {
+            if router.hasPrefix("Mapbox") || (router == "Automatic" && enabled && token.hasPrefix("pk.")) {
                 NavigationLink("Roads and vehicle preferences") {
                     Form {
                         Section("Roads to avoid") {
@@ -456,7 +424,7 @@ struct NavigationMapSettings: View {
                 Toggle("Use night colors in tunnels", isOn: $darkTunnels)
                 Toggle("Fade the road already traveled", isOn: $fadeRoute)
             } header: { Text("Mapbox Navigator") } footer: {
-                Text("Choose iPhone on the destination card to open Mapbox’s turn-by-turn screen with spoken guidance and rerouting. This screen runs on iPhone. Galaxy guidance also appears on CarPlay.")
+                Text("Start the route on your iPhone to open Mapbox Navigator with spoken guidance and rerouting.")
             }
         }
     }
@@ -1013,7 +981,7 @@ private struct StandardMapSettings: View {
 
 private struct CommaNavigationPreferences: View {
     let connection: CommaConnection
-    @AppStorage("navigation.offerPhoneTrip") private var sharing = false
+    @AppStorage(NavigationModel.phoneOnlyKey) private var phoneOnly = false
 
     private struct Snapshot: Decodable {
         let revision: String
@@ -1071,8 +1039,8 @@ private struct CommaNavigationPreferences: View {
                         if original.routeProvider == "google", let failure = original.googleRoutes?.failure, !failure.isEmpty {
                             LabeledContent("Last Google routing issue", value: failure)
                         }
-                        if sharing {
-                            Text("To start a Google trip on your comma, turn off “Send iPhone routes to comma” and choose Comma navigation.").font(.footnote)
+                        if phoneOnly {
+                            Text("Turn off “Use iPhone-only directions” in Navigation settings to use this provider for your next trip.").font(.footnote)
                         }
                     }
                     Picker("GPS source", selection: $gps) {

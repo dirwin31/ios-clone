@@ -1,6 +1,8 @@
 # Companion guide
 
-Open **Settings → Navigation → Navigation settings** to choose the map, appearance, camera, distance units and iPhone directions provider. Choose **Comma** on the destination card to let your paired device calculate the route. Choose **iPhone** for Apple Maps, Mapbox Driving or traffic-aware directions in Galaxy, or select **Mapbox Navigator** for Mapbox’s iPhone guidance screen. Mapbox services use the public token saved on this iPhone. Offline areas download map detail and routing data for Mapbox Navigator. Select Google Maps app or Waze app to open your chosen destination in that service. For a custom map, choose Mapbox Studio and enter a published style URI.
+Pick a destination and tap **Send to comma**. Your paired comma calculates the route. To choose its provider, open **Navigation settings → Comma settings → Directions provider**, select **Mapbox** or **Google Routes**, and tap **Save to comma**. Google routing uses the keys configured on the comma.
+
+To navigate without a comma, turn on **Use iPhone-only directions** in Navigation settings. **iPhone directions** then offers Apple Maps, Mapbox, and options to open a destination in Google Maps or Waze. Mapbox services use the public token saved on your iPhone. Mapbox Navigator supports downloaded areas. **Map appearance** controls the display map, including custom Mapbox Studio styles.
 
 The iOS source is in [starpilot-galaxy-ios](https://github.com/natehuby76/starpilot-galaxy-ios). Use `ios-companion-release` for the release app, `ios-companion-testing` for Live View testing, and `ios-companion-dev` for development including notification mirroring.
 

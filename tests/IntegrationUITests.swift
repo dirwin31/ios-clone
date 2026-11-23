@@ -170,7 +170,7 @@ final class IntegrationUITests: XCTestCase {
             attachment.lifetime = .keepAlways
             add(attachment)
         }
-        app.launchArguments = ["--preview-navigation-planner", "--ui-testing", "-navigation.offerPhoneTrip", "YES",
+        app.launchArguments = ["--preview-navigation-planner", "--ui-testing", "-navigation.usePhoneOnlyDirections", "YES", "-navigation.phoneRouter", "Apple Maps",
                                "-navigation.mapboxSetupSeen", "NO", "-navigation.mapboxEnabled", "YES"]
         app.launch()
         let useAppleMaps = app.buttons["Use Apple Maps for the map display"]
@@ -204,8 +204,8 @@ final class IntegrationUITests: XCTestCase {
         result.tap()
         let directions = app.buttons["Start Route"]
         XCTAssertTrue(directions.waitForExistence(timeout: 5))
-        XCTAssertTrue(app.staticTexts["Mapbox Driving · Sends route to comma"].exists)
-        XCTAssertFalse(directions.isEnabled, "Sending the route requires a paired comma connection")
+        XCTAssertTrue(app.staticTexts["Apple Maps · iPhone and CarPlay only"].exists)
+        XCTAssertTrue(directions.isEnabled, "An iPhone-only trip can start without a paired comma")
         XCTAssertTrue(app.frame.contains(directions.frame))
         XCTAssertFalse(app.buttons["directions-source"].exists)
         capture("\(device) route preview")
@@ -274,7 +274,8 @@ final class IntegrationUITests: XCTestCase {
     }
     func testSelectedDestinationWithoutPhoneRoute() {
         let app = XCUIApplication()
-        app.launchArguments = ["--ui-testing", "-galaxy.app.developerMode", "YES", "-galaxy.app.navigationEnabled", "YES"]
+        app.launchArguments = ["--ui-testing", "-galaxy.app.developerMode", "YES", "-galaxy.app.navigationEnabled", "YES",
+                               "-navigation.offerPhoneTrip", "YES", "-navigation.defaultComma", "NO"]
         app.launch()
         if app.buttons["expand-app-tabs"].isHittable { app.buttons["expand-app-tabs"].tap() }
         let tab = app.buttons["main-tab-Navigation"]
@@ -304,8 +305,14 @@ final class IntegrationUITests: XCTestCase {
         handle.tap()
         XCTAssertTrue(send.waitForExistence(timeout: 3))
         XCTAssertFalse(app.buttons["Get directions"].exists)
-        app.buttons["directions-source"].tap()
-        app.buttons["iPhone only"].tap()
+        XCTAssertFalse(app.buttons["directions-source"].exists)
+        app.buttons["Navigation options"].tap()
+        app.buttons["Navigation settings"].tap()
+        let phoneOnly = app.switches["navigation-phone-only"]
+        XCTAssertTrue(phoneOnly.waitForExistence(timeout: 5))
+        XCTAssertEqual(phoneOnly.value as? String, "0")
+        phoneOnly.tap()
+        app.buttons["Done"].tap()
         XCTAssertTrue(app.buttons["Get directions"].waitForExistence(timeout: 5))
         XCTAssertFalse(app.buttons["Start Route"].exists)
     }

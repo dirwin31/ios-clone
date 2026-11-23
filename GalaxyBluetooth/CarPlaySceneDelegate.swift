@@ -57,7 +57,7 @@ final class CarPlaySceneDelegate: NSObject, CPTemplateApplicationSceneDelegate, 
     private var navigationTabs: CPTabBarTemplate?
     private var navigationMenu: CPListTemplate?
     private enum NavigationAction: Equatable {
-        case info, map, start(UUID), phoneTrip(UUID), directions, phone, place(SavedPlace)
+        case info, map, start(UUID), directions, place(SavedPlace)
     }
     private struct NavigationRow: Equatable {
         let title: String
@@ -227,18 +227,8 @@ final class CarPlaySceneDelegate: NSObject, CPTemplateApplicationSceneDelegate, 
                 let detail = nav.busy ? (nav.sendToComma ? "Sending destination…" : "Getting directions…") : destination.address
                 rows.append(.init(title: destination.name, detail: detail, icon: "mappin.circle.fill", action: .info))
                 if !nav.busy {
-                    if nav.phoneTripPreferred {
-                        if !services.connection.connected {
-                            rows.append(.init(title: "Connect to your comma", detail: "Required to start the iPhone route", icon: "car.fill", action: .info))
-                        } else if nav.route == nil {
-                            rows.append(.init(title: "Get directions", detail: "Calculate the iPhone route", icon: "map", action: .directions))
-                        } else if nav.route?.commaPreview == nil || nav.plannedStart != nil {
-                            rows.append(.init(title: "Route unavailable for handoff", detail: "Choose a shorter trip from your current location", icon: "map", action: .info))
-                        } else {
-                            rows.append(.init(title: "Start Route", detail: nav.route?.startSummary(sharing: true) ?? "", icon: "car.fill", action: .phoneTrip(destination.id)))
-                        }
-                    } else if nav.sendToComma && !services.connection.connected {
-                        rows.append(.init(title: "Get iPhone directions", detail: "Comma is disconnected", icon: "iphone", action: .phone))
+                    if nav.sendToComma && !services.connection.connected {
+                        rows.append(.init(title: "Connect to your comma", detail: "Your comma calculates this trip", icon: "car.fill", action: .info))
                     } else if !nav.sendToComma && nav.route == nil {
                         rows.append(.init(title: "Get directions", detail: "Preview the route on iPhone", icon: "arrow.triangle.turn.up.right.diamond", action: .directions))
                     } else {
@@ -282,21 +272,14 @@ final class CarPlaySceneDelegate: NSObject, CPTemplateApplicationSceneDelegate, 
                     case .info: break
                     case .map:
                         self.openNavigation()
-                    case .start(let destinationID), .phoneTrip(let destinationID):
+                    case .start(let destinationID):
                         Task { @MainActor in
                             guard nav.destination?.id == destinationID else { return }
-                            let handoff = row.action == .phoneTrip(destinationID)
-                            if handoff {
-                                guard !nav.sendToComma, services.connection.connected, nav.plannedStart == nil,
-                                      UserDefaults.standard.bool(forKey: "navigation.offerPhoneTrip"), nav.route?.commaPreview != nil else { return }
-                            }
-                            await nav.start(connection: services.connection, phoneRouteOnComma: handoff)
+                            await nav.start(connection: services.connection)
                             self.refreshNavigation()
                         }
                     case .directions:
                         Task { await nav.calculateRoutes(refresh: false) }
-                    case .phone:
-                        Task { await nav.selectGuidanceSource(comma: false) }
                     case .place(let saved):
                         let place = services.saved.navigationPlace(saved)
                         Task {

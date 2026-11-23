@@ -10,8 +10,6 @@ struct NavigationHome: View {
     let openSettings: () -> Void
 
     @AppStorage(NavigationDistanceUnits.key) private var units = NavigationDistanceUnits.system
-    @AppStorage("navigation.offerPhoneTrip") private var handoff = false
-    @AppStorage("navigation.parkedPhonePreview") private var parkedPreview = false
     @AppStorage("navigation.phoneRouter") private var router = "Automatic"
     @Environment(\.dynamicTypeSize) private var typeSize
     @Environment(\.reduceGalacticalMotion) private var reduceMotion
@@ -27,7 +25,6 @@ struct NavigationHome: View {
     @State private var expanded = false
     @State private var library = false
     @State private var showNavigationSettings = false
-    @State private var details = false
     @State private var auxiliarySearch: PlaceSearchPurpose?
     @State private var markerPerspective = DriveMarkerPerspective()
     @State private var headerBottom: CGFloat = 0
@@ -70,7 +67,7 @@ struct NavigationHome: View {
         }
         .onChange(of: navigation.navigating) { _, active in
             finishSearch()
-            details = false; collapsed = false; expanded = false
+            collapsed = false; expanded = false
             if active {
                 if let place = navigation.destination { saved.rememberDestination(place) }
                 navigation.followLocation()
@@ -384,43 +381,25 @@ struct NavigationHome: View {
 
     private var itinerary: some View {
         VStack(alignment: .leading, spacing: 4) {
-            HStack {
-                Button { startAuxiliary(.start) } label: {
-                    placeRow(navigation.plannedStart?.name ?? "Current location", subtitle: "Starting point", symbol: "location.circle.fill")
-                }.buttonStyle(.plain)
-                if navigation.plannedStart != nil {
-                    Button("Use GPS") { Task { await navigation.preview(from: nil) } }
+            if navigation.sendToComma {
+                Label("Comma navigation", systemImage: "car.fill")
+                    .font(.subheadline.weight(.semibold))
+            } else {
+                HStack {
+                    Button { startAuxiliary(.start) } label: {
+                        placeRow(navigation.plannedStart?.name ?? "Current location", subtitle: "Starting point", symbol: "location.circle.fill")
+                    }.buttonStyle(.plain)
+                    if navigation.plannedStart != nil {
+                        Button("Use GPS") { Task { await navigation.preview(from: nil) } }
+                    }
                 }
-            }
-            Divider().padding(.leading, 40)
-            HStack(spacing: 12) {
-                Image(systemName: handoff || navigation.sendToComma ? "car.fill" : "iphone")
-                    .frame(width: 28).foregroundStyle(StarPilotTheme.guidance)
-                if handoff {
-                    Text("iPhone route on comma").font(.subheadline.weight(.semibold))
-                } else {
-                    Menu {
-                        Picker("Directions", selection: Binding(get: { navigation.sendToComma }, set: { value in
-                            Task { await navigation.selectGuidanceSource(comma: value) }
-                        })) {
-                            Text("Comma navigation").tag(true)
-                            Text("iPhone only").tag(false)
-                        }
-                    } label: {
-                        HStack { Text(navigation.sendToComma ? "Comma navigation" : "iPhone only")
-                            Image(systemName: "chevron.up.chevron.down").font(.caption2) }
-                        .font(.subheadline.weight(.semibold)).frame(minHeight: 44)
-                    }.disabled(navigation.busy).accessibilityIdentifier("directions-source")
-                }
-                Spacer(minLength: 0)
-
             }
         }
     }
 
     @ViewBuilder private var routeChoices: some View {
         if !navigation.sendToComma, !navigation.busy, !navigation.routes.isEmpty,
-           handoff || (ExternalNavigator(rawValue: router) == nil && (router != "Mapbox Navigator" || navigation.plannedStart != nil)) {
+           ExternalNavigator(rawValue: router) == nil, router != "Mapbox Navigator" || navigation.plannedStart != nil {
             Text(navigation.routes.count == 1 ? "Route" : "Choose a route").font(.headline)
             ForEach(Array(navigation.routes.enumerated()), id: \.offset) { index, route in
                 let selected = index == navigation.selectedRoute
@@ -441,12 +420,6 @@ struct NavigationHome: View {
                     .overlay { if selected { RoundedRectangle(cornerRadius: 14).strokeBorder(StarPilotTheme.guidance, lineWidth: 1.5) } }
                 }.buttonStyle(.plain).accessibilityAddTraits(selected ? .isSelected : [])
                 .accessibilityIdentifier("phone-route-\(index)")
-            }
-            if !handoff, let body = navigation.route?.commaPreview {
-                DisclosureGroup("Parked preview", isExpanded: $details) {
-                    if parkedPreview { ParkedPhoneRoutePreview(bodyData: body, connection: connection).id(body) }
-                    else { Button("Enable parked route preview") { parkedPreview = true } }
-                }.font(.subheadline)
             }
         }
     }
@@ -602,7 +575,7 @@ struct NavigationHome: View {
     private func select(_ place: NavigationPlace) {
         guard !navigation.busy, !navigation.navigating else { return }
         finishSearch()
-        collapsed = false; expanded = false; details = false
+        collapsed = false; expanded = false
         saved.rememberDestination(place)
         Task { await navigation.select(place) }
     }

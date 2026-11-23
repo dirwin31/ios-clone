@@ -87,7 +87,6 @@ struct RouteStartAction: View {
     @ObservedObject var navigation: NavigationModel
     @ObservedObject var connection: CommaConnection
     @ObservedObject private var inbox = ShareInbox.shared
-    @AppStorage("navigation.offerPhoneTrip") private var offerPhoneTrip = false
     @AppStorage("navigation.phoneRouter") private var router = "Automatic"
     @AppStorage(NavigationMapPreference.tokenKey) private var mapToken = ""
     @State private var navigatorTrip: NavigatorTrip?
@@ -100,7 +99,7 @@ struct RouteStartAction: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            if navigation.sendToComma && !offerPhoneTrip {
+            if navigation.sendToComma {
                 let queued = inbox.waiting?.place
                 let samePlace = queued != nil && queued?.latitude == navigation.destination?.coordinate.latitude
                     && queued?.longitude == navigation.destination?.coordinate.longitude
@@ -117,10 +116,10 @@ struct RouteStartAction: View {
                         .font(.headline).frame(maxWidth: .infinity).padding(.vertical, 5)
                 }
                 .disabled(navigation.busy || samePlace)
-            } else if !offerPhoneTrip, let external = ExternalNavigator(rawValue: router), let place = navigation.destination,
+            } else if let external = ExternalNavigator(rawValue: router), let place = navigation.destination,
                       let url = external.directions(to: place.coordinate) {
                 Link("Open destination in " + external.rawValue, destination: url)
-            } else if !offerPhoneTrip && router == "Mapbox Navigator" && navigation.plannedStart == nil {
+            } else if router == "Mapbox Navigator" && navigation.plannedStart == nil {
                 Button("Start Mapbox Navigator on iPhone") {
                     guard let place = navigation.destination else { return }
                     guard mapToken.hasPrefix("pk.") else {
@@ -142,14 +141,10 @@ struct RouteStartAction: View {
             } else if navigation.routes.isEmpty {
                 Button("Get directions") { Task { await navigation.calculateRoutes(refresh: false) } }
             } else if navigation.plannedStart == nil, let route = navigation.route {
-                Text(route.startSummary(sharing: offerPhoneTrip))
+                Text(route.startSummary(sharing: false))
                     .font(.footnote).foregroundStyle(.secondary)
                 Button("Start Route") {
-                    Task { await navigation.start(connection: connection, phoneRouteOnComma: offerPhoneTrip) }
-                }
-                .disabled(offerPhoneTrip && (!connection.connected || navigation.route?.commaPreview == nil))
-                if offerPhoneTrip && (!connection.connected || route.commaPreview == nil) {
-                    Text(!connection.connected ? "Connect to your paired comma to start." : "This route exceeds the comma’s route transfer limit. Choose a shorter trip.").font(.footnote)
+                    Task { await navigation.start(connection: connection) }
                 }
             } else {
                 Text("Preview from your chosen starting point. Use your current location to start guidance.")
