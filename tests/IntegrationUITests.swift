@@ -96,7 +96,8 @@ final class IntegrationUITests: XCTestCase {
         XCTAssertTrue(tools.waitForExistence(timeout: 30))
         tools.tap()
         XCTAssertTrue(app.webViews.staticTexts["Tools selected"].waitForExistence(timeout: 8))
-        XCTAssertTrue(tools.isSelected)
+        let selection = NSPredicate(format: "selected == true OR value == %@", "Selected")
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: selection, object: tools)], timeout: 5), .completed)
     }
 
     private func openSettingsSection(_ title: String, containing control: XCUIElement, in app: XCUIApplication) {
@@ -169,8 +170,14 @@ final class IntegrationUITests: XCTestCase {
             attachment.lifetime = .keepAlways
             add(attachment)
         }
-        app.launchArguments = ["--preview-navigation-planner", "--ui-testing", "-navigation.offerPhoneTrip", "YES"]
+        app.launchArguments = ["--preview-navigation-planner", "--ui-testing", "-navigation.offerPhoneTrip", "YES",
+                               "-navigation.mapboxSetupSeen", "NO", "-navigation.mapboxEnabled", "YES"]
         app.launch()
+        let useAppleMaps = app.buttons["Continue with Apple Maps"]
+        XCTAssertTrue(useAppleMaps.waitForExistence(timeout: 15))
+        XCTAssertFalse(app.buttons["Use Mapbox"].isEnabled)
+        XCTAssertTrue(app.staticTexts["Recommended for 3D navigation"].exists)
+        useAppleMaps.tap()
         let field = app.textFields["map-search"]
         XCTAssertTrue(field.waitForExistence(timeout: 20))
         XCTAssertTrue(app.buttons["home-shortcut"].isHittable)
@@ -229,8 +236,9 @@ final class IntegrationUITests: XCTestCase {
         mapViewButton.tap()
         XCTAssertEqual(mapViewButton.label, "Show full route")
         let center = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.55))
-        center.press(forDuration: 0.1, thenDragTo: center.withOffset(CGVector(dx: 55, dy: 0)))
-        XCTAssertEqual(mapViewButton.label, "Resume following my location")
+        center.press(forDuration: 0.1, thenDragTo: center.withOffset(CGVector(dx: 85, dy: 0)))
+        let unlocked = NSPredicate(format: "label == %@", "Resume following my location")
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: unlocked, object: mapViewButton)], timeout: 4), .completed)
         mapViewButton.tap()
         XCTAssertEqual(mapViewButton.label, "Show full route")
         capture("\(device) active guidance")
@@ -239,6 +247,21 @@ final class IntegrationUITests: XCTestCase {
         XCTAssertTrue(app.navigationBars["Navigation settings"].waitForExistence(timeout: 5))
         app.buttons["Done"].tap()
         XCTAssertTrue(app.buttons["End route"].isHittable)
+    }
+
+    func testEdgeSwipesBetweenPages() {
+        let app = XCUIApplication()
+        XCUIDevice.shared.orientation = .portrait
+        app.launchArguments = ["--preview-navigation-planner", "-navigation.mapboxSetupSeen", "YES"]
+        app.launch()
+        let search = app.textFields["map-search"]
+        XCTAssertTrue(search.waitForExistence(timeout: 15))
+        let right = app.coordinate(withNormalizedOffset: CGVector(dx: 0.998, dy: 0.55))
+        let left = app.coordinate(withNormalizedOffset: CGVector(dx: 0.002, dy: 0.55))
+        right.press(forDuration: 0.05, thenDragTo: right.withOffset(CGVector(dx: -150, dy: 0)))
+        XCTAssertTrue(app.staticTexts["Your comma"].waitForExistence(timeout: 8))
+        left.press(forDuration: 0.05, thenDragTo: left.withOffset(CGVector(dx: 150, dy: 0)))
+        XCTAssertTrue(search.waitForExistence(timeout: 8))
     }
 
     func testActiveRoutePreview() {
@@ -256,6 +279,7 @@ final class IntegrationUITests: XCTestCase {
         let tab = app.buttons["main-tab-Navigation"]
         XCTAssertTrue(tab.waitForExistence(timeout: 10))
         tab.tap()
+        if app.buttons["Continue with Apple Maps"].waitForExistence(timeout: 3) { app.buttons["Continue with Apple Maps"].tap() }
         let search = app.textFields["map-search"]
         search.tap()
         XCTAssertTrue(search.waitForExistence(timeout: 5))

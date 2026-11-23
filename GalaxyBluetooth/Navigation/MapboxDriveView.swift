@@ -5,6 +5,15 @@ import MapboxMaps
 enum NavigationMapPreference {
     static let enabledKey = "navigation.mapboxEnabled"
     static let tokenKey = "navigation.mapboxPublicToken"
+    static let promptedKey = "navigation.mapboxSetupSeen"
+
+    static func publicToken(from entry: String) -> String? {
+        let value = entry.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard value.hasPrefix("pk."), value.count > 3,
+              value.rangeOfCharacter(from: .whitespacesAndNewlines) == nil else { return nil }
+        return value
+    }
+
     static let poiKey = "navigation.mapboxPointLabels"
     static let placesKey = "navigation.mapboxPlaceLabels"
     static let trafficKey = "navigation.mapboxTraffic"
@@ -325,8 +334,11 @@ struct NavigationMapSettings: View {
                 Button("Remove saved token", role: .destructive) { entry = ""; token = "" }
             }
             if entry != token {
-                Button("Save public token") { token = entry.trimmingCharacters(in: .whitespacesAndNewlines); entry = token }
-                    .disabled(!entry.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("pk."))
+                Button("Save public token") {
+                    guard let value = NavigationMapPreference.publicToken(from: entry) else { return }
+                    token = value; entry = value
+                }
+                .disabled(NavigationMapPreference.publicToken(from: entry) == nil)
             }
             if enabled && !token.hasPrefix("pk.") { Text("Add a Mapbox public token to display this map. Apple Maps is available in the meantime.").font(.footnote) }
             if enabled {

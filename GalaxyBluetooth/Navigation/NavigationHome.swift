@@ -15,6 +15,11 @@ struct NavigationHome: View {
     @AppStorage("navigation.phoneRouter") private var router = "Automatic"
     @Environment(\.dynamicTypeSize) private var typeSize
     @Environment(\.reduceGalacticalMotion) private var reduceMotion
+    @AppStorage(NavigationMapPreference.enabledKey) private var mapboxEnabled = true
+    @AppStorage(NavigationMapPreference.tokenKey) private var publicToken = ""
+    @AppStorage(NavigationMapPreference.promptedKey) private var mapSetupSeen = false
+    @State private var showMapSetup = false
+    @State private var tokenEntry = ""
     @FocusState private var searchFocused: Bool
     @State private var query = ""
     @State private var searchingPlaces = false
@@ -74,6 +79,39 @@ struct NavigationHome: View {
         }
         .onChange(of: navigation.notice) { _, notice in
             if !notice.isEmpty { collapsed = false }
+        }
+        .onAppear {
+            if !mapSetupSeen && !navigation.navigating && navigation.destination == nil {
+                if mapboxEnabled && publicToken.isEmpty { showMapSetup = true }
+                else { mapSetupSeen = true }
+            }
+        }
+        .sheet(isPresented: $showMapSetup, onDismiss: { mapSetupSeen = true; tokenEntry = "" }) {
+            NavigationStack {
+                Form {
+                    Section {
+                        Label("Recommended for 3D navigation", systemImage: "building.2.fill").font(.headline)
+                        Text("Mapbox gives you detailed 3D buildings and a street-level view of the route ahead.")
+                        Link("Get your public token from Mapbox", destination: URL(string: "https://console.mapbox.com/account/access-tokens/")!)
+                    }
+                    Section("Mapbox public token") {
+                        SecureField("Paste your pk. token", text: $tokenEntry)
+                            .textInputAutocapitalization(.never).autocorrectionDisabled()
+                        Button("Use Mapbox") {
+                            guard let token = NavigationMapPreference.publicToken(from: tokenEntry) else { return }
+                            publicToken = token
+                            showMapSetup = false
+                        }.disabled(NavigationMapPreference.publicToken(from: tokenEntry) == nil)
+                    }
+                    Section {
+                        Button("Continue with Apple Maps") {
+                            mapboxEnabled = false
+                            showMapSetup = false
+                        }
+                    } footer: { Text("You can add or change your token later in Navigation settings.") }
+                }
+                .navigationTitle("Choose your map").navigationBarTitleDisplayMode(.inline)
+            }.presentationDetents([.medium, .large])
         }
         .onDisappear { if searchingPlaces { finishSearch() } }
         .sheet(item: $auxiliarySearch) { purpose in

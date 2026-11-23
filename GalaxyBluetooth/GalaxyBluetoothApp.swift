@@ -1017,11 +1017,23 @@ struct GalaxyRootView: View {
     @Environment(\.openURL) private var openURL
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.layoutDirection) private var layoutDirection
     init(model: AppModel) {
         self.model = model; navigation = model.navigationServices.navigation; bluetooth = model.bluetooth; lan = model.lan; assets = model.assets; server = model.server; discovery = model.discovery; galaxyPage = model.galaxyPage
     }
     var body: some View {
         chrome.environment(\.reduceGalacticalMotion, motionDisabled)
+            .background {
+                AppPageEdgeSwipes(enabled: !editorFocused && scenePhase == .active) { fromLeft in
+                    let forward = layoutDirection == .rightToLeft ? fromLeft : !fromLeft
+                    let pages: [CompanionTab] = [.galaxy, .navigation, .connections].filter {
+                        ($0 != .galaxy || model.opened) && ($0 != .navigation || model.navigationEnabled)
+                    }
+                    guard let index = pages.firstIndex(of: page) else { return }
+                    let next = index + (forward ? 1 : -1)
+                    if pages.indices.contains(next) { select(pages[next]) }
+                }
+            }
             .preferredColorScheme(appearance.scheme)
     }
     @ViewBuilder private var chrome: some View {
@@ -1094,16 +1106,6 @@ struct GalaxyRootView: View {
                         }
                         .padding(.horizontal, 3)
                         .modifier(FloatingGalaxyGlass())
-                        .overlay {
-                            RoundedRectangle(cornerRadius: 24)
-                                .strokeBorder(
-                                    LinearGradient(colors: [.white.opacity(0.28), .clear, .white.opacity(0.08)],
-                                                   startPoint: .topLeading, endPoint: .bottomTrailing),
-                                    lineWidth: 0.75
-                                )
-                                .allowsHitTesting(false)
-                                .accessibilityHidden(true)
-                        }
                     } else {
                         CompanionNavigationBar(tab: page, developerMode: model.developerMode,
                             navigation: model.navigationServices.navigation, expanded: $appTabsExpanded,
@@ -1223,6 +1225,56 @@ struct GalaxyRootView: View {
     private let brandPurple = Color(red: 139.0 / 255, green: 92.0 / 255, blue: 246.0 / 255)
 
 
+}
+
+private struct AppPageEdgeSwipes: UIViewRepresentable {
+    let enabled: Bool
+    let switchPage: (Bool) -> Void
+
+    func makeUIView(context: Context) -> EdgeObserver {
+        let view = EdgeObserver()
+        view.isUserInteractionEnabled = false
+        return view
+    }
+
+    func updateUIView(_ view: EdgeObserver, context: Context) {
+        view.switchPage = enabled ? switchPage : nil
+    }
+
+    final class EdgeObserver: UIView, UIGestureRecognizerDelegate {
+        var switchPage: ((Bool) -> Void)?
+        private var gestures: [UIScreenEdgePanGestureRecognizer] = []
+
+        override func didMoveToWindow() {
+            super.didMoveToWindow()
+            for gesture in gestures { gesture.view?.removeGestureRecognizer(gesture) }
+            gestures.removeAll()
+            guard let window else { return }
+            for edge: UIRectEdge in [.left, .right] {
+                let gesture = UIScreenEdgePanGestureRecognizer(target: self, action: #selector(finishSwipe(_:)))
+                gesture.edges = edge
+                gesture.cancelsTouchesInView = false
+                gesture.delegate = self
+                window.addGestureRecognizer(gesture)
+                gestures.append(gesture)
+            }
+        }
+
+        override func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+            switchPage != nil && window?.rootViewController?.presentedViewController == nil
+        }
+
+        func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool { true }
+
+        @objc private func finishSwipe(_ gesture: UIScreenEdgePanGestureRecognizer) {
+            guard gesture.state == .ended else { return }
+            let movement = gesture.translation(in: window)
+            let fromLeft = gesture.edges == .left
+            let distance = fromLeft ? movement.x : -movement.x
+            guard distance >= 55, distance > 1.5 * abs(movement.y) else { return }
+            switchPage?(fromLeft)
+        }
+    }
 }
 
 private struct ReduceGalacticalMotionKey: EnvironmentKey {
@@ -1535,14 +1587,31 @@ struct CompactConnectionStatus: View {
 }
 
 struct FloatingGalaxyGlass: ViewModifier {
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @Environment(\.colorScheme) private var scheme
+
     func body(content: Content) -> some View {
-        if #available(iOS 26.0, *) {
-            content.glassEffect(.regular.tint(Color.purple.opacity(0.12)), in: .rect(cornerRadius: 24))
-        } else {
-            content
-                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 24))
-                .overlay(RoundedRectangle(cornerRadius: 24).strokeBorder(Color.purple.opacity(0.18), lineWidth: 0.5))
+        let shape = Capsule()
+        Group {
+            if reduceTransparency {
+                content.background(Color(uiColor: .secondarySystemBackground), in: shape)
+            } else if #available(iOS 26.0, *) {
+                content.glassEffect(.regular.tint(.purple.opacity(0.08)).interactive(), in: shape)
+            } else {
+                content.background(.thinMaterial, in: shape)
+            }
         }
+        .overlay {
+            shape.strokeBorder(
+                LinearGradient(stops: [
+                    .init(color: .white.opacity(scheme == .dark ? 0.6 : 0.85), location: 0),
+                    .init(color: .white.opacity(0.12), location: 0.35),
+                    .init(color: .purple.opacity(0.19), location: 0.7),
+                    .init(color: .white.opacity(0.55), location: 1)
+                ], startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 1.25
+            ).allowsHitTesting(false).accessibilityHidden(true)
+        }
+        .shadow(color: .black.opacity(scheme == .dark ? 0.22 : 0.10), radius: 6, y: 2)
     }
 }
 
@@ -1868,6 +1937,7 @@ private struct AdaptiveCompanionLayout<Content: View>: View {
                             .tint(item.selected ? Color.purple : Color.primary)
                             .disabled(item.disabled)
                             .accessibilityIdentifier("galaxy-pill-" + item.id)
+                            .accessibilityValue(item.selected ? Text("Selected") : Text(""))
                             .accessibilityAddTraits(item.selected ? .isSelected : [])
                         }
                         GalaxyPillMenu(page: galaxyPage, model: model, select: select)

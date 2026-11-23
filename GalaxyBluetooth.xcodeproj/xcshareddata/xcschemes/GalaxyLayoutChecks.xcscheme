@@ -15,6 +15,7 @@
                <Test Identifier="IntegrationUITests/testLandingAndGalaxyPillLayouts()"/>
                <Test Identifier="IntegrationUITests/testGalaxyPillMotion()"/>
                <Test Identifier="IntegrationUITests/testPhoneNavigationPlannerAndDrive()"/>
+               <Test Identifier="IntegrationUITests/testEdgeSwipesBetweenPages()"/>
             </SelectedTests>
          </TestableReference>
       </Testables>

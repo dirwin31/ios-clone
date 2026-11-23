@@ -19,6 +19,7 @@ struct CommaFollowingMap: UIViewRepresentable {
     func makeUIView(context: Context) -> FollowingMapView {
         let map = FollowingMapView()
         map.delegate = context.coordinator
+        context.coordinator.observeManualMovement(on: map)
         map.showsUserLocation = false
         map.showsCompass = false
         map.showsScale = false
@@ -55,7 +56,7 @@ struct CommaFollowingMap: UIViewRepresentable {
     }
 
     @MainActor
-    final class Coordinator: NSObject, MKMapViewDelegate {
+    final class Coordinator: NSObject, MKMapViewDelegate, UIGestureRecognizerDelegate {
         let navigation: NavigationModel
         weak var map: FollowingMapView?
         private let marker = MKPointAnnotation()
@@ -257,6 +258,22 @@ struct CommaFollowingMap: UIViewRepresentable {
                 view.transform = CGAffineTransform(rotationAngle: (heading - map.camera.heading) * .pi / 180)
             }
         }
+        func observeManualMovement(on map: MKMapView) {
+            let pan = UIPanGestureRecognizer(target: self, action: #selector(manuallyMoved(_:)))
+            let pinch = UIPinchGestureRecognizer(target: self, action: #selector(manuallyMoved(_:)))
+            for gesture in [pan as UIGestureRecognizer, pinch] {
+                gesture.cancelsTouchesInView = false
+                gesture.delegate = self
+                map.addGestureRecognizer(gesture)
+            }
+        }
+
+        func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool { true }
+
+        @objc private func manuallyMoved(_ gesture: UIGestureRecognizer) {
+            if gesture.state == .began && navigation.followsUser { navigation.followsUser = false }
+        }
+
         func mapView(_ mapView: MKMapView, regionWillChangeAnimated animated: Bool) {
             guard !changingCamera, hasGesture(in: mapView) else { return }
             navigation.followsUser = false
