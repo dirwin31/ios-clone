@@ -371,6 +371,14 @@ struct DiscordReportSheet: View {
         NavigationStack {
             Form {
                 Section {
+                    Label("App and connection issues only", systemImage: "exclamationmark.triangle")
+                        .font(.headline)
+                    Text("Use this form for problems with the StarPilot app, Bluetooth, or Wi-Fi. For vehicle issues or driving behavior, post in the Discord channel below.")
+                    if let url = URL(string: "https://discord.com/channels/1387432184121393333/1506463404863389806") {
+                        Link("Report car and driving issues on Discord", destination: url)
+                    }
+                }
+                Section {
                     Label("StarPilot support", systemImage: "bubble.left.and.text.bubble.right.fill")
                         .font(.headline).foregroundStyle(brandPurple)
                     Text("Tell us what happened. Your description goes to the support forum; diagnostics go to a private support channel.")
