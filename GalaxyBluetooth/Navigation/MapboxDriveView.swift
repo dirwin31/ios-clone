@@ -9,8 +9,10 @@ enum NavigationMapPreference {
 
     static func publicToken(from entry: String) -> String? {
         let value = entry.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard value.hasPrefix("pk."), value.count > 3,
-              value.rangeOfCharacter(from: .whitespacesAndNewlines) == nil else { return nil }
+        guard value.utf8.count <= 2048, value.hasPrefix("pk."), value.count > 3,
+              value.dropFirst(3).utf8.allSatisfy({ byte in
+                  (65...90).contains(byte) || (97...122).contains(byte) || (48...57).contains(byte) || [45, 46, 95].contains(byte)
+              }) else { return nil }
         return value
     }
 
@@ -22,6 +24,54 @@ enum NavigationMapPreference {
         guard defaults.object(forKey: enabledKey) as? Bool != false,
               let token = defaults.string(forKey: tokenKey), token.hasPrefix("pk.") else { return nil }
         return token
+    }
+}
+
+struct CommaMapKeySetup: View {
+    @ObservedObject var bluetooth: BluetoothTransport
+    let save: (String) -> Void
+    @State private var attempt: UUID?
+    @State private var message = ""
+
+    var body: some View {
+        Section {
+            Text("1. Park and connect Galaxy to your comma over Bluetooth.")
+            Text("2. On the comma, open Bluetooth settings and tap Share Mapbox key.")
+            Text("3. Within two minutes, tap the button below to save the key on this iPhone.")
+            Button {
+                attempt = UUID()
+            } label: {
+                Label("Use key from comma", systemImage: "key")
+            }.disabled(!bluetooth.connected || attempt != nil)
+            if !bluetooth.connected {
+                Text("Waiting for a paired comma over Bluetooth.").font(.footnote)
+            } else if attempt != nil {
+                ProgressView("Checking comma…")
+            } else if !message.isEmpty {
+                Text(message).font(.footnote)
+            }
+        } header: { Text("Already use Mapbox on your comma?") } footer: {
+            Text("If your comma has no Share Mapbox key button, paste your public token instead.")
+        }
+        .task(id: attempt) {
+            guard let requested = attempt else { return }
+            let session = bluetooth.sessionIdentifier
+            defer { if attempt == requested { attempt = nil } }
+            do {
+                let reply = try await bluetooth.request(path: "/_bridge/mapbox-public-token", method: "GET", headers: [:], body: Data())
+                guard !Task.isCancelled, bluetooth.connected, bluetooth.sessionIdentifier == session else { return }
+                struct SharedKey: Decodable { let publicToken: String }
+                if reply.status == 200,
+                   let shared = try? JSONDecoder().decode(SharedKey.self, from: reply.bodyData),
+                   let token = NavigationMapPreference.publicToken(from: shared.publicToken) {
+                    save(token)
+                } else {
+                    message = "No key was shared. Tap Share Mapbox key on your comma and try again, or paste your public token."
+                }
+            } catch {
+                if !Task.isCancelled { message = "Couldn’t reach your comma. Check Bluetooth and try again." }
+            }
+        }
     }
 }
 
@@ -318,6 +368,13 @@ struct NavigationMapSettings: View {
     }
 
     @ViewBuilder private var appearance: some View {
+        if enabled && token.isEmpty && entry.isEmpty {
+            CommaMapKeySetup(bluetooth: model.bluetooth) { value in
+                guard enabled, token.isEmpty, entry.isEmpty else { return }
+                token = value
+                entry = value
+            }
+        }
         Section {
             Picker("Display map", selection: $enabled) {
                 Text("Apple Maps").tag(false)

@@ -36,7 +36,9 @@ struct NavigationHome: View {
 
     var body: some View {
         GeometryReader { geo in
-            if navigation.navigating {
+            if showMapSetup && !navigation.navigating {
+                mapSetup
+            } else if navigation.navigating {
                 drive
             } else {
                 let wide = geo.size.width >= 680 && !typeSize.isAccessibilitySize
@@ -86,32 +88,8 @@ struct NavigationHome: View {
                 else { mapSetupSeen = true }
             }
         }
-        .sheet(isPresented: $showMapSetup, onDismiss: { mapSetupSeen = true; tokenEntry = "" }) {
-            NavigationStack {
-                Form {
-                    Section {
-                        Label("Recommended for 3D navigation", systemImage: "building.2.fill").font(.headline)
-                        Text("Mapbox gives you detailed 3D buildings and a street-level view of the route ahead.")
-                        Link("Get your public token from Mapbox", destination: URL(string: "https://console.mapbox.com/account/access-tokens/")!)
-                    }
-                    Section("Mapbox public token") {
-                        SecureField("Paste your pk. token", text: $tokenEntry)
-                            .textInputAutocapitalization(.never).autocorrectionDisabled()
-                        Button("Use Mapbox") {
-                            guard let token = NavigationMapPreference.publicToken(from: tokenEntry) else { return }
-                            publicToken = token
-                            showMapSetup = false
-                        }.disabled(NavigationMapPreference.publicToken(from: tokenEntry) == nil)
-                    }
-                    Section {
-                        Button("Continue with Apple Maps") {
-                            mapboxEnabled = false
-                            showMapSetup = false
-                        }
-                    } footer: { Text("You can add or change your token later in Navigation settings.") }
-                }
-                .navigationTitle("Choose your map").navigationBarTitleDisplayMode(.inline)
-            }.presentationDetents([.medium, .large])
+        .onChange(of: showMapSetup) { _, presented in
+            if !presented { mapSetupSeen = true; tokenEntry = "" }
         }
         .onDisappear { if searchingPlaces { finishSearch() } }
         .sheet(item: $auxiliarySearch) { purpose in
@@ -127,6 +105,38 @@ struct NavigationHome: View {
             }
         }
         .sheet(isPresented: $showNavigationSettings) { NavigationMapSettings(model: connection.app) }
+    }
+
+    private var mapSetup: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    Label("Recommended for 3D navigation", systemImage: "building.2.fill").font(.headline)
+                    Text("Mapbox gives you detailed 3D buildings and a street-level view of the route ahead.")
+                    Button("Continue with Apple Maps") {
+                        mapboxEnabled = false
+                        showMapSetup = false
+                    }
+                }
+                CommaMapKeySetup(bluetooth: connection.bluetooth) { value in
+                    guard publicToken.isEmpty, tokenEntry.isEmpty, showMapSetup else { return }
+                    publicToken = value
+                    showMapSetup = false
+                }.disabled(!tokenEntry.isEmpty)
+                Section {
+                    Link("Open Mapbox access tokens", destination: URL(string: "https://console.mapbox.com/account/access-tokens/")!)
+                    Text("Sign in to Mapbox, copy your default public token (it starts with pk.), then paste it here.")
+                    SecureField("Paste your pk. token", text: $tokenEntry)
+                        .textInputAutocapitalization(.never).autocorrectionDisabled()
+                    Button("Use Mapbox") {
+                        guard let token = NavigationMapPreference.publicToken(from: tokenEntry) else { return }
+                        publicToken = token
+                        showMapSetup = false
+                    }.disabled(NavigationMapPreference.publicToken(from: tokenEntry) == nil)
+                } header: { Text("Use a token from your Mapbox account") } footer: { Text("You can revisit map setup in Navigation settings.") }
+            }
+            .navigationTitle("Choose your map").navigationBarTitleDisplayMode(.inline)
+        }
     }
 
     private func plannerHeight(_ available: CGFloat, wide: Bool) -> CGFloat {

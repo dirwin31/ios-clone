@@ -1349,6 +1349,7 @@ private struct GalaxyPillButton: View {
             .contentShape(Rectangle())
         }.buttonStyle(CompanionPressStyle()).disabled(item.disabled).accessibilityLabel(Text(verbatim: item.label))
             .accessibilityIdentifier("galaxy-pill-" + item.id)
+            .accessibilityValue(item.selected ? Text("Selected") : Text(""))
             .accessibilityAddTraits(item.selected ? .isSelected : [])
     }
 }

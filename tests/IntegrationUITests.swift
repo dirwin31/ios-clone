@@ -175,8 +175,8 @@ final class IntegrationUITests: XCTestCase {
         app.launch()
         let useAppleMaps = app.buttons["Continue with Apple Maps"]
         XCTAssertTrue(useAppleMaps.waitForExistence(timeout: 15))
-        XCTAssertFalse(app.buttons["Use Mapbox"].isEnabled)
         XCTAssertTrue(app.staticTexts["Recommended for 3D navigation"].exists)
+        XCTAssertTrue(app.staticTexts["2. On the comma, open Bluetooth settings and tap Share Mapbox key."].exists)
         useAppleMaps.tap()
         let field = app.textFields["map-search"]
         XCTAssertTrue(field.waitForExistence(timeout: 20))
