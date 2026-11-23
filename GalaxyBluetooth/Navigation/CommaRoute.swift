@@ -67,6 +67,13 @@ struct CommaRouteSnapshot: Decodable {
     let polyline6: String?
     let instruction: CommaInstruction?
     let error: String?
+    var phoneTripOnroad = false
+    var routeUnavailable = false
+    func needsPhoneReroute(for revision: String, offRouteSamples: Int) -> Bool {
+        ready && phoneTripOnroad && phoneTripRevision == revision &&
+            (routeUnavailable || (status == "active" && offRouteSamples >= 3))
+    }
+    var phoneTripRevision: String? = nil
     var bluetoothDispatchDate: Date? = nil
     var routePoints: [RoutePoint]? = nil
     var positionValidForSeconds: Double? = nil
@@ -140,6 +147,23 @@ enum NavigationMapMotion {
     static func anchorY(height: Double, bottomInset: Double) -> Double {
         max(0, min(height, height - max(0, bottomInset) - 64))
     }
+    static func carPlayAnimationDuration(interval: TimeInterval, fixAge: TimeInterval) -> TimeInterval {
+        // A delayed Bluetooth fix has already spent part of its interval in transit.
+        max(0.1, min(2.5, interval - max(0, fixAge)))
+    }
+
+    // At the same street-detail zoom, a shorter map covers less ground ahead.
+    // Match the phone's ground distance half a viewport above the vehicle with a
+    // pitched perspective camera (Mapbox's focal length is 1.5 viewport heights).
+    static func carPlayCruisingPitch(_ pitch: Double, mapHeight: Double, phoneHeight: Double) -> Double {
+        guard pitch >= 45, pitch < 80, mapHeight > 0, mapHeight < phoneHeight else { return pitch }
+        let ray = atan(1.0 / 3.0)
+        let angle = pitch * .pi / 180 + ray
+        guard angle < .pi / 2 else { return pitch }
+        let matched = (acos((mapHeight / phoneHeight) * cos(angle)) - ray) * 180 / .pi
+        return min(80, pitch + 8, matched)
+    }
+
     static func cameraDistance(speed: Double, distanceToTurn: Double) -> Double {
         let speed = speed.isFinite ? min(55, max(0, speed)) : 0
         let cruising = min(3800, 1600 + speed * 65)

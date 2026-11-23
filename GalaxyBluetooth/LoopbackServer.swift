@@ -48,6 +48,69 @@ final class LoopbackServer: ObservableObject {
 
     }
 
+    private static let startupSettingsScript = """
+    const startupURL = new URL(location.href);
+    let startupChoice = startupURL.searchParams.get('startupPage');
+    if (startupChoice) {
+      startupURL.searchParams.delete('startupPage');
+      history.replaceState(history.state, '', startupURL);
+      if (route.path === '/settings' && /^(toggle|section):[\\w/-]+$/.test(startupChoice)) {
+        const mounted = SettingsPage.mounted;
+        SettingsPage.mounted = async function (...args) {
+          const choice = startupChoice;
+          startupChoice = null;
+          const originalRoute = route.view;
+          if (!choice) return mounted?.apply(this, args);
+          let interrupted = false;
+          const cancel = () => { interrupted = true; };
+          window.addEventListener('pointerdown', cancel, true);
+          window.addEventListener('keydown', cancel, true);
+          try { await mounted?.apply(this, args); }
+          finally {
+            window.removeEventListener('pointerdown', cancel, true);
+            window.removeEventListener('keydown', cancel, true);
+          }
+          if (interrupted || route.path !== '/settings' || route.view !== originalRoute || !this.$el?.isConnected) return;
+          const [kind, key] = choice.split(':');
+          if (kind === 'toggle') this.open(key);
+          else {
+            const section = this.sections.find(item => item.id === key);
+            if (section) this.selectSection(section);
+          }
+        };
+      }
+    }
+    """
+
+    private static let startupCatalogScript = """
+    window.__galaxyStartupPages = async () => {
+      const rows = new Map();
+      const add = (id, name) => { if (id && name && !rows.has(id)) rows.set(id, {id, name}); };
+      const tools = items => { for (const item of items || []) {
+        add(item.path, item.name);
+        tools(item.children);
+      } };
+      tools(startupApp.visibleTools);
+      const title = key => key.split(/[\\/_-]/).filter(Boolean).map(word => word[0].toUpperCase() + word.slice(1)).join(' ');
+      const settings = await import('./settings.js');
+      for (const section of settings.SETTINGS_SECTIONS || []) {
+        add('section:' + section.id, section.label);
+        for (const key of section.pages || []) add('toggle:' + key, title(key));
+      }
+      const driving = await import('./driving.js').catch(() => ({}));
+      for (const group of driving.DRIVING_GROUPS || []) {
+        for (const item of group.items || []) add('/driving/' + item.page, item.title);
+      }
+      const active = startupApp.$refs.activeSettings;
+      const detail = active?.state?.data;
+      if (detail?.page && detail.page !== 'hub') add('toggle:' + detail.page, detail.title || title(detail.page));
+      for (const row of detail?.rows || []) if (row.page) add('toggle:' + row.page, row.label || title(row.page));
+      const path = route.path;
+      if (path !== '/') add(path, title(path));
+      return [...rows.values()];
+    };
+    """
+
     func useWebRoot(_ root: URL) {
         webRoot = root
 
@@ -400,6 +463,12 @@ final class LoopbackServer: ObservableObject {
         }
         if ["js/snapshot-feed.js", "js/settings.js"].contains(assetPath), let source = String(data: data, encoding: .utf8) {
             data = Data(Self.nativeReadDeadlines(source, asset: assetPath).utf8)
+        }
+        if assetPath == "js/app.js", let source = String(data: data, encoding: .utf8),
+           source.contains("\ncreateApp({"), source.contains(".mount(\"#galaxy-app\")"),
+           source.contains("import { SettingsPage"), source.contains("visibleTools()") {
+            let entry = source.replacingOccurrences(of: "\ncreateApp({", with: "\n" + Self.startupSettingsScript + "\nconst startupApp = createApp({")
+            data = Data((entry + "\n" + Self.startupCatalogScript).utf8)
         }
         let pathExtension = (assetPath as NSString).pathExtension
         if assetPath == "js/camera-viewer.js", let source = String(data: data, encoding: .utf8),

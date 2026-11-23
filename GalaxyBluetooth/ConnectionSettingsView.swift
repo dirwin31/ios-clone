@@ -20,12 +20,9 @@ struct ConnectionSettingsView: View {
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.openURL) private var openURL
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
-    @SceneStorage("settings.navigationExpanded") private var navigationExpanded = false
     @AppStorage(AppPreference.openGalaxy) private var autoOpenGalaxy = true
     @AppStorage(AppPreference.toolbarLabels) private var toolbarLabels = true
     @AppStorage(AppPreference.liveScreenAwake) private var keepLiveAwake = true
-    @AppStorage(AppPreference.rememberDestinations) private var rememberDestinations = true
-    @AppStorage(NavigationDistanceUnits.key) private var distanceUnits = NavigationDistanceUnits.system
     @AppStorage(AppAppearance.key) private var appearance = AppAppearance.system
     @AppStorage("galaxy.app.language") private var language = "en"
     @AppStorage("galaxy.galacticalAnimations") private var galacticalAnimations = true
@@ -33,21 +30,24 @@ struct ConnectionSettingsView: View {
     @AppStorage("galaxy.location.hideIndicator") private var hideLocationIndicator = false
     @Namespace private var modeSelection
     @Environment(\.reduceGalacticalMotion) private var reduceMotion
+    @AppStorage(AppPreference.startupPage) private var startupPage = "/"
+    @State private var showStartupPages = false
+    @State private var startupPages = StartupPage.cached
+    @State private var startupSearch = ""
+    @State private var showToolbarOrder = false
+    @AppStorage(GalaxyToolbar.orderKey) private var toolbarOrder = ""
     @State private var showOrder = false
     @State private var showTunnel = false
     @State private var advanced = false
+    @SceneStorage("settings.navigationExpanded") private var navigationExpanded = false
     @SceneStorage("settings.phoneExpanded") private var phoneExpanded = false
     @SceneStorage("settings.galaxyExpanded") private var galaxyExpanded = false
     @SceneStorage("settings.supportExpanded") private var supportExpanded = false
     @State private var confirmForget = false
     @State private var confirmPairingReset = false
-    @State private var confirmNavigationAlpha = false
-    @AppStorage(NavigationMapPreference.enabledKey) private var useMapbox = true
-    @AppStorage(NavigationMapPreference.tokenKey) private var mapboxToken = ""
     @State private var showMapSettings = false
     @State private var showPairingHelp = false
     @State private var checked = false
-    @State private var openAfterReconnect = false
     @State private var connectingCommaID: String?
     @State private var showHotspotJoin = false
 
@@ -99,7 +99,8 @@ struct ConnectionSettingsView: View {
     private func settingsContent(wide: Bool) -> some View {
         ScrollView {
             settingsPage(wide: wide)
-        }.scrollBounceBehavior(.basedOnSize).background {
+        }.simultaneousGesture(DragGesture(minimumDistance: 12).onChanged { _ in model.autoOpenGalaxyPending = false })
+        .scrollBounceBehavior(.basedOnSize).background {
             LinearGradient(stops: [
                 .init(color: Color(uiColor: StarPilotTheme.toolbarColor(dark: colorScheme == .dark)), location: 0),
                 .init(color: background, location: 0.22),
@@ -107,18 +108,36 @@ struct ConnectionSettingsView: View {
             ], startPoint: .top, endPoint: .bottom).ignoresSafeArea()
         }.foregroundStyle(Color.primary)
             .sheet(isPresented: $showMapSettings) {
-                NavigationMapSettings()
+                NavigationMapSettings(model: model)
             }
-            .alert("Enable navigation alpha?", isPresented: $confirmNavigationAlpha) {
-                Button("Cancel", role: .cancel) { }
-                Button("Enable alpha") { model.navigationAlpha = true }
-            } message: {
-                Text("Navigation and CarPlay maps are experimental and may stop working or show incorrect guidance. Check directions independently. You can turn this off at any time.")
+            .onChange(of: pairing) { _, value in if value { model.autoOpenGalaxyPending = false } }
+            .sheet(isPresented: $showStartupPages) { startupPicker }
+            .sheet(isPresented: $showToolbarOrder) {
+                let shortcuts = GalaxyToolbar.order(toolbarOrder)
+                NavigationStack {
+                    List {
+                        Section {
+                            ForEach(shortcuts, id: \.self) { id in
+                                HStack {
+                                    Label(LocalizedStringKey(GalaxyToolbar.labels[id] ?? id),
+                                          systemImage: GalaxyBarItem.icon(for: id))
+                                    Spacer()
+                                    if let slot = shortcuts.firstIndex(of: id), slot < 4 {
+                                        Text("\(slot + 1)").foregroundStyle(.secondary)
+                                    }
+                                }
+                            }.onMove { source, destination in
+                                var items = GalaxyToolbar.order(toolbarOrder)
+                                items.move(fromOffsets: source, toOffset: destination)
+                                toolbarOrder = items.joined(separator: ",")
+                            }
+                        } footer: { Text("Drag to reorder. The first four available shortcuts appear in the Galaxy toolbar. The others are in the options menu.") }
+                        Button("Reset order") { toolbarOrder = "" }
+                    }.environment(\.editMode, .constant(.active))
+                        .navigationTitle("Galaxy toolbar").navigationBarTitleDisplayMode(.inline)
+                        .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { showToolbarOrder = false } } }
+                }.presentationDetents([.medium, .large])
             }
-            .onChange(of: connected) { _, _ in openReconnectedGalaxy() }
-            .onChange(of: pairing) { _, value in if value { openAfterReconnect = false } }
-            .onChange(of: model.opened) { _, _ in openReconnectedGalaxy() }
-            .onChange(of: model.wantsConnection) { _, value in if !value { openAfterReconnect = false } }
             .sheet(isPresented: $showOrder) {
                 NavigationStack {
                     List {
@@ -156,7 +175,7 @@ struct ConnectionSettingsView: View {
             } message: { Text("This removes the saved app pairing. Pair your phone again to reconnect.") }
             .confirmationDialog("Reset app pairing and reconnect?", isPresented: $confirmPairingReset, titleVisibility: .visible) {
                 Button("Reset pairing and find comma", role: .destructive) {
-                    openAfterReconnect = false
+                    model.autoOpenGalaxyPending = false
                     model.resetPairingForReconnect()
                 }
             } message: {
@@ -179,7 +198,7 @@ struct ConnectionSettingsView: View {
                 Spacer(minLength: 0)
                 if !dynamicTypeSize.isAccessibilitySize {
                     ConnectionOrbit(route: connected ? model.transport.label : "", pairing: pairing)
-                        .scaleEffect(0.62).frame(width: 164, height: 64)
+                        .scaleEffect(x: 0.62, y: 0.62).frame(width: 164, height: 64)
                 }
             }
             let layout = wide ? AnyLayout(HStackLayout(alignment: .top, spacing: 22)) : AnyLayout(VStackLayout(spacing: 20))
@@ -193,8 +212,10 @@ struct ConnectionSettingsView: View {
                     Text("Connection").font(.title3.bold()).accessibilityAddTraits(.isHeader)
                     connectionModePanel
                     connectionExtras
+                        .simultaneousGesture(TapGesture().onEnded { model.autoOpenGalaxyPending = false })
                     Text("Preferences").font(.title3.bold()).accessibilityAddTraits(.isHeader).padding(.top, 8)
                     preferences()
+                        .simultaneousGesture(TapGesture().onEnded { model.autoOpenGalaxyPending = false })
                 }.frame(maxWidth: .infinity)
             }
             Divider()
@@ -245,12 +266,6 @@ struct ConnectionSettingsView: View {
             }.tint(accent).padding(.horizontal, 14).padding(.vertical, 7).background(panel, in: RoundedRectangle(cornerRadius: 16))
                 .overlay(RoundedRectangle(cornerRadius: 16).stroke(accent.opacity(0.16)))
         }
-    }
-
-    private func openReconnectedGalaxy() {
-        guard openAfterReconnect, !pairing, connected, model.opened else { return }
-        openAfterReconnect = false
-        if autoOpenGalaxy { select(.galaxy) }
     }
 
     private var connectionModePanel: some View {
@@ -305,9 +320,9 @@ struct ConnectionSettingsView: View {
                         discovery.devices.count == 1, let device = discovery.devices.first {
                     connectToDiscoveredComma(device)
                 } else {
-                    openAfterReconnect = true
+                    model.autoOpenGalaxyPending = true
                     model.connect()
-                    openReconnectedGalaxy()
+                    model.openIfReady()
                 }
             } label: {
                 HStack(spacing: 7) {
@@ -396,13 +411,11 @@ struct ConnectionSettingsView: View {
     private func connectToDiscoveredComma(_ device: DiscoveredComma) {
         guard connectingCommaID == nil, !model.selectingDiscoveredComma else { return }
         connectingCommaID = device.id
-        openAfterReconnect = true
+        model.autoOpenGalaxyPending = true
         Task { @MainActor in
             defer { connectingCommaID = nil }
-            if await model.selectDiscoveredComma(device) {
-                openReconnectedGalaxy()
-            } else {
-                openAfterReconnect = false
+            if !(await model.selectDiscoveredComma(device)) {
+                model.autoOpenGalaxyPending = false
                 if device.address == "172.31.254.1" { showHotspotJoin = true }
             }
         }
@@ -462,13 +475,85 @@ struct ConnectionSettingsView: View {
         }
     }
 
+    private var startupLabel: String {
+        if let tab = CompanionTab(rawValue: startupPage) { return tab.rawValue }
+        if let page = startupPages.first(where: { $0.id == startupPage }) { return "Galaxy · " + page.name }
+        return "Galaxy · " + startupPage
+    }
+
+    private func startupOption(_ id: String, _ name: String) -> some View {
+        Button {
+            startupPage = id
+            showStartupPages = false
+        } label: {
+            HStack {
+                Text(verbatim: name)
+                Spacer()
+                if startupPage == id { Image(systemName: "checkmark").foregroundStyle(accent) }
+            }
+        }.foregroundStyle(.primary)
+    }
+
+    private var startupPicker: some View {
+        NavigationStack {
+            List {
+                Section("App") {
+                    ForEach(CompanionTab.allCases.filter { tab in
+                        tab != .galaxy && (!tab.isDeveloperPage || model.developerMode) &&
+                        (tab != .navigation || model.navigationEnabled) &&
+                        (startupSearch.isEmpty || tab.rawValue.localizedCaseInsensitiveContains(startupSearch))
+                    }) { tab in startupOption(tab.rawValue, tab.rawValue) }
+                }
+                Section("Galaxy") {
+                    ForEach(startupPages.filter { startupSearch.isEmpty || $0.name.localizedCaseInsensitiveContains(startupSearch) }) { page in
+                        startupOption(page.id, page.name)
+                    }
+                }
+            }
+            .navigationTitle("Startup page")
+            .searchable(text: $startupSearch)
+            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { showStartupPages = false } } }
+            .task { startupPages = await model.galaxyPage.startupPages() }
+        }
+    }
+
     private func preferences() -> some View {
         VStack(spacing: 0) {
+            preferenceSection("Navigation", expanded: $navigationExpanded) {
+                if model.navigationEnabled {
+                    row(CompanionTab.navigation.icon, title: "Navigation map", subtitle: "Choose a destination or return to your trip") {
+                        Button { select(.navigation) } label: { Image(systemName: "chevron.right").frame(width: 44, height: 44) }
+                            .accessibilityLabel("Open navigation map")
+                            .accessibilityIdentifier("settings-open-navigation")
+                    }
+                    separator
+                }
+                row("map", title: "Navigation settings", subtitle: "Choose guidance, maps and route preferences") {
+                    Button { showMapSettings = true } label: { Image(systemName: "chevron.right").frame(width: 44, height: 44) }
+                        .accessibilityLabel("Open navigation settings")
+                        .accessibilityIdentifier("navigation-map-settings")
+                }
+            }
+            separator
             preferenceSection("Phone & alerts", expanded: $phoneExpanded) {
-                toggleRow("arrow.up.forward.app", title: "Open Galaxy after connecting", subtitle: "Switch from Settings when Galaxy is ready", isOn: $autoOpenGalaxy)
+                toggleRow("arrow.up.forward.app", title: "Open a page on startup", subtitle: "Open your chosen page once when the app starts", isOn: $autoOpenGalaxy)
+                if autoOpenGalaxy {
+                    separator
+                    row("bookmark", title: "Startup page", subtitle: startupLabel) {
+                        Button("Choose") {
+                            model.autoOpenGalaxyPending = false
+                            startupSearch = ""
+                            showStartupPages = true
+                        }.font(.system(size: 12)).frame(minHeight: 44)
+                    }
+                }
                 separator
-                row("music.note", title: "Phone music", subtitle: pairing ? "Waiting for app pairing" : audio.summary) {
-                    Button("Set up") { model.startAudioPairing() }.disabled(!connected || pairing).font(.system(size: 12)).frame(minHeight: 44)
+                toggleRow("music.note", title: "Phone music", subtitle: "Pair this iPhone for Bluetooth audio", isOn: $model.phoneMusicEnabled)
+                if model.phoneMusicEnabled {
+                    separator
+                    row("hifispeaker", title: "Music pairing", subtitle: pairing ? "Waiting for app pairing" : audio.summary) {
+                        Button("Set up") { model.startAudioPairing() }.disabled(!connected || pairing).font(.system(size: 12)).frame(minHeight: 44)
+                    }
                 }
                 separator
                 toggleRow("location", title: "Share phone location", subtitle: location.status.isEmpty ? "Optional" : location.status,
@@ -503,6 +588,13 @@ struct ConnectionSettingsView: View {
                 separator
                 toggleRow("sparkles", title: "Galactical Animations", subtitle: "Animate button presses, tab selection, and connection changes", isOn: $galacticalAnimations)
                 separator
+                if !DuoLayout.isEnabled {
+                    row("arrow.up.arrow.down", title: "Galaxy toolbar", subtitle: "Choose and arrange four shortcuts") {
+                        Button("Edit") { showToolbarOrder = true }
+                            .font(.system(size: 12)).frame(minHeight: 44)
+                    }
+                    separator
+                }
                 toggleRow("textformat", title: "Galaxy toolbar labels", subtitle: "Show names below icons when the toolbar has room", isOn: $toolbarLabels)
                 separator
                 row("rectangle.on.rectangle", title: "Galaxy screens", subtitle: pairing ? "Waiting for pairing" : checking ? "Checking version…" : assets.status == "Galaxy matches comma." ? "Up to date · just checked" : assets.status.contains("screens have changed") ? "Update available · connect over Wi-Fi or Tunnel" : assets.readyRoot != nil ? "Saved from your comma" : "Not downloaded · needs Local Wi-Fi or Tunnel") {
@@ -521,23 +613,6 @@ struct ConnectionSettingsView: View {
                     .font(.system(size: 11)).foregroundStyle(muted)
             }
             separator
-            preferenceSection("Navigation", expanded: $navigationExpanded) {
-                Picker("Distance units", selection: $distanceUnits) {
-                    Text("System").tag(NavigationDistanceUnits.system)
-                    Text("Metric").tag(NavigationDistanceUnits.metric)
-                    Text("Imperial").tag(NavigationDistanceUnits.imperial)
-                }.pickerStyle(.menu)
-                separator
-                toggleRow("clock", title: "Remember destinations", subtitle: "Add destinations to Recents on this phone", isOn: $rememberDestinations)
-                separator
-                row("map", title: "Navigation map", subtitle: useMapbox && mapboxToken.hasPrefix("pk.") ? "Mapbox 3D" : "Apple Maps") {
-                    Button("Change") { showMapSettings = true }
-                        .frame(minHeight: 44)
-                        .accessibilityLabel("Change navigation map")
-                        .accessibilityIdentifier("navigation-map-settings")
-                }
-            }
-            separator
             preferenceSection("Support & developer", expanded: $supportExpanded) {
                 row("ladybug", title: "Logs & support", subtitle: "Report a problem or share diagnostics") {
                     Button { select(.logs) } label: { Image(systemName: "chevron.right").frame(width: 44, height: 44) }.accessibilityLabel("Open Logs & support")
@@ -549,11 +624,6 @@ struct ConnectionSettingsView: View {
                 if model.developerMode {
                     Divider().overlay(accent.opacity(0.12)).padding(.leading, 42)
                     toggleRow("sun.max", title: "Keep Live View awake", subtitle: "Keep the iPhone display on while Live View is open", isOn: $keepLiveAwake)
-                    separator
-                    row("location.fill", title: "Navigation alpha testing", subtitle: "Navigation UI and CarPlay maps · experimental") {
-                        Toggle("Navigation alpha testing", isOn: Binding(get: { model.navigationAlpha }, set: { if $0 { confirmNavigationAlpha = true } else { model.navigationAlpha = false } })).labelsHidden()
-                            .accessibilityIdentifier("navigation-alpha-toggle")
-                    }
 
                 }
             }

@@ -85,6 +85,20 @@ final class AppModel: ObservableObject {
     private var lastRoute = "Reconnecting…"
     @Published var showDiagnostics = false
     @Published var showAudioPairing = false
+    @Published var phoneMusicEnabled = UserDefaults.standard.bool(forKey: "galaxy.phoneMusic.enabled") {
+        didSet {
+            guard oldValue != phoneMusicEnabled else { return }
+            UserDefaults.standard.set(phoneMusicEnabled, forKey: "galaxy.phoneMusic.enabled")
+            if phoneMusicEnabled {
+                if transport.connected && !pairingInProgress { startAudioPairing() }
+            } else {
+                offerAudioPairing = false
+                audioWindowOpen = false
+                showAudioPairing = false
+                audioPairing.dismiss()
+            }
+        }
+    }
     private var offerAudioPairing = false
     private var audioWindowOpen = false
     private let claimer = ClaimTransport()
@@ -95,12 +109,16 @@ final class AppModel: ObservableObject {
         value.onSharingChanged = { [weak self] _ in self?.updateMonitoring() }
         return value
     }()
-    @Published var tab: CompanionTab = .connections
+    @Published var tab: CompanionTab = .connections {
+        didSet {
+            autoOpenGalaxyPending = false
+            if tab != .galaxy { galaxyPage.pendingStartupPage = nil }
+        }
+    }
     @Published var developerMode = UserDefaults.standard.bool(forKey: "galaxy.app.developerMode") {
         didSet {
             UserDefaults.standard.set(developerMode, forKey: "galaxy.app.developerMode")
             if !developerMode {
-                navigationAlpha = false
                 if tab.isDeveloperPage { tab = opened ? .galaxy : .connections }
                 diagnostics.live = false
                 diagnostics.phoneVisible = false
@@ -108,14 +126,13 @@ final class AppModel: ObservableObject {
             }
         }
     }
-    @Published var navigationAlpha = UserDefaults.standard.bool(forKey: "galaxy.app.developerMode") && UserDefaults.standard.bool(forKey: "galaxy.app.navigationAlpha") {
+    @Published var navigationEnabled = UserDefaults.standard.object(forKey: "galaxy.app.navigationEnabled") as? Bool ?? true {
         didSet {
-            UserDefaults.standard.set(navigationAlpha, forKey: "galaxy.app.navigationAlpha")
-            navigationServices.setEnabled(navigationAlpha && developerMode)
-            if !navigationAlpha && tab == .navigation { tab = opened ? .galaxy : .connections }
+            UserDefaults.standard.set(navigationEnabled, forKey: "galaxy.app.navigationEnabled")
+            navigationServices.setEnabled(navigationEnabled)
+            if !navigationEnabled && tab == .navigation { tab = opened ? .galaxy : .connections }
         }
     }
-    var navigationEnabled: Bool { developerMode && navigationAlpha }
     var connectionSetupBusy: Bool { pairingInProgress || offerAudioPairing || showAudioPairing }
     private var galaxyRecoveryTask: Task<Void, Never>?
     private var lastAutomaticGalaxyRecovery: TimeInterval = -.infinity
@@ -343,12 +360,11 @@ final class AppModel: ObservableObject {
         return candidate
     }
     private var firstConnection: Task<Void, Never>?
-    private var openAfterFirstConnection = false
+    var autoOpenGalaxyPending = true
     private var automaticLAN: Task<Void, Never>?
     private var lanProbeTask: Task<Void, Never>?
     private var lastLANDiscovery = Date.distantPast
     private var triedLANAddresses = Set<String>()
-    /// One step for the app and music: comma's open pairing window gives this iPhone its key, then music is set up in the same window.
     private var pairingTask: Task<Void, Never>?
     var hasLANPairingSetup: Bool {
         lan.expectedDeviceID != nil && (try? LANTransport.endpoint(address)) != nil
@@ -424,8 +440,8 @@ final class AppModel: ObservableObject {
         pairingKey = outcome.result.key
         if mode == .lan { mode = .automatic }
         connectionMessage = "Paired. Connecting to comma…"
-        offerAudioPairing = true
-        audioWindowOpen = true
+        offerAudioPairing = phoneMusicEnabled
+        audioWindowOpen = phoneMusicEnabled
         lastReconnect = Date()
         bluetooth.reconnectSaved(pairingKey: pairingKey)
         if !bluetooth.connecting { bluetooth.scan() }
@@ -536,7 +552,7 @@ final class AppModel: ObservableObject {
         } catch { connectionMessage = error.localizedDescription }
     }
     func startAudioPairing() {
-        guard transport.connected else { return }
+        guard phoneMusicEnabled, transport.connected else { return }
         audioPairing.onEvent = { [weak self] event in self?.connectionLog.record(event) }
         connectionLog.record("Music setup using " + transport.label)
         showAudioPairing = true
@@ -619,7 +635,9 @@ final class AppModel: ObservableObject {
     }
     func openIfReady() {
         if transport.connected { pairingResetNeeded = false }
-        guard wantsConnection, !pairingInProgress, !offerAudioPairing, !showAudioPairing, transport.connected, !opened, !openingGalaxy else { return }
+        guard wantsConnection, !pairingInProgress, !offerAudioPairing, !showAudioPairing, transport.connected else { return }
+        if opened { openGalaxyIfRequested(); return }
+        guard !openingGalaxy else { return }
         openingGalaxy = true
         Task { @MainActor in
             defer { openingGalaxy = false }
@@ -633,25 +651,40 @@ final class AppModel: ObservableObject {
                 guard transport.usesNetwork else { return }
                 assets.inUseRoot = nil
                 opened = true
-                finishFirstConnection()
+                openGalaxyIfRequested()
                 return
             }
             assets.inUseRoot = root
             server.useWebRoot(root)
             opened = true
-            finishFirstConnection()
+            openGalaxyIfRequested()
         }
     }
-    private func finishFirstConnection() {
-        guard openAfterFirstConnection else { return }
-        openAfterFirstConnection = false
-        if tab == .connections, UserDefaults.standard.object(forKey: AppPreference.openGalaxy) as? Bool != false { tab = .galaxy }
+    func openGalaxyIfRequested() {
+        guard phoneActive, autoOpenGalaxyPending, tab == .connections else { return }
+        let defaults = UserDefaults.standard
+        guard defaults.object(forKey: AppPreference.openGalaxy) as? Bool != false else {
+            autoOpenGalaxyPending = false
+            return
+        }
+        let choice = defaults.string(forKey: AppPreference.startupPage) ?? "/"
+        if let screen = CompanionTab(rawValue: choice), screen != .galaxy {
+            autoOpenGalaxyPending = false
+            guard (!screen.isDeveloperPage || developerMode), (screen != .navigation || navigationEnabled) else { return }
+            tab = screen
+            diagnostics.live = screen == .live
+            return
+        }
+        guard opened, transport.connected, !pairingInProgress, !offerAudioPairing, !showAudioPairing else { return }
+        autoOpenGalaxyPending = false
+        galaxyPage.pendingStartupPage = StartupPage.valid(choice) ? choice : "/"
+        tab = .galaxy
     }
     func disconnect() {
         legacyURL = nil
         automaticLAN?.cancel(); lanProbeTask?.cancel()
         discovery.stop()
-        firstConnection?.cancel(); firstConnection = nil; openAfterFirstConnection = false
+        firstConnection?.cancel(); firstConnection = nil; autoOpenGalaxyPending = false
         tunnelProbeTask?.cancel(); tunnel.invalidate("Disconnected")
         wantsConnection = false; opened = false
         bluetooth.disconnect(reason: "User selected Disconnect"); lan.invalidate(reason: "User selected Disconnect")
@@ -828,8 +861,7 @@ final class AppModel: ObservableObject {
                       self.discovery.devices[0].id == candidate.id,
                       self.discovery.devices[0].address == candidate.address else { return }
                 self.connectionLog.record("First setup: verifying the only discovered comma")
-                self.openAfterFirstConnection = true
-                if !(await self.selectDiscoveredComma(candidate, userSelected: false)) { self.openAfterFirstConnection = false }
+                _ = await self.selectDiscoveredComma(candidate, userSelected: false)
             }
             return
         }
@@ -945,6 +977,7 @@ final class AppModel: ObservableObject {
 
 
 enum AppPreference {
+    static let startupPage = "galaxy.app.startupPage"
     static let openGalaxy = "galaxy.app.openAfterConnection"
     static let toolbarLabels = "galaxy.app.toolbarLabels"
     static let rememberDestinations = "galaxy.app.rememberDestinations"
@@ -982,6 +1015,7 @@ struct GalaxyRootView: View {
     @State private var hasVisitedGalaxy = false
     @State private var appTabsExpanded = true
     @State private var showingAppTabsInGalaxy = false
+    @AppStorage(GalaxyToolbar.orderKey) private var galaxyToolbarOrder = ""
     private var motionDisabled: Bool { reduceMotion || !galacticalAnimations || scenePhase != .active }
     @AppStorage("galaxy.galacticalAnimations") private var galacticalAnimations = true
     private var page: CompanionTab { model.tab == .galaxy && !model.opened ? .connections : model.tab }
@@ -1002,11 +1036,23 @@ struct GalaxyRootView: View {
     @Environment(\.openURL) private var openURL
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.layoutDirection) private var layoutDirection
     init(model: AppModel) {
         self.model = model; navigation = model.navigationServices.navigation; bluetooth = model.bluetooth; lan = model.lan; assets = model.assets; server = model.server; discovery = model.discovery; galaxyPage = model.galaxyPage
     }
     var body: some View {
         chrome.environment(\.reduceGalacticalMotion, motionDisabled)
+            .background {
+                AppPageEdgeSwipes(enabled: !editorFocused && scenePhase == .active) { fromLeft in
+                    let forward = layoutDirection == .rightToLeft ? fromLeft : !fromLeft
+                    let pages: [CompanionTab] = [.galaxy, .navigation, .connections].filter {
+                        ($0 != .galaxy || model.opened) && ($0 != .navigation || model.navigationEnabled)
+                    }
+                    guard let index = pages.firstIndex(of: page) else { return }
+                    let next = index + (forward ? 1 : -1)
+                    if pages.indices.contains(next) { select(pages[next]) }
+                }
+            }
             .preferredColorScheme(appearance.scheme)
     }
     @ViewBuilder private var chrome: some View {
@@ -1066,27 +1112,19 @@ struct GalaxyRootView: View {
                 Group {
                     if showsGalaxyPill {
                         HStack(spacing: 0) {
-                            AppTabsButton(action: showAppTabs)
-                                .buttonStyle(.plain)
-                                .font(.system(size: 16, weight: .semibold))
-                                .foregroundStyle(.secondary)
-                            ForEach(galaxyPage.barItems.filter { $0.id == "back" || $0.primary }.sorted { $0.id == "back" && $1.id != "back" }) { item in
+                            if let back = galaxyPage.barItems.first(where: { $0.id == "back" && !$0.disabled }) {
+                                GalaxyPillButton(page: galaxyPage, item: back)
+                            } else {
+                                Button(action: showAppTabs) { Image(systemName: "chevron.backward").frame(width: 44, height: 48) }
+                                    .buttonStyle(.plain).accessibilityLabel("Show app tabs")
+                            }
+                            ForEach(GalaxyToolbar.visible(galaxyToolbarOrder, items: galaxyPage.barItems)) { item in
                                 GalaxyPillButton(page: galaxyPage, item: item)
                             }
-                            GalaxyPillMenu(page: galaxyPage, model: model, compact: true, select: select)
+                            GalaxyPillMenu(page: galaxyPage, model: model, compact: true, showAppTabs: showAppTabs, select: select)
                         }
                         .padding(.horizontal, 3)
                         .modifier(FloatingGalaxyGlass())
-                        .overlay {
-                            RoundedRectangle(cornerRadius: 24)
-                                .strokeBorder(
-                                    LinearGradient(colors: [.white.opacity(0.28), .clear, .white.opacity(0.08)],
-                                                   startPoint: .topLeading, endPoint: .bottomTrailing),
-                                    lineWidth: 0.75
-                                )
-                                .allowsHitTesting(false)
-                                .accessibilityHidden(true)
-                        }
                     } else {
                         CompanionNavigationBar(tab: page, developerMode: model.developerMode,
                             navigation: model.navigationServices.navigation, expanded: $appTabsExpanded,
@@ -1099,7 +1137,10 @@ struct GalaxyRootView: View {
             if DuoLayout.isEnabled && page == .navigation { Color.clear }
             else { chromeBackground.ignoresSafeArea() }
         }
-        .onChange(of: page) { _, _ in showingAppTabsInGalaxy = false }
+        .onChange(of: page) { _, current in
+            showingAppTabsInGalaxy = false
+            if current == .galaxy { hasVisitedGalaxy = true }
+        }
         .ignoresSafeArea(.container, edges: editorFocused ? .all : [])
         .statusBarHidden(editorFocused)
         .onChange(of: model.showConnections) { _, show in
@@ -1131,8 +1172,16 @@ struct GalaxyRootView: View {
         }
         .task(id: scenePhase) {
 #if targetEnvironment(simulator)
+            if ProcessInfo.processInfo.arguments.contains("--preview-navigation-planner") {
+                model.navigationEnabled = true
+                let nav = model.navigationServices.navigation
+                let center = CLLocationCoordinate2D(latitude: 43.636, longitude: -79.388)
+                nav.camera = .region(MKCoordinateRegion(center: center, latitudinalMeters: 4000, longitudinalMeters: 4000))
+                model.tab = .navigation
+                return
+            }
             if ProcessInfo.processInfo.arguments.contains("--preview-route") {
-                model.developerMode = true; model.navigationAlpha = true
+                model.developerMode = true; model.navigationEnabled = true
                 let nav = model.navigationServices.navigation
                 let points = [CLLocationCoordinate2D(latitude: 43.6412, longitude: -79.3894), CLLocationCoordinate2D(latitude: 43.6433, longitude: -79.3894), CLLocationCoordinate2D(latitude: 43.6433, longitude: -79.3850)]
                 nav.commaPolyline = MKPolyline(coordinates: points, count: points.count)
@@ -1163,10 +1212,11 @@ struct GalaxyRootView: View {
             model.setPhoneActive(scenePhase == .active)
             model.navigationServices.setEnabled(model.navigationEnabled)
             model.navigationServices.setPhoneActive(scenePhase == .active)
-            if scenePhase == .active { ShareInbox.shared.activated(model: model); model.recoverGalaxy(reload: false); await model.checkGalaxyUpdates() }
+            if scenePhase == .active { ShareInbox.shared.activated(model: model); model.openGalaxyIfRequested(); model.recoverGalaxy(reload: false); await model.checkGalaxyUpdates() }
         }
     }
     private func presentReport() {
+        model.autoOpenGalaxyPending = false
         reportWasSent = false
         discordReport = ReportCapture(logs: captureReportLogs())
     }
@@ -1177,6 +1227,7 @@ struct GalaxyRootView: View {
                     "Galaxy screen updates\n" + model.assets.status].joined(separator: "\n\n")
     }
     private func showAppTabs() {
+        model.autoOpenGalaxyPending = false
         appTabsExpanded = true
         showingAppTabsInGalaxy = true
     }
@@ -1193,6 +1244,56 @@ struct GalaxyRootView: View {
     private let brandPurple = Color(red: 139.0 / 255, green: 92.0 / 255, blue: 246.0 / 255)
 
 
+}
+
+private struct AppPageEdgeSwipes: UIViewRepresentable {
+    let enabled: Bool
+    let switchPage: (Bool) -> Void
+
+    func makeUIView(context: Context) -> EdgeObserver {
+        let view = EdgeObserver()
+        view.isUserInteractionEnabled = false
+        return view
+    }
+
+    func updateUIView(_ view: EdgeObserver, context: Context) {
+        view.switchPage = enabled ? switchPage : nil
+    }
+
+    final class EdgeObserver: UIView, UIGestureRecognizerDelegate {
+        var switchPage: ((Bool) -> Void)?
+        private var gestures: [UIScreenEdgePanGestureRecognizer] = []
+
+        override func didMoveToWindow() {
+            super.didMoveToWindow()
+            for gesture in gestures { gesture.view?.removeGestureRecognizer(gesture) }
+            gestures.removeAll()
+            guard let window else { return }
+            for edge: UIRectEdge in [.left, .right] {
+                let gesture = UIScreenEdgePanGestureRecognizer(target: self, action: #selector(finishSwipe(_:)))
+                gesture.edges = edge
+                gesture.cancelsTouchesInView = false
+                gesture.delegate = self
+                window.addGestureRecognizer(gesture)
+                gestures.append(gesture)
+            }
+        }
+
+        override func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+            switchPage != nil && window?.rootViewController?.presentedViewController == nil
+        }
+
+        func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool { true }
+
+        @objc private func finishSwipe(_ gesture: UIScreenEdgePanGestureRecognizer) {
+            guard gesture.state == .ended else { return }
+            let movement = gesture.translation(in: window)
+            let fromLeft = gesture.edges == .left
+            let distance = fromLeft ? movement.x : -movement.x
+            guard distance >= 55, distance > 1.5 * abs(movement.y) else { return }
+            switchPage?(fromLeft)
+        }
+    }
 }
 
 private struct ReduceGalacticalMotionKey: EnvironmentKey {
@@ -1246,15 +1347,15 @@ private struct GalaxyPillButton: View {
                 Image(systemName: item.icon)
                     .font(.system(size: 16, weight: .medium))
                     .frame(height: 19)
-                if item.primary && toolbarLabels && !typeSize.isAccessibilitySize {
+                if item.id != "back" && toolbarLabels && !typeSize.isAccessibilitySize {
                     Text(verbatim: item.label)
                         .font(.caption.weight(.medium))
                         .lineLimit(1)
                 }
             }
             .padding(.vertical, 9)
-            .frame(minWidth: 44, maxWidth: item.primary ? .infinity : 44, minHeight: 48)
-            .foregroundStyle(item.primary ? Color.primary : Color.secondary)
+            .frame(minWidth: 44, maxWidth: item.id != "back" ? .infinity : 44, minHeight: 48)
+            .foregroundStyle(item.id != "back" ? Color.primary : Color.secondary)
             .overlay(alignment: .bottom) {
                 if item.selected {
                     Capsule()
@@ -1267,6 +1368,7 @@ private struct GalaxyPillButton: View {
             .contentShape(Rectangle())
         }.buttonStyle(CompanionPressStyle()).disabled(item.disabled).accessibilityLabel(Text(verbatim: item.label))
             .accessibilityIdentifier("galaxy-pill-" + item.id)
+            .accessibilityValue(item.selected ? Text("Selected") : Text(""))
             .accessibilityAddTraits(item.selected ? .isSelected : [])
     }
 }
@@ -1286,11 +1388,14 @@ private struct GalaxyPillMenu: UIViewRepresentable {
     let select: (CompanionTab) -> Void
     @Environment(\.locale) private var locale
 
+    let showAppTabs: (() -> Void)?
+    @AppStorage(GalaxyToolbar.orderKey) private var toolbarOrder = ""
     let compact: Bool
 
-    init(page: GalaxyPageDiagnostics, model: AppModel, compact: Bool = false, select: @escaping (CompanionTab) -> Void) {
+    init(page: GalaxyPageDiagnostics, model: AppModel, compact: Bool = false, showAppTabs: (() -> Void)? = nil, select: @escaping (CompanionTab) -> Void) {
         self.page = page
         self.model = model
+        self.showAppTabs = showAppTabs
         self.compact = compact
         self.select = select
     }
@@ -1330,6 +1435,9 @@ private struct GalaxyPillMenu: UIViewRepresentable {
 
     private func sections() -> [UIMenuElement] {
         var appActions: [UIAction] = []
+        if let showAppTabs {
+            appActions.append(UIAction(title: String(localized: "Show app tabs", locale: locale), image: UIImage(systemName: "square.grid.2x2")) { _ in showAppTabs() })
+        }
         if model.navigationEnabled {
             appActions.append(UIAction(title: String(localized: "Navigation", locale: locale), image: UIImage(systemName: CompanionTab.navigation.icon)) { _ in
                 if model.navigationEnabled { select(.navigation) }
@@ -1341,7 +1449,8 @@ private struct GalaxyPillMenu: UIViewRepresentable {
         if !page.deviceStatus.isEmpty {
             galaxyActions.append(UIAction(title: page.deviceStatus, attributes: .disabled) { _ in })
         }
-        for item in page.barItems where DuoLayout.isEnabled || (!item.primary && item.id != "back") {
+        let visible = GalaxyToolbar.visible(toolbarOrder, items: page.barItems)
+        for item in page.barItems where !compact || (item.id != "back" && !visible.contains(item)) {
             galaxyActions.append(UIAction(title: item.label, image: UIImage(systemName: item.icon), attributes: item.disabled ? .disabled : []) { _ in
                 if let current = page.barItems.first(where: { $0.id == item.id }) { page.activate(current) }
             })
@@ -1498,14 +1607,31 @@ struct CompactConnectionStatus: View {
 }
 
 struct FloatingGalaxyGlass: ViewModifier {
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @Environment(\.colorScheme) private var scheme
+
     func body(content: Content) -> some View {
-        if #available(iOS 26.0, *) {
-            content.glassEffect(.regular.tint(Color.purple.opacity(0.12)), in: .rect(cornerRadius: 24))
-        } else {
-            content
-                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 24))
-                .overlay(RoundedRectangle(cornerRadius: 24).strokeBorder(Color.purple.opacity(0.18), lineWidth: 0.5))
+        let shape = Capsule()
+        Group {
+            if reduceTransparency {
+                content.background(Color(uiColor: .secondarySystemBackground), in: shape)
+            } else if #available(iOS 26.0, *) {
+                content.glassEffect(.regular.tint(.purple.opacity(0.08)).interactive(), in: shape)
+            } else {
+                content.background(.thinMaterial, in: shape)
+            }
         }
+        .overlay {
+            shape.strokeBorder(
+                LinearGradient(stops: [
+                    .init(color: .white.opacity(scheme == .dark ? 0.6 : 0.85), location: 0),
+                    .init(color: .white.opacity(0.12), location: 0.35),
+                    .init(color: .purple.opacity(0.19), location: 0.7),
+                    .init(color: .white.opacity(0.55), location: 1)
+                ], startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 1.25
+            ).allowsHitTesting(false).accessibilityHidden(true)
+        }
+        .shadow(color: .black.opacity(scheme == .dark ? 0.22 : 0.10), radius: 6, y: 2)
     }
 }
 
@@ -1626,7 +1752,7 @@ final class ConnectionEventLog: ObservableObject {
         Pairing active: \(model.pairingInProgress); setup busy: \(model.connectionSetupBusy)
         Last pairing failure: \(model.pairingFailure.isEmpty ? "none" : model.pairingFailure)
         Current connection message: \(model.connectionMessage)
-        Navigation alpha: \(model.navigationEnabled)
+        Navigation enabled: \(model.navigationEnabled)
         Retained failure events (may also appear in the timeline; retained=\(failureCount); older failures dropped=\(max(0, totalFailures - failureCount))):
         \(failureEvents.suffix(eventLimit ?? failureCount).joined(separator: "\n"))
         Recent connection events:
@@ -1831,6 +1957,7 @@ private struct AdaptiveCompanionLayout<Content: View>: View {
                             .tint(item.selected ? Color.purple : Color.primary)
                             .disabled(item.disabled)
                             .accessibilityIdentifier("galaxy-pill-" + item.id)
+                            .accessibilityValue(item.selected ? Text("Selected") : Text(""))
                             .accessibilityAddTraits(item.selected ? .isSelected : [])
                         }
                         GalaxyPillMenu(page: galaxyPage, model: model, select: select)

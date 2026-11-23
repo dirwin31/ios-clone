@@ -1,10 +1,12 @@
 # Companion guide
 
-To use Mapbox in the iPhone Navigation tab, enable **Navigation alpha testing**, then open **Navigation map → Change** beside it. Enter a public Mapbox token and choose **Use Mapbox 3D**. The map stays on Mapbox while browsing, previewing a destination, and navigating with either the iPhone or comma. Choose **iPhone → Start on iPhone** to drive without connecting a comma. iPhone routes use Mapbox Directions when Mapbox is selected. CarPlay uses the selected map provider for its navigation map and dashboard. Its overview and zoom buttons control the car display independently of the phone.
+Pick a destination and tap **Send to comma**. Your paired comma calculates the route. To choose its provider, open **Navigation settings → Comma settings → Directions provider**, select **Mapbox** or **Google Routes**, and tap **Save to comma**. Google routing uses the keys configured on the comma.
+
+To navigate without a comma, turn on **Use iPhone-only directions** in Navigation settings. **iPhone directions** then offers Apple Maps, Mapbox, and options to open a destination in Google Maps or Waze. Mapbox services use the public token saved on your iPhone. Mapbox Navigator supports downloaded areas. **Map appearance** controls the display map, including custom Mapbox Studio styles.
 
 The iOS source is in [starpilot-galaxy-ios](https://github.com/natehuby76/starpilot-galaxy-ios). Use `ios-companion-release` for the release app, `ios-companion-testing` for Live View testing, and `ios-companion-dev` for development including notification mirroring.
 
-The app starts with the regular StarPilot BT interface. Under Developer mode, Navigation alpha testing enables the native navigation interface and CarPlay map. Regular CarPlay keeps its existing toggles and stats. Turning alpha off clears phone navigation without sending a route-clear command to comma.
+Navigation is available on iPhone and CarPlay by default. Turn it off in Navigation settings to return to the regular Galaxy interface. Turning it off clears local guidance and leaves the destination on comma.
 
 DI’s comma-served Galaxy and pairing changes are imported from `dirwin31/openpilot` commit `434a65cdb73d81f69b134386773d23c4c7ee825a` (StarPilotBT PR #3).
 

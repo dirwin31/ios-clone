@@ -1,8 +1,46 @@
 import Foundation
 
+struct PhoneTripRejection: LocalizedError {
+    let message: String
+    var errorDescription: String? { message }
+}
+
 /// Adapter for the navigation API already installed on the newer StarPilot fork.
 /// It never changes configuration or GPS-source settings and never retries a write.
 enum NativeNavigationAPI {
+    @MainActor
+    static func sendPhoneTrip(destination: NavigationDestination, route: Data, revision: String, supportsOnroad: Bool,
+                              transport: any GalaxyRequestTransport, willSend: () -> Void = {}, stillCurrent: () -> Bool) async throws -> String {
+        let body: [String: Any] = ["revision": revision, "phoneRoute": try JSONSerialization.jsonObject(with: route),
+            "destination": ["name": destination.name, "latitude": destination.latitude, "longitude": destination.longitude]]
+        guard stillCurrent(), !Task.isCancelled else { throw CancellationError() }
+        willSend()
+        let reply = try await transport.request(path: "/api/navigation/phone-trip", method: "POST",
+            headers: ["content-type": "application/json"], body: JSONSerialization.data(withJSONObject: body))
+        guard stillCurrent() else { throw BridgeError.message("Connection changed. Check the active trip on comma.") }
+        guard reply.status == 200 else {
+            let detail = try? JSONSerialization.jsonObject(with: reply.bodyData) as? [String: Any]
+            let reason = detail?["error"] as? String ?? ""
+            if reply.status == 409 {
+                if detail?["code"] as? String == "trip_changed" || reason.hasPrefix("Navigation changed") {
+                    throw PhoneTripRejection(message: "The active trip changed. Review the route and send it again.")
+                }
+                if reason.hasPrefix("Park and reconnect"), !supportsOnroad {
+                    throw PhoneTripRejection(message: "This comma software accepts iPhone routes while parked. For on-road handoff, update the comma to a version that supports it.")
+                }
+                throw PhoneTripRejection(message: "The comma declined this trip. Refresh the route and try again.")
+            }
+            if reply.status == 400 {
+                throw PhoneTripRejection(message: "The comma could not use this route. Check its navigation setup and choose a fresh route from your current location.")
+            }
+            throw BridgeError.message("Comma returned HTTP \(reply.status) for the iPhone route.")
+        }
+        struct Receipt: Decodable { let revision: String; let activeRouteSource: String; let destination: NavigationDestination }
+        let receipt = try JSONDecoder().decode(Receipt.self, from: reply.bodyData)
+        guard receipt.activeRouteSource == "iphone", !receipt.revision.isEmpty, receipt.destination.matches(destination) else { throw NavigationContractError.invalidResponse }
+        return receipt.revision
+    }
+
     // Native status provides a 3-second upper bound, not a sample timestamp.
     // Allow a bounded Bluetooth delivery/poll interval for guidance only. GPS keeps
     // its independent <=2.5-second expiry and is never extended by this policy.
@@ -13,6 +51,8 @@ enum NativeNavigationAPI {
         return max(0, guidanceDisplayMaxAge - ageUpperBound - elapsed)
     }
     struct State: Decodable {
+        let activeRouteSource: String?
+        let phoneRouteTripOnroad: Bool?
         let revision: String
         let enabled: Bool
         let hasKey: Bool
@@ -145,6 +185,9 @@ enum NativeNavigationAPI {
                 "waitingForLocation": "Destination received. Waiting for GPS on comma.",
                 "routing": "Destination received. Comma is calculating the route.",
                 "routeUnavailable": "Comma couldn’t calculate a route.", "stale": "Waiting for fresh navigation from comma…"][state.status])
+        result.phoneTripOnroad = state.phoneRouteTripOnroad == true
+        result.routeUnavailable = state.status == "routeUnavailable"
+        result.phoneTripRevision = state.activeRouteSource == "iphone" ? state.revision : nil
         result.routePoints = state.route.map { $0.map { RoutePoint(latitude: $0.latitude, longitude: $0.longitude) } }
         result.positionValidForSeconds = live ? (location?.validForMs ?? 0) / 1000 : 0
         try result.validate()

@@ -28,12 +28,84 @@
       }
     },
     {
+      "identity": "mapbox-navigation-ios",
+      "kind": "remoteSourceControl",
+      "location": "https://github.com/mapbox/mapbox-navigation-ios.git",
+      "state": {
+        "revision": "a0ec3d5ec88c7c244dcae9e0c089a95b6bafd990",
+        "version": "3.16.0"
+      }
+    },
+    {
+      "identity": "mapbox-navigation-native-ios",
+      "kind": "remoteSourceControl",
+      "location": "https://github.com/mapbox/mapbox-navigation-native-ios.git",
+      "state": {
+        "revision": "c07eb8906a7e92d5eb2d0a286fa702ea4e6e9028",
+        "version": "324.16.0"
+      }
+    },
+    {
+      "identity": "ohhttpstubs",
+      "kind": "remoteSourceControl",
+      "location": "https://github.com/AliSoftware/OHHTTPStubs",
+      "state": {
+        "revision": "12f19662426d0434d6c330c6974d53e2eb10ecd9",
+        "version": "9.1.0"
+      }
+    },
+    {
+      "identity": "swift-argument-parser",
+      "kind": "remoteSourceControl",
+      "location": "https://github.com/apple/swift-argument-parser",
+      "state": {
+        "revision": "011f0c765fb46d9cac61bca19be0527e99c98c8b",
+        "version": "1.5.1"
+      }
+    },
+    {
+      "identity": "swift-custom-dump",
+      "kind": "remoteSourceControl",
+      "location": "https://github.com/pointfreeco/swift-custom-dump",
+      "state": {
+        "revision": "82645ec760917961cfa08c9c0c7104a57a0fa4b1",
+        "version": "1.3.3"
+      }
+    },
+    {
+      "identity": "swift-snapshot-testing",
+      "kind": "remoteSourceControl",
+      "location": "https://github.com/pointfreeco/swift-snapshot-testing.git",
+      "state": {
+        "revision": "b2d4cb30735f4fbc3a01963a9c658336dd21e9ba",
+        "version": "1.18.1"
+      }
+    },
+    {
+      "identity": "swift-syntax",
+      "kind": "remoteSourceControl",
+      "location": "https://github.com/swiftlang/swift-syntax",
+      "state": {
+        "revision": "0687f71944021d616d34d922343dcef086855920",
+        "version": "600.0.1"
+      }
+    },
+    {
       "identity": "turf-swift",
       "kind": "remoteSourceControl",
       "location": "https://github.com/mapbox/turf-swift.git",
       "state": {
         "revision": "bf840e6b9529d105687840fe2c9dcd74197d46d1",
         "version": "4.0.0"
+      }
+    },
+    {
+      "identity": "xctest-dynamic-overlay",
+      "kind": "remoteSourceControl",
+      "location": "https://github.com/pointfreeco/xctest-dynamic-overlay",
+      "state": {
+        "revision": "a3f634d1a409c7979cabc0a71b3f26ffa9fc8af1",
+        "version": "1.4.3"
       }
     }
   ],

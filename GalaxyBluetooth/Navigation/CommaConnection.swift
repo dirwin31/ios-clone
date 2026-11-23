@@ -72,6 +72,29 @@ final class CommaConnection: ObservableObject {
         }
         return response.bodyData
     }
+    func startPhoneTrip(destination: NavigationDestination, route: Data, willSend: () -> Void) async throws -> String {
+        let before = session
+        guard connected, deviceIdentity != nil, !setupInProgress else { throw BridgeError.message("Connect to your paired comma first.") }
+        let status = try await transport.request(path: "/api/navigation/status", method: "GET", headers: [:], body: Data())
+        guard before == session, status.status == 200,
+              let info = try JSONSerialization.jsonObject(with: status.bodyData) as? [String: Any],
+              info["phoneRouteTripVersion"] as? Int == 1, let revision = info["revision"] as? String else {
+            throw BridgeError.message("Your connected comma needs software that supports starting an iPhone route.")
+        }
+        return try await sendPhoneTrip(destination: destination, route: route, revision: revision,
+                                       supportsOnroad: info["phoneRouteTripOnroad"] as? Bool == true, willSend: willSend)
+    }
+
+    // The server atomically checks this revision. A reroute must use the revision
+    // acknowledged for our trip, even if another device has since selected a route.
+    func sendPhoneTrip(destination: NavigationDestination, route: Data, revision: String, supportsOnroad: Bool, willSend: () -> Void = {}) async throws -> String {
+        let before = session
+        guard connected, deviceIdentity != nil, !setupInProgress else { throw BridgeError.message("Reconnect to your paired comma.") }
+        return try await NativeNavigationAPI.sendPhoneTrip(destination: destination, route: route, revision: revision,
+                                                           supportsOnroad: supportsOnroad, transport: transport, willSend: willSend,
+                                                           stillCurrent: { self.session == before && self.connected })
+    }
+
     func commaIsParked() async -> Bool? {
         guard connected else { return nil }
         let before = session

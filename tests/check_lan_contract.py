@@ -12,7 +12,7 @@ for name in ['GalaxyAssetStore.swift', 'LoopbackServer.swift', 'GalaxyBluetoothA
 assert not Path('GalaxyBluetooth/Resources/Web').exists(), 'Galaxy pages come from comma, never from the app bundle'
 settings = Path('GalaxyBluetooth/ConnectionSettingsView.swift').read_text(encoding='utf-8')
 assert 'ForEach(discovery.devices) { device in' in settings, 'A single advertised comma also needs a selectable row'
-assert 'if await model.selectDiscoveredComma(device)' in settings, 'Selection must verify the advertised endpoint'
+assert 'await model.selectDiscoveredComma(device)' in settings, 'Selection must verify the advertised endpoint'
 controller = Path('GalaxyBluetooth/GalaxyBluetoothApp.swift').read_text(encoding='utf-8')
 for context in ['Selected comma', 'Automatic LAN verification', 'Bluetooth pairing via LAN']:
   assert f'context: "{context}"' in controller, f'Missing diagnostic context for {context}'

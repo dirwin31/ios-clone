@@ -6,7 +6,8 @@ struct GalaxyBarItem: Decodable, Identifiable, Equatable {
     let label: String
     let selected: Bool
     let disabled: Bool
-    var icon: String {
+    var icon: String { Self.icon(for: id) }
+    static func icon(for id: String) -> String {
         switch id {
         case "home": return "house.fill"
         case "toggles": return "switch.2"
@@ -20,6 +21,49 @@ struct GalaxyBarItem: Decodable, Identifiable, Equatable {
         }
     }
     var primary: Bool { ["home", "toggles", "tools", "routes"].contains(id) }
+}
+
+enum GalaxyToolbar {
+    static let orderKey = "galaxy.app.toolbarOrder"
+    static let defaults = ["home", "toggles", "tools", "routes", "search", "theme", "menu"]
+    static let labels = ["home": "Home", "toggles": "Toggles", "tools": "Tools", "routes": "Routes",
+                         "search": "Search", "theme": "Theme", "menu": "Galaxy menu"]
+
+    static func order(_ stored: String) -> [String] {
+        var seen = Set<String>()
+        return (stored.split(separator: ",").map(String.init) + defaults).filter {
+            defaults.contains($0) && seen.insert($0).inserted
+        }
+    }
+
+    static func visible(_ stored: String, items: [GalaxyBarItem]) -> [GalaxyBarItem] {
+        Array(order(stored).compactMap { id in items.first { $0.id == id } }.prefix(4))
+    }
+}
+
+struct StartupPage: Codable, Identifiable {
+    let id: String
+    let name: String
+    static let primary = [Self(id: "/", name: "Home"), Self(id: "/settings", name: "Toggles"),
+                          Self(id: "/tools", name: "Tools"), Self(id: "/recordings", name: "Routes")]
+    static let cacheKey = "galaxy.app.startupCatalog"
+    static var cached: [StartupPage] {
+        guard let data = UserDefaults.standard.data(forKey: cacheKey),
+              let pages = try? JSONDecoder().decode([StartupPage].self, from: data) else { return primary }
+        return pages
+    }
+    static func valid(_ id: String) -> Bool {
+        id == "/" || (id.utf8.count <= 256 && id.range(of: #"^(/|toggle:|section:)[a-zA-Z0-9_-]+(/[a-zA-Z0-9_-]+)*$"#, options: .regularExpression) != nil)
+    }
+    static func url(_ base: URL, for id: String) -> URL {
+        guard valid(id), var parts = URLComponents(url: base, resolvingAgainstBaseURL: false) else { return base }
+        if id.hasPrefix("/") { parts.fragment = id }
+        else {
+            parts.fragment = "/settings"
+            parts.queryItems = (parts.queryItems ?? []) + [URLQueryItem(name: "startupPage", value: id)]
+        }
+        return parts.url ?? base
+    }
 }
 
 struct GalaxyDownloadedFile: Identifiable {
@@ -54,6 +98,27 @@ final class GalaxyPageDiagnostics: ObservableObject {
     @Published var barItems: [GalaxyBarItem] = []
     @Published var deviceStatus = ""
     fileprivate weak var barWebView: WKWebView?
+    var pendingStartupPage: String?
+    func startupPages() async -> [StartupPage] {
+        guard let web = barWebView, let value = try? await web.callAsyncJavaScript(
+            "return await window.__galaxyStartupPages?.()", arguments: [:], in: nil, contentWorld: .page),
+              let rows = value as? [[String: String]], !rows.isEmpty else { return StartupPage.cached }
+        var pages = StartupPage.primary
+        for row in rows {
+            guard let id = row["id"], let name = row["name"], StartupPage.valid(id), !name.isEmpty,
+                  !pages.contains(where: { $0.id == id }) else { continue }
+            pages.append(StartupPage(id: id, name: name))
+        }
+        if let data = try? JSONEncoder().encode(pages) { UserDefaults.standard.set(data, forKey: StartupPage.cacheKey) }
+        return pages
+    }
+
+    func takeStartupURL(_ base: URL) -> URL? {
+        guard let id = pendingStartupPage else { return nil }
+        pendingStartupPage = nil
+        return StartupPage.url(base, for: id)
+    }
+
     func activate(_ item: GalaxyBarItem) {
         guard barItems.contains(item), !item.disabled else { return }
         if item.id == "theme", let dark = darkAppearance {
@@ -575,12 +640,13 @@ private struct GalaxyPage: UIViewRepresentable {
         webView.backgroundColor = DuoLayout.isEnabled ? .clear : StarPilotTheme.toolbarColor(dark: true)
         if DuoLayout.isEnabled { webView.scrollView.backgroundColor = .clear }
         webView.scrollView.contentInsetAdjustmentBehavior = .never
-        webView.load(URLRequest(url: url))
+        webView.load(URLRequest(url: diagnostics.takeStartupURL(url) ?? url))
         return webView
     }
 
     func updateUIView(_ uiView: WKWebView, context: Context) {
         uiView.evaluateJavaScript("window.__galaxyBluetooth = \(bluetooth ? "true" : "false")", completionHandler: nil)
+        if isActive, let startup = diagnostics.takeStartupURL(url) { uiView.load(URLRequest(url: startup)) }
         context.coordinator.isVisible = isActive
         context.coordinator.syncVisibility(uiView)
         context.coordinator.syncPush(uiView)
