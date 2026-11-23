@@ -1094,7 +1094,18 @@ struct GalaxyRootView: View {
                             }
                             GalaxyPillMenu(page: galaxyPage, model: model, compact: true, select: select)
                         }
-                        .padding(.horizontal, 3).modifier(FloatingGalaxyGlass())
+                        .padding(.horizontal, 3)
+                        .modifier(FloatingGalaxyGlass())
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 24)
+                                .strokeBorder(
+                                    LinearGradient(colors: [.white.opacity(0.28), .clear, .white.opacity(0.08)],
+                                                   startPoint: .topLeading, endPoint: .bottomTrailing),
+                                    lineWidth: 0.75
+                                )
+                                .allowsHitTesting(false)
+                                .accessibilityHidden(true)
+                        }
                     } else {
                         CompanionNavigationBar(tab: page, developerMode: model.developerMode,
                             navigation: model.navigationServices.navigation, expanded: $appTabsExpanded,
