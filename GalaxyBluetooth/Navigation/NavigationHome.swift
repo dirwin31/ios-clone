@@ -470,34 +470,47 @@ private struct TripSummaryRow<Options: View>: View {
 
     @ScaledMetric(relativeTo: .title2) private var valueSize: CGFloat = 23
 
+    @ScaledMetric(relativeTo: .headline) private var compactValueSize: CGFloat = 18
+
     var body: some View {
-        ViewThatFits(in: .horizontal) {
-            if !typeSize.isAccessibilitySize {
+        if typeSize.isAccessibilitySize {
+            stackedSummary
+        } else {
+            ViewThatFits(in: .horizontal) {
                 HStack(spacing: 20) {
-                    metrics
+                    metrics(size: valueSize, spacing: 18)
                     Spacer(minLength: 0)
                     actions
                 }
-            }
-            VStack(alignment: .leading, spacing: 12) {
-                ViewThatFits(in: .horizontal) {
-                    metrics
-                    VStack(alignment: .leading, spacing: 10) { metricItems }
+                HStack(spacing: 6) {
+                    metrics(size: compactValueSize, spacing: 8)
+                    Spacer(minLength: 0)
+                    actions
                 }
-                actions.frame(maxWidth: .infinity, alignment: .trailing)
+                stackedSummary
             }
         }
     }
 
-    private var metrics: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 18) { metricItems }
+    private var stackedSummary: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            ViewThatFits(in: .horizontal) {
+                metrics(size: valueSize, spacing: 18)
+                VStack(alignment: .leading, spacing: 10) { metricItems(size: valueSize) }
+            }
+            actions.frame(maxWidth: .infinity, alignment: .trailing)
+        }
+    }
+
+    private func metrics(size: CGFloat, spacing: CGFloat) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: spacing) { metricItems(size: size) }
             .fixedSize(horizontal: true, vertical: false)
     }
 
-    @ViewBuilder private var metricItems: some View {
-        metric(Date().addingTimeInterval(navigation.remainingTime).formatted(date: .omitted, time: .shortened), "arrival")
-        metric(NavigationDuration.text(navigation.remainingTime), "remaining")
-        metric(units.text(navigation.remainingDistance), "distance")
+    @ViewBuilder private func metricItems(size: CGFloat) -> some View {
+        metric(Date().addingTimeInterval(navigation.remainingTime).formatted(date: .omitted, time: .shortened), "arrival", size: size)
+        metric(NavigationDuration.text(navigation.remainingTime), "remaining", size: size)
+        metric(units.text(navigation.remainingDistance), "distance", size: size)
     }
 
     private var actions: some View {
@@ -510,10 +523,10 @@ private struct TripSummaryRow<Options: View>: View {
         }.fixedSize(horizontal: true, vertical: false)
     }
 
-    private func metric(_ value: String, _ label: LocalizedStringKey) -> some View {
+    private func metric(_ value: String, _ label: LocalizedStringKey, size: CGFloat) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(navigation.usingComma && !navigation.commaFeedReady ? "—" : value)
-                .font(.system(size: valueSize, weight: .semibold, design: .rounded))
+                .font(.system(size: size, weight: .semibold, design: .rounded))
                 .monospacedDigit().lineLimit(1).minimumScaleFactor(0.75)
             Text(label).font(.caption).foregroundStyle(.secondary).lineLimit(1).minimumScaleFactor(0.85)
         }

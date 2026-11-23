@@ -114,6 +114,22 @@ struct CarDisplayMapOptions: Equatable {
 }
 
 struct MapboxDriveMap: View {
+    private static let carArrow = UIGraphicsImageRenderer(size: CGSize(width: 30, height: 30)).image { _ in
+        let disk = UIBezierPath(ovalIn: CGRect(x: 1, y: 1, width: 28, height: 28))
+        StarPilotTheme.routePurple.setFill()
+        disk.fill()
+        UIColor.white.setStroke()
+        disk.lineWidth = 2
+        disk.stroke()
+        let arrow = UIBezierPath()
+        arrow.move(to: CGPoint(x: 15, y: 5))
+        arrow.addLine(to: CGPoint(x: 22, y: 22))
+        arrow.addLine(to: CGPoint(x: 15, y: 18))
+        arrow.addLine(to: CGPoint(x: 8, y: 22))
+        arrow.close()
+        UIColor.white.setFill()
+        arrow.fill()
+    }
     private static let destinationIcon: UIImage = {
         let palette = UIImage.SymbolConfiguration(paletteColors: [.white, .systemRed])
         let symbol = UIImage(systemName: "mappin.circle.fill", withConfiguration: palette)?
@@ -231,7 +247,14 @@ struct MapboxDriveMap: View {
                                 .foregroundStyle(.white, StarPilotTheme.accent).accessibilityLabel("Starting point: \(start.name)")
                         }
                     }
-                    if !(driving && following && carDisplay == nil) && !anchored, let point = position(at: clock.date) {
+                    if carDisplay != nil, driving, following, let point = position(at: clock.date) {
+                        GeoJSONSource(id: "galaxy-car-position").data(.geometry(.point(Point(aligned(point)))))
+                        StyleImage(id: "galaxy-car-arrow", image: Self.carArrow)
+                        SymbolLayer(id: "galaxy-car-marker", source: "galaxy-car-position")
+                            .slot(.top).iconImage("galaxy-car-arrow")
+                            .iconPitchAlignment(.viewport).iconRotationAlignment(.viewport)
+                            .iconAllowOverlap(true).iconIgnorePlacement(true).iconOcclusionOpacity(1)
+                    } else if !(driving && following), let point = position(at: clock.date) {
                         MapViewAnnotation(coordinate: aligned(point)) {
                             DrivePositionMarker(perspective: markerPerspective, following: false, comma: commaTrip)
                         }
@@ -249,13 +272,6 @@ struct MapboxDriveMap: View {
                 .onMapLoadingError {
                     if $0.type == .style {
                         navigation.notice = "Mapbox couldn’t load. Check your internet connection and public token in Navigation map settings."
-                    }
-                }
-                .overlay {
-                    if carDisplay != nil, anchored, position(at: clock.date) != nil {
-                        DrivePositionMarker(perspective: markerPerspective, following: true, comma: commaTrip)
-                            .position(anchor)
-                            .allowsHitTesting(false)
                     }
                 }
             }
