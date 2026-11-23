@@ -186,11 +186,18 @@ struct CommaFollowingMap: UIViewRepresentable {
                     distanceToTurn: navigation.distanceToTurn)
                 origin = displayed ?? point; target = point
                 originHeading = heading
-                targetHeading = navigation.commaHeading >= 0 ? navigation.commaHeading : heading
                 let jump = displayed.map {
                     CLLocation(latitude: $0.latitude, longitude: $0.longitude)
                         .distance(from: CLLocation(latitude: point.latitude, longitude: point.longitude))
                 } ?? 0
+                let phoneSpeed = navigation.goodLocation.flatMap { fix -> Double? in
+                    guard (0...2).contains(-fix.timestamp.timeIntervalSinceNow), fix.speed >= 0,
+                          fix.distance(from: CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude)) <= 30 else { return nil }
+                    return fix.speed
+                }
+                let moving = NavigationMapMotion.reliableCourse(speed: phoneSpeed ?? filteredSpeed,
+                    displacement: jump, hasMeasuredSpeed: phoneSpeed != nil)
+                targetHeading = (displayed == nil || moving) && navigation.commaHeading >= 0 ? navigation.commaHeading : heading
                 duration = displayed == nil || jump > 500 || UIAccessibility.isReduceMotionEnabled ? 0 : min(2.5, max(0.35, elapsed))
                 acceptedDate = received; lastArrival = now; startedAt = now
                 if !markerAdded { marker.coordinate = coordinate; map.addAnnotation(marker); markerAdded = true }

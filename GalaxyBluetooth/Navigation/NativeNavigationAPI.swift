@@ -169,7 +169,9 @@ enum NativeNavigationAPI {
         return "/api/navigation/status?routeKey=" + version.prefix(16)
     }
     static func snapshot(_ data: Data) throws -> CommaRouteSnapshot {
-        let state = try decode(data)
+        try snapshot(decode(data))
+    }
+    static func snapshot(_ state: State) throws -> CommaRouteSnapshot {
         let guiding = ["guiding", "arrived"].contains(state.status) && state.instruction != nil && state.destination != nil && ((state.route?.count ?? 0) >= 2 || state.routeUnchanged == true)
         let location = state.location
         let live = location?.lastKnown != true && (location?.validForMs ?? 0) > 0

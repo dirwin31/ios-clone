@@ -100,9 +100,12 @@ final class CarPlaySceneDelegate: NSObject, CPTemplateApplicationSceneDelegate, 
         timer?.invalidate()
         timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
             Task { @MainActor in
-                self?.refreshTelemetry()
-                self?.refreshNavigation()
-                self?.refreshVisibleSettings()
+                guard let self else { return }
+                let showingMap = self.mapTemplate != nil && self.controller?.rootTemplate === self.mapTemplate
+                AppModel.shared.diagnostics.carPlayShowingMap = showingMap
+                if !showingMap { self.refreshTelemetry() }
+                self.refreshNavigation()
+                self.refreshVisibleSettings()
             }
         }
     }
@@ -302,7 +305,7 @@ final class CarPlaySceneDelegate: NSObject, CPTemplateApplicationSceneDelegate, 
     }
 
     private func refreshNavigation() {
-        refreshNavigationMenu()
+        if mapTemplate == nil { refreshNavigationMenu() }
         guard AppModel.shared.navigationEnabled else { return }
         let nav = AppModel.shared.navigationServices.navigation
         if !nav.navigating {
@@ -422,6 +425,7 @@ final class CarPlaySceneDelegate: NSObject, CPTemplateApplicationSceneDelegate, 
         gridActions.removeAllObjects(); gridSizes.removeAllObjects(); overflowParents.removeAllObjects(); settingsRefresh.removeAllObjects(); navigating = false
         AppModel.shared.navigationServices.setCarPlayActive(false)
         AppModel.shared.setCarPlayActive(false)
+        AppModel.shared.diagnostics.carPlayShowingMap = false
     }
 
     func tabBarTemplate(_ tabBarTemplate: CPTabBarTemplate, didSelect selectedTemplate: CPTemplate) {
@@ -1433,8 +1437,8 @@ private final class CompanionCarPlayMap: UIViewController, MKMapViewDelegate {
         let safe = map.safeAreaLayoutGuide.layoutFrame
         let x = CarDisplayMapOptions.followX(in: safe.isEmpty ? frame : safe, dashboard: dashboard,
                                              rightToLeft: map.effectiveUserInterfaceLayoutDirection == .rightToLeft)
-        let anchor = CGPoint(x: x,
-                             y: frame.minY + max(frame.height * 0.45, frame.height - (dashboard ? 26 : min(60, frame.height * 0.23))))
+        let anchor = CGPoint(x: x, y: CarDisplayMapOptions.followY(height: map.bounds.height,
+            bottomInset: map.safeAreaInsets.bottom, dashboard: dashboard))
         let ground = map.convert(anchor, toCoordinateFrom: map)
         if CLLocationCoordinate2DIsValid(ground), current.centerCoordinateDistance > 0 {
             let center = MKMapPoint(current.centerCoordinate)
@@ -1564,7 +1568,10 @@ private final class CompanionCarPlayMap: UIViewController, MKMapViewDelegate {
             } else { position.coordinate = displayed }
             if !hadPosition { map.addAnnotation(position) }
             let course = navigation.usingComma ? navigation.commaHeading : navigation.goodLocation?.course ?? -1
-            let heading = course.isFinite && course >= 0 ? course : map.camera.heading
+            let phone = navigation.goodLocation
+            let hasSpeed = phone.map { (0...2).contains(-$0.timestamp.timeIntervalSinceNow) && $0.speed >= 0 && $0.distance(from: location) <= 30 } ?? false
+            let canRotate = !hadPosition || (hasSpeed ? (phone?.speed ?? 0) >= 2.5 : filteredSpeed >= 2.5 && now.timeIntervalSince(lastMovement) < 1)
+            let heading = canRotate && course.isFinite && course >= 0 ? course : map.camera.heading
             if !showingOverview || next == nil {
                 showingDestination = false
                 let pitch = navigation.followPitch(cruising: dashboard ? 55 : 66, speed: filteredSpeed)

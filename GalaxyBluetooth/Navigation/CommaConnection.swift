@@ -131,7 +131,7 @@ final class CommaConnection: ObservableObject {
             let response = try await transport.request(path: try NativeNavigationAPI.statusPath(version: version), method: "GET", headers: [:], body: Data())
             guard before == session, response.status == 200 else { throw BridgeError.message("Comma navigation status unavailable (HTTP \(response.status)).") }
             let decoded = try NativeNavigationAPI.decode(response.bodyData)
-            var snapshot = try NativeNavigationAPI.snapshot(response.bodyData)
+            var snapshot = try NativeNavigationAPI.snapshot(decoded)
             snapshot.bluetoothDispatchDate = response.bluetoothDispatchDate
             if let version = snapshot.routeVersion { nativeRouteVersion = (before, version) }
             let state = "Navigation feed: \(decoded.status); enabled: \(decoded.enabled); map key configured: \(decoded.hasKey); instruction: \(snapshot.instruction != nil)"

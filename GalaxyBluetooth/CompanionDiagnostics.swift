@@ -47,6 +47,7 @@ final class CompanionDiagnostics: ObservableObject {
     var lan: LANTransport?
     var phoneActive = true { didSet { updateActivity() } }
     private var task: Task<Void, Never>?
+    var carPlayShowingMap = false
     private var telemetryTask: Task<Void, Never>?
     private var reconnectCount = 0
     private var retryDelay = 1.0
@@ -128,6 +129,7 @@ final class CompanionDiagnostics: ObservableObject {
         }
     }
     private func pollDiagnostics() async {
+        guard !carPlayShowingMap || (phoneVisible && phoneActive) else { return }
         let interval = transport?.localRefreshDelay.map { max(1, $0) } ?? 3
         guard Date().timeIntervalSince(lastDiagnostics) >= interval, let transport, transport.connected else { return }
         lastDiagnostics = Date()

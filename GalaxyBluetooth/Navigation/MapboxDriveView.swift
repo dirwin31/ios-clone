@@ -484,6 +484,12 @@ struct CarDisplayMapOptions: Equatable {
     let mapHeight: CGFloat
     let maximumFPS: Float
 
+    static func followY(height: CGFloat, bottomInset: CGFloat, dashboard: Bool) -> CGFloat {
+        // A full-screen CarPlay ETA card is about 54 points tall with a small bottom margin.
+        let clearance = dashboard ? min(26, height * 0.18) : min(32, height * 0.15)
+        return max(height / 2, height - max(0, bottomInset) - clearance)
+    }
+
     static func followX(in frame: CGRect, dashboard: Bool, rightToLeft: Bool) -> CGFloat {
         guard !dashboard else { return frame.midX }
         // Leave the leading side to the maneuver and ETA cards and keep clear of the trailing buttons.
@@ -587,8 +593,8 @@ struct MapboxDriveMap: View {
         guard let point = position(at: .now) else { return nil }
         let sample = CLLocation(coordinate: point, altitude: 0, horizontalAccuracy: -1, verticalAccuracy: -1,
             course: navigation.commaHeading, speed: commaSpeed, timestamp: navigation.commaPositionSampleDate)
-        if carDisplay != nil, let phone = navigation.goodLocation,
-           phone.timestamp > sample.timestamp, (0...2).contains(-phone.timestamp.timeIntervalSinceNow),
+        if let phone = navigation.goodLocation,
+           (0...1.5).contains(-phone.timestamp.timeIntervalSinceNow),
            phone.horizontalAccuracy <= 15, phone.distance(from: sample) <= 30 {
             return phone
         }
@@ -609,7 +615,8 @@ struct MapboxDriveMap: View {
             let anchor = CGPoint(
                 x: carDisplay == nil ? (tripFrame.isEmpty ? bounds.width / 2 : min(bounds.width * 0.9, max(bounds.width * 0.1, tripFrame.midX - bounds.minX))) :
                     CarDisplayMapOptions.followX(in: carFrame, dashboard: carDisplay?.dashboard == true, rightToLeft: rtl),
-                y: max(bounds.height * 0.35, bounds.height - panel - (carDisplay == nil ? DrivePositionMarker.barClearance + DrivePositionMarker.diameter / 2 : 10)))
+                y: carDisplay.map { CarDisplayMapOptions.followY(height: bounds.height, bottomInset: geometry.safeAreaInsets.bottom, dashboard: $0.dashboard) }
+                    ?? max(bounds.height * 0.35, bounds.height - panel - DrivePositionMarker.barClearance - DrivePositionMarker.diameter / 2))
             let dx = 2 * anchor.x - bounds.width, dy = 2 * anchor.y - bounds.height
             let padding = driving ? EdgeInsets(top: max(0, dy), leading: max(0, dx), bottom: max(0, -dy), trailing: max(0, -dx))
                                   : EdgeInsets(top: top, leading: plannerInsets.leading, bottom: panel, trailing: 0)
@@ -698,7 +705,7 @@ struct MapboxDriveMap: View {
                 routePoints = routeShape?.coordinates.map { RoutePoint(latitude: $0.latitude, longitude: $0.longitude) } ?? []
                 if !driving && navigation.destination != nil { preview(top: top, bottom: panel, padding: padding) }
                 else if following && position(at: .now) != nil { follow(padding: padding) }
-                else if following || carDisplay?.overview == true { overview(top: top, bottom: panel) }
+                else if carDisplay?.overview == true { overview(top: top, bottom: panel) }
             }
             .onChange(of: navigation.destination?.id) { _, _ in preview(top: top, bottom: panel, padding: padding) }
             .onChange(of: driving) { _, _ in cameraFix = nil; follow(padding: padding) }
@@ -719,8 +726,7 @@ struct MapboxDriveMap: View {
             }
             .onChange(of: navigation.positionDisplayGeneration) { _, _ in lastCommaFix = nil; commaSpeed = 0; cameraFix = nil }
             .onChange(of: navigation.commaFeedReady) { _, ready in
-                if !ready && commaTrip { cameraFix = nil }
-                follow(padding: padding)
+                if ready { follow(padding: padding) }
             }
             .onChange(of: padding) { _, _ in
                 if plannerInsets != EdgeInsets(), navigation.destination != nil, !following {
@@ -776,8 +782,16 @@ struct MapboxDriveMap: View {
         let zoom = driving ? 18.0 + zoomAdjustment - 0.8 * log2(distance / 1200) : 16.8
         let measuredBearing = fix.course >= 0 ? fix.course : (commaTrip ? navigation.commaHeading : -1)
         let validBearing = measuredBearing.isFinite && (0..<360).contains(measuredBearing)
-        let moving = speed >= 1.2 || displacement >= 6
-        if validBearing && (!continuous || moving) {
+        let phoneSpeed = navigation.goodLocation.flatMap { phone -> Double? in
+            guard (0...2).contains(-phone.timestamp.timeIntervalSinceNow), phone.horizontalAccuracy <= 15,
+                  phone.distance(from: fix) <= 30, phone.speed >= 0 else { return nil }
+            return phone.speed
+        }
+        let motionSpeed = phoneSpeed ?? speed
+        let moving = motionSpeed >= 1.2 || (phoneSpeed == nil && displacement >= 8)
+        let steerCamera = NavigationMapMotion.reliableCourse(speed: motionSpeed, displacement: displacement,
+            hasMeasuredSpeed: phoneSpeed != nil)
+        if validBearing && (previous == nil || steerCamera) {
             cameraBearing = NavigationMapMotion.heading(from: cameraBearing, to: measuredBearing,
                 fraction: continuous ? 1 - exp(-dt / 0.5) : 1)
         }
@@ -786,7 +800,7 @@ struct MapboxDriveMap: View {
             mapHeight: Double($0.mapHeight), phoneHeight: Double($0.phoneMapHeight)) } ?? cruisingPitch
         let targetPitch = driving ? navigation.followPitch(cruising: cruise, speed: speed) : 48
         cameraPitch += (targetPitch - cameraPitch) * (continuous ? 1 - exp(-dt / 1.2) : 1)
-        let accepted = continuous && !moving ? previous?.coordinate ?? point : point
+        let accepted = previous != nil && displacement < 15 && !moving ? previous?.coordinate ?? point : point
         let center = aligned(accepted)
         cameraFix = CLLocation(coordinate: accepted, altitude: 0, horizontalAccuracy: -1, verticalAccuracy: -1, timestamp: stamp)
         let camera = Viewport.camera(center: center, zoom: CGFloat(cameraZoom - log2(carDisplay?.zoomFactor ?? 1)), bearing: cameraBearing,
