@@ -660,7 +660,7 @@ struct MapboxDriveMap: View {
                 if commaTrip { updateCommaSpeed() }
             }
             .onChange(of: cameraLocation?.timestamp) { _, _ in
-                if driving || navigation.destination == nil { follow(padding: padding) }
+                follow(padding: padding)
             }
             .onChange(of: navigation.positionDisplayGeneration) { _, _ in lastCommaFix = nil; commaSpeed = 0; cameraFix = nil }
             .onChange(of: navigation.commaFeedReady) { _, ready in
@@ -668,7 +668,7 @@ struct MapboxDriveMap: View {
                 follow(padding: padding)
             }
             .onChange(of: padding) { _, _ in
-                if plannerInsets != EdgeInsets(), navigation.destination != nil {
+                if plannerInsets != EdgeInsets(), navigation.destination != nil, !following {
                     preview(top: top, bottom: panel, padding: padding)
                 } else { follow(padding: padding, layoutChanged: true) }
             }
@@ -707,7 +707,7 @@ struct MapboxDriveMap: View {
     }
 
     private func follow(padding: EdgeInsets, layoutChanged: Bool = false) {
-        guard following, driving || navigation.destination == nil,
+        guard following, carDisplay == nil || driving || navigation.destination == nil,
               let fix = cameraLocation else { return }
         let point = fix.coordinate, stamp = fix.timestamp
         let previous = cameraFix

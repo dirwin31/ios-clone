@@ -217,6 +217,17 @@ final class IntegrationUITests: XCTestCase {
         XCTAssertTrue(app.buttons["End route"].waitForExistence(timeout: 12))
         XCTAssertTrue(app.buttons["Navigation options"].isHittable)
         if !isDuo { XCTAssertTrue(app.buttons["expand-app-tabs"].isHittable) }
+        let mapViewButton = app.buttons["navigation-map-view"]
+        XCTAssertEqual(mapViewButton.label, "Show full route")
+        mapViewButton.tap()
+        XCTAssertEqual(mapViewButton.label, "Resume following my location")
+        mapViewButton.tap()
+        XCTAssertEqual(mapViewButton.label, "Show full route")
+        let center = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.55))
+        center.press(forDuration: 0.1, thenDragTo: center.withOffset(CGVector(dx: 55, dy: 0)))
+        XCTAssertEqual(mapViewButton.label, "Resume following my location")
+        mapViewButton.tap()
+        XCTAssertEqual(mapViewButton.label, "Show full route")
         capture("\(device) active guidance")
         app.buttons["Navigation options"].tap()
         app.buttons["Navigation settings"].tap()

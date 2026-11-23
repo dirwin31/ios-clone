@@ -119,13 +119,26 @@ struct NavigationHome: View {
     private var mapButtons: some View {
         HStack(spacing: 8) {
             if hasSystemRail { Spacer() } else { appTabs }
-            Button { navigation.followLocation() } label: {
-                Image(systemName: "location.fill").frame(width: 44, height: 44)
-            }
-            .modifier(NavigationMapGlass(radius: 22)).accessibilityLabel("Follow my location")
+            mapViewButton
         }
         .padding(10)
         .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).maxY } action: { headerBottom = $0 }
+    }
+
+    private var mapViewButton: some View {
+        let hasRoute = (navigation.usingComma ? navigation.commaPolyline : navigation.route?.polyline) != nil
+        let offersOverview = hasRoute && navigation.followsUser
+        let symbol = offersOverview ? "point.topleft.down.to.point.bottomright.curvepath"
+            : navigation.followsUser ? "location.fill" : "location.slash.fill"
+        return Button {
+            if offersOverview { navigation.showOverview() } else { navigation.followLocation() }
+        } label: {
+            Image(systemName: symbol).font(.headline)
+                .frame(width: 44, height: 44)
+        }
+        .modifier(NavigationMapGlass(radius: 22))
+        .accessibilityLabel(offersOverview ? "Show full route" : navigation.followsUser ? "Follow my location" : "Resume following my location")
+        .accessibilityIdentifier("navigation-map-view")
     }
 
     private var planner: some View {
@@ -395,9 +408,13 @@ struct NavigationHome: View {
             .overlay(alignment: .topLeading) {
                 VStack(alignment: .leading, spacing: 6) {
                     if !hasSystemRail { appTabs }
-                    maneuver
+                    HStack(alignment: .top, spacing: 8) {
+                        maneuver.frame(maxWidth: 450)
+                        Spacer(minLength: 0)
+                        mapViewButton
+                    }
                 }
-                .frame(maxWidth: 450, alignment: .leading).padding(12)
+                .padding(12)
                 .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).maxY } action: { headerBottom = $0 }
             }
             .overlay(alignment: .bottom) {
@@ -485,10 +502,6 @@ struct NavigationHome: View {
                 }
             }
             Button("Navigation settings", systemImage: "slider.horizontal.3") { showNavigationSettings = true }
-            if navigation.navigating {
-                Button("Follow my location", systemImage: "scope") { navigation.followLocation() }
-                Button("Show full route", systemImage: "point.topleft.down.to.point.bottomright.curvepath") { navigation.showOverview() }
-            }
             Button("Submit report", systemImage: "bubble.left") { submitReport() }
             Button("Reset navigation", systemImage: "arrow.counterclockwise", role: .destructive) {
                 Task { await connection.app.navigationServices.resetNavigation() }

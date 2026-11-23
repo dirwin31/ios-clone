@@ -576,6 +576,7 @@ final class NavigationModel: NSObject, ObservableObject, @preconcurrency CLLocat
         plannedStart = nil
         if phoneTripPreferred { sendToComma = false }
         else if let preferred = UserDefaults.standard.object(forKey: "navigation.defaultComma") as? Bool { sendToComma = preferred }
+        followsUser = false
         destination = place; routes = []; selectedRoute = 0; notice = ""; error = ""
         camera = .region(MKCoordinateRegion(center: place.coordinate, latitudinalMeters: 2500, longitudinalMeters: 2500))
         if !sendToComma { await calculateRoutes(refresh: false) }
@@ -584,6 +585,7 @@ final class NavigationModel: NSObject, ObservableObject, @preconcurrency CLLocat
         guard !navigating, routes.indices.contains(index) else { return }
         onEvent?("Route alternative selected: \(index + 1)")
         selectedRoute = index
+        followsUser = false
         camera = .rect(routes[index].polyline.boundingMapRect)
     }
     func selectGuidanceSource(comma: Bool) async {
@@ -708,7 +710,10 @@ final class NavigationModel: NSObject, ObservableObject, @preconcurrency CLLocat
             onEvent?("Route calculation completed: \(choices.count) alternatives")
             routes = Array(choices.prefix(3)); selectedRoute = 0; stepIndex = 0
             offRouteSamples = 0; error = ""
-            if !navigating { camera = .rect(routes[0].polyline.boundingMapRect) }
+            if !navigating {
+                followsUser = false
+                camera = .rect(routes[0].polyline.boundingMapRect)
+            }
             updateProgress(routes[0], at: origin)
         } catch {
             guard revision == token, !Task.isCancelled else { return }
@@ -788,6 +793,7 @@ final class NavigationModel: NSObject, ObservableObject, @preconcurrency CLLocat
             instruction = "Waiting for comma’s route"; distanceToTurn = 0; remainingTime = 0; remainingDistance = 0
         }
         onEvent?("Navigation started; comma: \(usingComma)")
+        followsUser = true
         navigating = true; stepIndex = 0
         if !usingComma, let location = goodLocation, let route { updateProgress(route, at: location) }
     }
@@ -1075,6 +1081,7 @@ final class NavigationModel: NSObject, ObservableObject, @preconcurrency CLLocat
         guard !busy, !navigating else { return }
         directions?.cancel(); revision = UUID(); recalculating = false
         routes = []; plannedStart = nil; destination = nil; error = ""
+        followsUser = true
         camera = .userLocation(fallback: .automatic)
     }
 
