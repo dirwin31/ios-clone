@@ -996,6 +996,7 @@ struct GalaxyRootView: View {
     @State private var hasVisitedGalaxy = false
     @State private var appTabsExpanded = true
     @State private var showingAppTabsInGalaxy = false
+    @AppStorage(GalaxyToolbar.orderKey) private var galaxyToolbarOrder = ""
     private var motionDisabled: Bool { reduceMotion || !galacticalAnimations || scenePhase != .active }
     @AppStorage("galaxy.galacticalAnimations") private var galacticalAnimations = true
     private var page: CompanionTab { model.tab == .galaxy && !model.opened ? .connections : model.tab }
@@ -1080,14 +1081,16 @@ struct GalaxyRootView: View {
                 Group {
                     if showsGalaxyPill {
                         HStack(spacing: 0) {
-                            AppTabsButton(action: showAppTabs)
-                                .buttonStyle(.plain)
-                                .font(.system(size: 16, weight: .semibold))
-                                .foregroundStyle(.secondary)
-                            ForEach(galaxyPage.barItems.filter { $0.id == "back" || $0.primary }.sorted { $0.id == "back" && $1.id != "back" }) { item in
+                            if let back = galaxyPage.barItems.first(where: { $0.id == "back" && !$0.disabled }) {
+                                GalaxyPillButton(page: galaxyPage, item: back)
+                            } else {
+                                Button(action: showAppTabs) { Image(systemName: "chevron.backward").frame(width: 44, height: 48) }
+                                    .buttonStyle(.plain).accessibilityLabel("Show app tabs")
+                            }
+                            ForEach(GalaxyToolbar.visible(galaxyToolbarOrder, items: galaxyPage.barItems)) { item in
                                 GalaxyPillButton(page: galaxyPage, item: item)
                             }
-                            GalaxyPillMenu(page: galaxyPage, model: model, compact: true, select: select)
+                            GalaxyPillMenu(page: galaxyPage, model: model, compact: true, showAppTabs: showAppTabs, select: select)
                         }
                         .padding(.horizontal, 3)
                         .modifier(FloatingGalaxyGlass())
@@ -1273,15 +1276,15 @@ private struct GalaxyPillButton: View {
                 Image(systemName: item.icon)
                     .font(.system(size: 16, weight: .medium))
                     .frame(height: 19)
-                if item.primary && toolbarLabels && !typeSize.isAccessibilitySize {
+                if item.id != "back" && toolbarLabels && !typeSize.isAccessibilitySize {
                     Text(verbatim: item.label)
                         .font(.caption.weight(.medium))
                         .lineLimit(1)
                 }
             }
             .padding(.vertical, 9)
-            .frame(minWidth: 44, maxWidth: item.primary ? .infinity : 44, minHeight: 48)
-            .foregroundStyle(item.primary ? Color.primary : Color.secondary)
+            .frame(minWidth: 44, maxWidth: item.id != "back" ? .infinity : 44, minHeight: 48)
+            .foregroundStyle(item.id != "back" ? Color.primary : Color.secondary)
             .overlay(alignment: .bottom) {
                 if item.selected {
                     Capsule()
@@ -1313,11 +1316,14 @@ private struct GalaxyPillMenu: UIViewRepresentable {
     let select: (CompanionTab) -> Void
     @Environment(\.locale) private var locale
 
+    let showAppTabs: (() -> Void)?
+    @AppStorage(GalaxyToolbar.orderKey) private var toolbarOrder = ""
     let compact: Bool
 
-    init(page: GalaxyPageDiagnostics, model: AppModel, compact: Bool = false, select: @escaping (CompanionTab) -> Void) {
+    init(page: GalaxyPageDiagnostics, model: AppModel, compact: Bool = false, showAppTabs: (() -> Void)? = nil, select: @escaping (CompanionTab) -> Void) {
         self.page = page
         self.model = model
+        self.showAppTabs = showAppTabs
         self.compact = compact
         self.select = select
     }
@@ -1357,6 +1363,9 @@ private struct GalaxyPillMenu: UIViewRepresentable {
 
     private func sections() -> [UIMenuElement] {
         var appActions: [UIAction] = []
+        if let showAppTabs {
+            appActions.append(UIAction(title: String(localized: "Show app tabs", locale: locale), image: UIImage(systemName: "square.grid.2x2")) { _ in showAppTabs() })
+        }
         if model.navigationEnabled {
             appActions.append(UIAction(title: String(localized: "Navigation", locale: locale), image: UIImage(systemName: CompanionTab.navigation.icon)) { _ in
                 if model.navigationEnabled { select(.navigation) }
@@ -1368,7 +1377,8 @@ private struct GalaxyPillMenu: UIViewRepresentable {
         if !page.deviceStatus.isEmpty {
             galaxyActions.append(UIAction(title: page.deviceStatus, attributes: .disabled) { _ in })
         }
-        for item in page.barItems where DuoLayout.isEnabled || (!item.primary && item.id != "back") {
+        let visible = GalaxyToolbar.visible(toolbarOrder, items: page.barItems)
+        for item in page.barItems where !compact || (item.id != "back" && !visible.contains(item)) {
             galaxyActions.append(UIAction(title: item.label, image: UIImage(systemName: item.icon), attributes: item.disabled ? .disabled : []) { _ in
                 if let current = page.barItems.first(where: { $0.id == item.id }) { page.activate(current) }
             })

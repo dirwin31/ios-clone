@@ -6,7 +6,8 @@ struct GalaxyBarItem: Decodable, Identifiable, Equatable {
     let label: String
     let selected: Bool
     let disabled: Bool
-    var icon: String {
+    var icon: String { Self.icon(for: id) }
+    static func icon(for id: String) -> String {
         switch id {
         case "home": return "house.fill"
         case "toggles": return "switch.2"
@@ -20,6 +21,24 @@ struct GalaxyBarItem: Decodable, Identifiable, Equatable {
         }
     }
     var primary: Bool { ["home", "toggles", "tools", "routes"].contains(id) }
+}
+
+enum GalaxyToolbar {
+    static let orderKey = "galaxy.app.toolbarOrder"
+    static let defaults = ["home", "toggles", "tools", "routes", "search", "theme", "menu"]
+    static let labels = ["home": "Home", "toggles": "Toggles", "tools": "Tools", "routes": "Routes",
+                         "search": "Search", "theme": "Theme", "menu": "Galaxy menu"]
+
+    static func order(_ stored: String) -> [String] {
+        var seen = Set<String>()
+        return (stored.split(separator: ",").map(String.init) + defaults).filter {
+            defaults.contains($0) && seen.insert($0).inserted
+        }
+    }
+
+    static func visible(_ stored: String, items: [GalaxyBarItem]) -> [GalaxyBarItem] {
+        Array(order(stored).compactMap { id in items.first { $0.id == id } }.prefix(4))
+    }
 }
 
 struct GalaxyDownloadedFile: Identifiable {
