@@ -197,7 +197,8 @@ final class IntegrationUITests: XCTestCase {
         app.launchArguments = ["-galaxy.app.developerMode", "NO", "-galaxy.app.navigationEnabled", "YES"]
         app.launch()
         let settings = app.buttons["navigation-map-settings"]
-        openSettingsSection("Navigation", containing: settings, in: app)
+        XCTAssertTrue(app.buttons["settings-open-navigation"].waitForExistence(timeout: 10))
+        XCTAssertTrue(settings.isHittable)
         settings.tap()
         XCTAssertTrue(app.navigationBars["Navigation settings"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.switches["Enable navigation"].exists)

@@ -20,7 +20,6 @@ struct ConnectionSettingsView: View {
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.openURL) private var openURL
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
-    @SceneStorage("settings.navigationExpanded") private var navigationExpanded = false
     @AppStorage(AppPreference.openGalaxy) private var autoOpenGalaxy = true
     @AppStorage(AppPreference.arrival) private var showArrival = true
     @AppStorage(AppPreference.toolbarLabels) private var toolbarLabels = true
@@ -172,6 +171,7 @@ struct ConnectionSettingsView: View {
                         .scaleEffect(x: 0.62, y: 0.62).frame(width: 164, height: 64)
                 }
             }
+            navigationShortcuts
             let layout = wide ? AnyLayout(HStackLayout(alignment: .top, spacing: 22)) : AnyLayout(VStackLayout(spacing: 20))
             layout {
                 VStack(alignment: .leading, spacing: 12) {
@@ -193,6 +193,35 @@ struct ConnectionSettingsView: View {
         }
         .padding(.horizontal, wide ? 28 : 20).padding(.vertical, 18)
         .frame(maxWidth: wide ? 1100 : 560).frame(maxWidth: .infinity)
+    }
+
+    private var navigationShortcuts: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            if model.navigationEnabled {
+                Button { select(.navigation) } label: {
+                    HStack {
+                        Label("Navigation", systemImage: CompanionTab.navigation.icon).font(.headline)
+                        Spacer()
+                        Image(systemName: "chevron.right").accessibilityHidden(true)
+                    }.frame(minHeight: 44).contentShape(Rectangle())
+                }
+                .accessibilityHint("Opens the navigation map")
+                .accessibilityIdentifier("settings-open-navigation")
+                Divider()
+            }
+            Button { showMapSettings = true } label: {
+                HStack {
+                    Label("Navigation settings", systemImage: "slider.horizontal.3")
+                    Spacer()
+                    Image(systemName: "chevron.right").accessibilityHidden(true)
+                }.frame(minHeight: 44).contentShape(Rectangle())
+            }
+            .accessibilityIdentifier("navigation-map-settings")
+        }
+        .buttonStyle(.plain)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 4)
+        .background(panel, in: RoundedRectangle(cornerRadius: 16))
     }
 
     private var footerLinks: some View {
@@ -513,15 +542,6 @@ struct ConnectionSettingsView: View {
                 Toggle("Follow Galaxy language", isOn: $followGalaxyLanguage)
                 Text("Use Galaxy’s selected language after connecting.")
                     .font(.system(size: 11)).foregroundStyle(muted)
-            }
-            separator
-            preferenceSection("Navigation", expanded: $navigationExpanded) {
-                row("map", title: "Navigation settings", subtitle: "Guidance, maps, camera and appearance") {
-                    Button("Open") { showMapSettings = true }
-                        .frame(minHeight: 44)
-                        .accessibilityLabel("Open navigation settings")
-                        .accessibilityIdentifier("navigation-map-settings")
-                }
             }
             separator
             preferenceSection("Support & developer", expanded: $supportExpanded) {
