@@ -85,6 +85,20 @@ final class AppModel: ObservableObject {
     private var lastRoute = "Reconnecting…"
     @Published var showDiagnostics = false
     @Published var showAudioPairing = false
+    @Published var phoneMusicEnabled = UserDefaults.standard.bool(forKey: "galaxy.phoneMusic.enabled") {
+        didSet {
+            guard oldValue != phoneMusicEnabled else { return }
+            UserDefaults.standard.set(phoneMusicEnabled, forKey: "galaxy.phoneMusic.enabled")
+            if phoneMusicEnabled {
+                if transport.connected && !pairingInProgress { startAudioPairing() }
+            } else {
+                offerAudioPairing = false
+                audioWindowOpen = false
+                showAudioPairing = false
+                audioPairing.dismiss()
+            }
+        }
+    }
     private var offerAudioPairing = false
     private var audioWindowOpen = false
     private let claimer = ClaimTransport()
@@ -348,7 +362,6 @@ final class AppModel: ObservableObject {
     private var lanProbeTask: Task<Void, Never>?
     private var lastLANDiscovery = Date.distantPast
     private var triedLANAddresses = Set<String>()
-    /// One step for the app and music: comma's open pairing window gives this iPhone its key, then music is set up in the same window.
     private var pairingTask: Task<Void, Never>?
     var hasLANPairingSetup: Bool {
         lan.expectedDeviceID != nil && (try? LANTransport.endpoint(address)) != nil
@@ -424,8 +437,8 @@ final class AppModel: ObservableObject {
         pairingKey = outcome.result.key
         if mode == .lan { mode = .automatic }
         connectionMessage = "Paired. Connecting to comma…"
-        offerAudioPairing = true
-        audioWindowOpen = true
+        offerAudioPairing = phoneMusicEnabled
+        audioWindowOpen = phoneMusicEnabled
         lastReconnect = Date()
         bluetooth.reconnectSaved(pairingKey: pairingKey)
         if !bluetooth.connecting { bluetooth.scan() }
@@ -536,7 +549,7 @@ final class AppModel: ObservableObject {
         } catch { connectionMessage = error.localizedDescription }
     }
     func startAudioPairing() {
-        guard transport.connected else { return }
+        guard phoneMusicEnabled, transport.connected else { return }
         audioPairing.onEvent = { [weak self] event in self?.connectionLog.record(event) }
         connectionLog.record("Music setup using " + transport.label)
         showAudioPairing = true

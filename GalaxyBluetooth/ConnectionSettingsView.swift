@@ -463,8 +463,12 @@ struct ConnectionSettingsView: View {
             preferenceSection("Phone & alerts", expanded: $phoneExpanded) {
                 toggleRow("arrow.up.forward.app", title: "Open Galaxy after connecting", subtitle: "Switch from Settings when Galaxy is ready", isOn: $autoOpenGalaxy)
                 separator
-                row("music.note", title: "Phone music", subtitle: pairing ? "Waiting for app pairing" : audio.summary) {
-                    Button("Set up") { model.startAudioPairing() }.disabled(!connected || pairing).font(.system(size: 12)).frame(minHeight: 44)
+                toggleRow("music.note", title: "Phone music", subtitle: "Pair this iPhone for Bluetooth audio", isOn: $model.phoneMusicEnabled)
+                if model.phoneMusicEnabled {
+                    separator
+                    row("hifispeaker", title: "Music pairing", subtitle: pairing ? "Waiting for app pairing" : audio.summary) {
+                        Button("Set up") { model.startAudioPairing() }.disabled(!connected || pairing).font(.system(size: 12)).frame(minHeight: 44)
+                    }
                 }
                 separator
                 toggleRow("location", title: "Share phone location", subtitle: location.status.isEmpty ? "Optional" : location.status,
