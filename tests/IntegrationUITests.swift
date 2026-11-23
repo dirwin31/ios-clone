@@ -152,8 +152,9 @@ final class IntegrationUITests: XCTestCase {
         XCTAssertTrue(app.cells["Save to Files"].waitForExistence(timeout: 10))
         let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "Share diagnostics text file"; shot.lifetime = .keepAlways; add(shot)
     }
-    func testDuoNavigationPlannerAndDrive() throws {
-        try XCTSkipUnless(ProcessInfo.processInfo.environment["SIMULATOR_MODEL_IDENTIFIER"] == "iPhone19,4", "Duo layout")
+    func testPhoneNavigationPlannerAndDrive() {
+        let isDuo = ProcessInfo.processInfo.environment["SIMULATOR_MODEL_IDENTIFIER"] == "iPhone19,4"
+        let device = isDuo ? "Duo" : "iPhone"
         let app = XCUIApplication()
         XCUIDevice.shared.orientation = .portrait
         defer { XCUIDevice.shared.orientation = .portrait }
@@ -167,7 +168,15 @@ final class IntegrationUITests: XCTestCase {
         app.launch()
         let field = app.textFields["map-search"]
         XCTAssertTrue(field.waitForExistence(timeout: 20))
-        capture("Duo destination planner")
+        XCTAssertTrue(app.buttons["home-shortcut"].isHittable)
+        XCTAssertTrue(app.staticTexts["Recent"].exists)
+        let handle = app.buttons["place-panel-handle"]
+        handle.tap()
+        XCTAssertTrue(app.buttons["Saved places & recents"].isHittable)
+        handle.tap()
+        XCTAssertTrue(app.buttons["home-shortcut"].isHittable)
+        if !isDuo { XCTAssertTrue(app.buttons["expand-app-tabs"].isHittable) }
+        capture("\(device) destination planner")
         app.buttons["Navigation options"].tap()
         app.buttons["Navigation settings"].tap()
         XCTAssertTrue(app.navigationBars["Navigation settings"].waitForExistence(timeout: 5))
@@ -179,31 +188,36 @@ final class IntegrationUITests: XCTestCase {
         field.typeText("Test")
         let result = app.buttons["place-search-result"].firstMatch
         XCTAssertTrue(result.waitForExistence(timeout: 5))
-        capture("Duo inline search")
+        capture("\(device) inline search")
         result.tap()
         let directions = app.buttons["Start Route"]
         XCTAssertTrue(directions.waitForExistence(timeout: 5))
         XCTAssertFalse(directions.isEnabled, "Sending the route requires a paired comma connection")
         XCTAssertTrue(app.frame.contains(directions.frame))
         XCTAssertFalse(app.segmentedControls.buttons["Comma"].exists)
-        capture("Duo route preview")
-        XCTAssertTrue(app.buttons["duo-route-0"].label.contains("km"))
+        capture("\(device) route preview")
+        XCTAssertFalse(app.buttons["Save place options"].exists)
+        app.buttons["Navigation options"].tap()
+        XCTAssertTrue(app.buttons["Save as Home"].exists)
+        app.buttons["Save as Work"].tap()
+        XCTAssertTrue(app.buttons["phone-route-0"].label.contains("km"))
         XCUIDevice.shared.orientation = .landscapeLeft
         XCTAssertTrue(app.frame.contains(directions.frame))
         XCTAssertTrue(app.buttons["Close destination"].isHittable)
-        let alternate = app.buttons["duo-route-1"]
-        for _ in 0..<3 where !alternate.isHittable { app.scrollViews["duo-itinerary"].swipeUp() }
+        let alternate = app.buttons["phone-route-1"]
+        for _ in 0..<3 where !alternate.isHittable { app.scrollViews["route-itinerary"].swipeUp() }
         XCTAssertTrue(alternate.isHittable)
         alternate.tap()
         XCTAssertTrue(alternate.isSelected)
-        capture("Duo landscape planner")
+        capture("\(device) landscape planner")
         app.terminate()
         XCUIDevice.shared.orientation = .portrait
         app.launchArguments = ["--preview-route"]
         app.launch()
         XCTAssertTrue(app.buttons["End route"].waitForExistence(timeout: 12))
         XCTAssertTrue(app.buttons["Navigation options"].isHittable)
-        capture("Duo active guidance")
+        if !isDuo { XCTAssertTrue(app.buttons["expand-app-tabs"].isHittable) }
+        capture("\(device) active guidance")
         app.buttons["Navigation options"].tap()
         app.buttons["Navigation settings"].tap()
         XCTAssertTrue(app.navigationBars["Navigation settings"].waitForExistence(timeout: 5))
@@ -226,20 +240,20 @@ final class IntegrationUITests: XCTestCase {
         let tab = app.buttons["main-tab-Navigation"]
         XCTAssertTrue(tab.waitForExistence(timeout: 10))
         tab.tap()
-        app.buttons["map-search"].tap()
-        let search = app.searchFields.firstMatch
+        let search = app.textFields["map-search"]
+        search.tap()
         XCTAssertTrue(search.waitForExistence(timeout: 5))
         search.typeText("Test")
         let place = app.buttons["place-search-result"].firstMatch
         XCTAssertTrue(place.waitForExistence(timeout: 8))
         place.tap()
-        let send = app.buttons["Send to comma"]
+        let send = app.buttons["Send when connected"]
         XCTAssertTrue(send.waitForExistence(timeout: 5))
         let handle = app.buttons["place-panel-handle"]
         let before = handle.frame.midY
         let grab = handle.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
         grab.press(forDuration: 0.1, thenDragTo: grab.withOffset(CGVector(dx: 0, dy: 90)))
-        XCTAssertTrue(app.buttons["map-search"].isHittable)
+        XCTAssertTrue(app.buttons["Close destination"].isHittable)
         let collapsed = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
             handle.label == "Expand place panel" && handle.frame.midY > before + 40
         }, object: nil)
@@ -248,7 +262,8 @@ final class IntegrationUITests: XCTestCase {
         handle.tap()
         XCTAssertTrue(send.waitForExistence(timeout: 3))
         XCTAssertFalse(app.buttons["Get directions"].exists)
-        app.segmentedControls.buttons["iPhone"].tap()
+        app.buttons["directions-source"].tap()
+        app.buttons["iPhone"].tap()
         XCTAssertTrue(app.buttons["Get directions"].waitForExistence(timeout: 5))
         XCTAssertFalse(app.buttons["Start on iPhone"].exists)
     }
