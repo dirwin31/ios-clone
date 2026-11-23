@@ -656,7 +656,8 @@ final class NavigationModel: NSObject, ObservableObject, @preconcurrency CLLocat
             } catch {
                 guard generation == commandGeneration else { return }
                 onEvent?("Go failed; send phase: \(sending); \(LANTransport.failureCode(error))")
-                self.error = sending ? "Comma did not confirm the destination. Check its screen before retrying. \(error.localizedDescription)" : "No destination sent. \(error.localizedDescription)"
+                if let rejection = error as? PhoneTripRejection { self.error = rejection.message }
+                else { self.error = sending ? "Comma did not confirm the destination. Check its screen before retrying. \(error.localizedDescription)" : "No destination sent. \(error.localizedDescription)" }
                 return
             }
         }

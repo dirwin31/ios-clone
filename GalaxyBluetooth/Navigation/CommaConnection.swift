@@ -2,6 +2,11 @@ import Foundation
 import Combine
 import CryptoKit
 
+struct PhoneTripRejection: LocalizedError {
+    let message: String
+    var errorDescription: String? { message }
+}
+
 /// Navigation adapter only. Pairing, reconnects, GPS uploads and BLE ownership stay in AppModel.
 @MainActor
 final class CommaConnection: ObservableObject {
@@ -88,7 +93,21 @@ final class CommaConnection: ObservableObject {
             headers: ["content-type": "application/json"], body: JSONSerialization.data(withJSONObject: body))
         guard before == session else { throw BridgeError.message("Connection changed. Check the active trip on comma.") }
         guard reply.status == 200 else {
-            throw BridgeError.message(reply.status == 409 ? "Park and check the current trip before trying again." : "Comma declined the iPhone route (HTTP \(reply.status)).")
+            let detail = try? JSONSerialization.jsonObject(with: reply.bodyData) as? [String: Any]
+            let reason = detail?["error"] as? String ?? ""
+            if reply.status == 409 {
+                if detail?["code"] as? String == "trip_changed" || reason.hasPrefix("Navigation changed") {
+                    throw PhoneTripRejection(message: "The active trip changed. Review the route and send it again.")
+                }
+                if reason.hasPrefix("Park and reconnect"), info["phoneRouteTripOnroad"] as? Bool != true {
+                    throw PhoneTripRejection(message: "This comma software accepts iPhone routes while parked. For on-road guidance, choose Comma and send the destination.")
+                }
+                throw PhoneTripRejection(message: "The comma declined this trip. Refresh the route and try again.")
+            }
+            if reply.status == 400 {
+                throw PhoneTripRejection(message: "The comma could not use this route. Check its navigation setup and choose a fresh route from your current location.")
+            }
+            throw BridgeError.message("Comma returned HTTP \(reply.status) for the iPhone route.")
         }
         struct Receipt: Decodable { let activeRouteSource: String; let destination: NavigationDestination }
         let receipt = try JSONDecoder().decode(Receipt.self, from: reply.bodyData)

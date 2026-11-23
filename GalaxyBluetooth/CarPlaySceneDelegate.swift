@@ -57,7 +57,7 @@ final class CarPlaySceneDelegate: NSObject, CPTemplateApplicationSceneDelegate, 
     private var navigationTabs: CPTabBarTemplate?
     private var navigationMenu: CPListTemplate?
     private enum NavigationAction: Equatable {
-        case info, map, start(UUID), directions, phone, place(SavedPlace)
+        case info, map, start(UUID), phoneTrip(UUID), directions, phone, place(SavedPlace)
     }
     private struct NavigationRow: Equatable {
         let title: String
@@ -232,6 +232,11 @@ final class CarPlaySceneDelegate: NSObject, CPTemplateApplicationSceneDelegate, 
                     } else if !nav.sendToComma && nav.route == nil {
                         rows.append(.init(title: "Get directions", detail: "Preview the route on iPhone", icon: "arrow.triangle.turn.up.right.diamond", action: .directions))
                     } else {
+                        if !nav.sendToComma, services.connection.connected, nav.plannedStart == nil,
+                           UserDefaults.standard.bool(forKey: "navigation.offerPhoneTrip"), nav.route?.commaPreview != nil {
+                            rows.append(.init(title: "Start this route on comma", detail: "Use the selected iPhone route",
+                                              icon: "car.fill", action: .phoneTrip(destination.id)))
+                        }
                         rows.append(.init(title: nav.sendToComma ? "Send to comma" : "Start on iPhone",
                                           detail: nav.sendToComma ? "Comma calculates the route" : destination.name,
                                           icon: "location.fill", action: .start(destination.id)))
@@ -272,10 +277,15 @@ final class CarPlaySceneDelegate: NSObject, CPTemplateApplicationSceneDelegate, 
                     case .info: break
                     case .map:
                         self.openNavigation()
-                    case .start(let destinationID):
+                    case .start(let destinationID), .phoneTrip(let destinationID):
                         Task { @MainActor in
                             guard nav.destination?.id == destinationID else { return }
-                            await nav.start(connection: services.connection)
+                            let handoff = row.action == .phoneTrip(destinationID)
+                            if handoff {
+                                guard !nav.sendToComma, services.connection.connected, nav.plannedStart == nil,
+                                      UserDefaults.standard.bool(forKey: "navigation.offerPhoneTrip"), nav.route?.commaPreview != nil else { return }
+                            }
+                            await nav.start(connection: services.connection, phoneRouteOnComma: handoff)
                             self.refreshNavigation()
                         }
                     case .directions:

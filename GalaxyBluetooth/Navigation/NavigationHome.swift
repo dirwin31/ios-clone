@@ -1001,7 +1001,7 @@ private struct NavigationDestinationPanel: View {
 
             if !navigation.sendToComma {
                 Text(offerPhoneTrip && ["Mapbox Driving", "Mapbox Traffic", "Automatic"].contains(router)
-                    ? "Your iPhone calculates the route. Choose Start this route on comma to send a compatible route to your parked device, or Start on iPhone for phone guidance."
+                    ? "Your iPhone calculates the route. Choose Start this route on comma to send it to your device, or Start on iPhone for phone guidance."
                     : "Your phone handles directions for this trip. Starting it leaves any route on your comma alone.")
                     .font(.footnote).foregroundStyle(.secondary)
             }

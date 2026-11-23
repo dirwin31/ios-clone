@@ -239,7 +239,7 @@ struct NavigationMapSettings: View {
             }
             Toggle("Offer iPhone routes for comma assistance", isOn: $offerPhoneTrip)
             if offerPhoneTrip {
-                Text("While parked, choose a Mapbox route on iPhone, then tap Start this route on comma. Your comma tracks the trip using its current assistance settings.").font(.footnote)
+                Text("Choose a Mapbox route, then select Start this route on comma on iPhone or CarPlay. Your comma tracks the trip using its current assistance settings. Older comma software requires parking for this handoff.").font(.footnote)
             }
             Toggle("Preview iPhone routes with comma", isOn: $parkedPreview)
             if parkedPreview {
