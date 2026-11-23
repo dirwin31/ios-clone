@@ -1154,6 +1154,9 @@ struct GalaxyRootView: View {
 #if targetEnvironment(simulator)
             if ProcessInfo.processInfo.arguments.contains("--preview-navigation-planner") {
                 model.navigationEnabled = true
+                let nav = model.navigationServices.navigation
+                let center = CLLocationCoordinate2D(latitude: 43.636, longitude: -79.388)
+                nav.camera = .region(MKCoordinateRegion(center: center, latitudinalMeters: 4000, longitudinalMeters: 4000))
                 model.tab = .navigation
                 return
             }

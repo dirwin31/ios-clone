@@ -176,11 +176,12 @@ final class IntegrationUITests: XCTestCase {
         result.tap()
         let directions = app.buttons["Start Route"]
         XCTAssertTrue(directions.waitForExistence(timeout: 5))
-        XCTAssertTrue(directions.isHittable)
+        XCTAssertFalse(directions.isEnabled, "Sending the route requires a paired comma connection")
+        XCTAssertTrue(app.frame.contains(directions.frame))
         XCTAssertFalse(app.segmentedControls.buttons["Comma"].exists)
         capture("Duo route preview")
         XCUIDevice.shared.orientation = .landscapeLeft
-        XCTAssertTrue(directions.isHittable)
+        XCTAssertTrue(app.frame.contains(directions.frame))
         XCTAssertTrue(app.buttons["Close destination"].isHittable)
         let alternate = app.buttons["duo-route-1"]
         for _ in 0..<3 where !alternate.isHittable { app.scrollViews["duo-itinerary"].swipeUp() }

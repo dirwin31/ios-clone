@@ -483,7 +483,7 @@ final class NavigationModel: NSObject, ObservableObject, @preconcurrency CLLocat
         cancelPlaceSearch()
         let cleaned = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !cleaned.isEmpty else { return }
-        #if DEBUG
+        #if DEBUG || targetEnvironment(simulator)
         if ProcessInfo.processInfo.arguments.contains("--ui-testing") {
             results = query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? [] : [NavigationPlace(
                 item: MKMapItem(placemark: MKPlacemark(coordinate: CLLocationCoordinate2D(latitude: 43.65, longitude: -79.38))),
@@ -611,7 +611,7 @@ final class NavigationModel: NSObject, ObservableObject, @preconcurrency CLLocat
         await calculateRoutes(refresh: false)
     }
     func calculateRoutes(refresh: Bool) async {
-        #if DEBUG
+        #if DEBUG || targetEnvironment(simulator)
         if ProcessInfo.processInfo.arguments.contains("--ui-testing") {
             #if targetEnvironment(simulator)
             if ProcessInfo.processInfo.arguments.contains("--preview-navigation-planner"), let destination {

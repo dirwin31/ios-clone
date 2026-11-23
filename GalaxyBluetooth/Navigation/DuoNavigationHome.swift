@@ -509,6 +509,7 @@ private struct DuoRouteButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         HStack(spacing: 8) {
             Image(systemName: "arrow.triangle.turn.up.right.diamond.fill")
+                .accessibilityHidden(true)
             configuration.label
         }
         .font(.headline).foregroundStyle(.white)
