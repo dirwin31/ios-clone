@@ -85,8 +85,11 @@ import Foundation
         } catch is CancellationError { }
         precondition(peer.writes.count == 2)
         precondition(NavigationMapMotion.carPlayAnimationDuration(interval: 1, fixAge: 0) == 1)
-        precondition(NavigationMapMotion.carPlayAnimationDuration(interval: 1, fixAge: 0.75) == 0.25)
-        precondition(NavigationMapMotion.carPlayAnimationDuration(interval: 1, fixAge: 2) == 0.1)
+        precondition(NavigationMapMotion.carPlayAnimationDuration(interval: 1, fixAge: 0.75) == 0.65)
+        precondition(NavigationMapMotion.carPlayAnimationDuration(interval: 1, fixAge: 2) == 0.65)
+        precondition(!NavigationMapMotion.reliableCourse(speed: 0.4, displacement: 9, hasMeasuredSpeed: true))
+        precondition(!NavigationMapMotion.reliableCourse(speed: 5, displacement: 0.4, hasMeasuredSpeed: false))
+        precondition(NavigationMapMotion.reliableCourse(speed: 6, displacement: 4, hasMeasuredSpeed: true))
         let landscapePitch = NavigationMapMotion.carPlayCruisingPitch(68, mapHeight: 300, phoneHeight: 800)
         precondition((68...76).contains(landscapePitch) && landscapePitch > 68)
         let ray = atan(1.0 / 3.0)

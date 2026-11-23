@@ -147,9 +147,15 @@ enum NavigationMapMotion {
     static func anchorY(height: Double, bottomInset: Double) -> Double {
         max(0, min(height, height - max(0, bottomInset) - 64))
     }
+    static func reliableCourse(speed: Double, displacement: Double, hasMeasuredSpeed: Bool) -> Bool {
+        // GPS course becomes unreliable near a standstill, including when fixes from two sources alternate.
+        speed >= 2.5 && (hasMeasuredSpeed || displacement >= 3)
+    }
+
     static func carPlayAnimationDuration(interval: TimeInterval, fixAge: TimeInterval) -> TimeInterval {
-        // A delayed Bluetooth fix has already spent part of its interval in transit.
-        max(0.1, min(2.5, interval - max(0, fixAge)))
+        // Shorten late updates without turning every delayed Bluetooth sample into a jump and pause.
+        let cadence = min(1.2, max(0.15, interval))
+        return min(cadence, max(cadence * 0.65, cadence - max(0, fixAge)))
     }
 
     // At the same street-detail zoom, a shorter map covers less ground ahead.

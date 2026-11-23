@@ -25,6 +25,10 @@ struct NavigationHome: View {
     @State private var expanded = false
     @State private var library = false
     @State private var showNavigationSettings = false
+    @State private var showCommaRoutes = false
+    @State private var destinationHeaderHeight: CGFloat = 60
+    @State private var itineraryHeight: CGFloat = 50
+    @State private var startActionHeight: CGFloat = 88
     @State private var auxiliarySearch: PlaceSearchPurpose?
     @State private var markerPerspective = DriveMarkerPerspective()
     @State private var headerBottom: CGFloat = 0
@@ -101,6 +105,11 @@ struct NavigationHome: View {
                 select(saved.navigationPlace(place))
             }
         }
+        .sheet(isPresented: $showCommaRoutes) {
+            if let place = navigation.destination {
+                CommaRouteOptionsView(connection: connection, navigation: navigation, place: place)
+            }
+        }
         .sheet(isPresented: $showNavigationSettings) { NavigationMapSettings(model: connection.app) }
     }
 
@@ -139,6 +148,9 @@ struct NavigationHome: View {
     private func plannerHeight(_ available: CGFloat, wide: Bool) -> CGFloat {
         if searchingPlaces { return min(available * (wide ? 0.95 : 0.78), 490) }
         if collapsed { return typeSize.isAccessibilitySize ? 170 : (navigation.destination == nil ? 128 : 89) }
+        if navigation.destination != nil, navigation.sendToComma, !expanded {
+            return min(available - 16, 20 + destinationHeaderHeight + itineraryHeight + startActionHeight)
+        }
         if wide && (expanded || navigation.destination != nil) { return min(available - 16, 490) }
         if expanded || typeSize.isAccessibilitySize { return available * 0.78 }
         let preview = navigation.destination != nil
@@ -191,6 +203,7 @@ struct NavigationHome: View {
             if !searchingPlaces { handle }
             if let place = navigation.destination {
                 destinationHeader(place)
+                    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { destinationHeaderHeight = $0 }
                 if !collapsed {
                     Divider()
                     ScrollView {
@@ -201,12 +214,14 @@ struct NavigationHome: View {
                             messages
                             QueuedPlaceStatus()
                         }.padding(16).frame(maxWidth: .infinity, alignment: .leading)
+                            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { itineraryHeight = $0 }
                     }
                     .accessibilityIdentifier("route-itinerary")
                     Divider()
                     RouteStartAction(navigation: navigation, connection: connection)
                         .buttonStyle(NavigationRouteButtonStyle())
                         .padding(.horizontal, 16).padding(.vertical, 9)
+                        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { startActionHeight = $0 }
                 }
             } else {
                 searchField
@@ -382,8 +397,13 @@ struct NavigationHome: View {
     private var itinerary: some View {
         VStack(alignment: .leading, spacing: 4) {
             if navigation.sendToComma {
-                Label("Comma navigation", systemImage: "car.fill")
-                    .font(.subheadline.weight(.semibold))
+                if connection.connected {
+                    Button { showCommaRoutes = true } label: {
+                        Label("Route options on comma", systemImage: "point.topleft.down.to.point.bottomright.curvepath")
+                    }
+                } else {
+                    Label("Comma disconnected", systemImage: "car.fill").font(.subheadline.weight(.semibold))
+                }
             } else {
                 HStack {
                     Button { startAuxiliary(.start) } label: {
@@ -448,10 +468,15 @@ struct NavigationHome: View {
                                 let eta = Date().addingTimeInterval(navigation.remainingTime).formatted(date: .omitted, time: .shortened)
                                 Text("Arrive \(eta)").font(StarPilotTheme.title(22)).monospacedDigit()
                                 Text("\(NavigationDuration.text(navigation.remainingTime)) · \(units.text(navigation.remainingDistance))")
-                                    .font(.subheadline).foregroundStyle(.secondary).monospacedDigit()
+                                    .font(.subheadline.weight(.medium)).foregroundStyle(.primary.opacity(0.82)).monospacedDigit()
                             }
                         }.accessibilityElement(children: .combine)
                         Spacer(minLength: 0)
+                        if navigation.usingComma {
+                            Button { showCommaRoutes = true } label: {
+                                Image(systemName: "arrow.triangle.branch").frame(minWidth: 36, minHeight: 44)
+                            }.accessibilityLabel("Comma route options")
+                        }
                         Button { Task { await navigation.end(connection: connection) } } label: {
                             Text(navigation.endingRoute ? "Ending…" : "End")
                                 .font(.subheadline.weight(.semibold)).foregroundStyle(.red)
@@ -464,6 +489,7 @@ struct NavigationHome: View {
                     messages
                 }
                 .padding(.horizontal, 16).padding(.vertical, 12).frame(maxWidth: 440)
+                .background(Color(uiColor: .systemBackground).opacity(0.09), in: RoundedRectangle(cornerRadius: 24))
                 .modifier(NavigationMapGlass(radius: 24))
                 .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { tripFrame = $0 }
                 .overlay(alignment: .top) { TripBarFollowMarker(markerPerspective: markerPerspective, navigation: navigation) }

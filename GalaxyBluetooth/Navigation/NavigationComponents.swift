@@ -103,7 +103,7 @@ struct RouteStartAction: View {
                 let queued = inbox.waiting?.place
                 let samePlace = queued != nil && queued?.latitude == navigation.destination?.coordinate.latitude
                     && queued?.longitude == navigation.destination?.coordinate.longitude
-                Text("Your iPhone sends the destination. Your comma calculates the route.")
+                Text("Your comma calculates route options after it receives this destination.")
                     .font(.footnote).foregroundStyle(.secondary)
                 Button {
                     if connection.connected {
@@ -223,5 +223,114 @@ struct ParkedPhoneRoutePreview: View {
             }
             preview = reply
         } catch { message = error.localizedDescription }
+    }
+}
+
+
+private struct CommaRouteOptionsState: Decodable {
+    let revision: String
+    let routeKey: String
+    let destination: NavigationDestination?
+    let selectedRoute: Int?
+    let routeProvider: String?
+    let alternatives: [Choice]?
+
+    struct Choice: Decodable, Identifiable {
+        let index: Int
+        let distanceMeters: Double
+        let durationSeconds: Double
+        var id: Int { index }
+    }
+}
+
+struct CommaRouteOptionsView: View {
+    @ObservedObject var connection: CommaConnection
+    @ObservedObject var navigation: NavigationModel
+    let place: NavigationPlace
+    @Environment(\.dismiss) private var dismiss
+    @AppStorage(NavigationDistanceUnits.key) private var units = NavigationDistanceUnits.system
+    @State private var state: CommaRouteOptionsState?
+    @State private var loadedSession: String?
+    @State private var busy = false
+    @State private var message = ""
+
+    private func matchesPlace(_ state: CommaRouteOptionsState) -> Bool {
+        guard let target = state.destination else { return false }
+        return abs(place.coordinate.latitude - target.latitude) < 0.000001 &&
+            abs(place.coordinate.longitude - target.longitude) < 0.000001
+    }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                if let state, loadedSession == connection.session {
+                    if let provider = state.routeProvider, ["google", "mapbox"].contains(provider) {
+                        LabeledContent("Preferred on comma", value: provider == "google" ? "Google Routes" : "Mapbox")
+                    }
+                    if navigation.navigating, navigation.usingComma, matchesPlace(state), let choices = state.alternatives, !choices.isEmpty {
+                        Section(place.name) {
+                            ForEach(choices) { choice in
+                                Button { Task { await refresh(selecting: choice.index) } } label: {
+                                    HStack {
+                                        Text(NavigationDuration.text(choice.durationSeconds))
+                                        Text(units.text(choice.distanceMeters)).foregroundStyle(.secondary)
+                                        Spacer()
+                                        if choice.index == state.selectedRoute { Image(systemName: "checkmark") }
+                                    }
+                                }.disabled(choice.index == state.selectedRoute || busy || !connection.connected)
+                            }
+                        }
+                    } else {
+                        Text(navigation.navigating ? "Your comma has no route choices available right now." : "Send this destination to your comma to see the routes it finds.")
+                    }
+                }
+                if !message.isEmpty { Text(message) }
+                if busy { ProgressView() }
+                else { Button("Refresh routes") { Task { await refresh() } } }
+            }
+            .navigationTitle("Route options")
+            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
+        }
+        .task { await refresh() }
+    }
+
+    @MainActor private func refresh(selecting index: Int? = nil) async {
+        guard !busy else { return }
+        busy = true
+        defer { busy = false }
+        let session = connection.session
+        do {
+            let identity = try await connection.ensureDeviceIdentity()
+            func current() -> Bool {
+                !Task.isCancelled && connection.connected && connection.session == session &&
+                    connection.deviceIdentity == identity && navigation.destination?.id == place.id
+            }
+            guard current() else { throw CancellationError() }
+            let reply = try await connection.transport.request(path: "/api/navigation/status", method: "GET", headers: [:], body: Data())
+            guard current(), reply.status == 200 else { throw BridgeError.message("Reconnect to your comma and refresh routes.") }
+            let latest = try JSONDecoder().decode(CommaRouteOptionsState.self, from: reply.bodyData)
+            let previous = state
+            state = latest
+            message = ""
+            if let index {
+                guard loadedSession == session, navigation.navigating, navigation.usingComma, !navigation.busy,
+                      matchesPlace(latest), previous?.revision == latest.revision, previous?.routeKey == latest.routeKey,
+                      latest.alternatives?.contains(where: { $0.index == index }) == true else {
+                    throw BridgeError.message("The route choices changed. Refresh to see the current trip.")
+                }
+                let payload: [String: Any] = ["action": "selectRoute", "revision": latest.revision, "index": index]
+                let result = try await connection.transport.request(path: "/api/navigation/action", method: "POST",
+                    headers: ["content-type": "application/json"], body: JSONSerialization.data(withJSONObject: payload))
+                guard current(), result.status == 200 else { throw BridgeError.message("Route change unconfirmed. Refresh to check the selected route.") }
+                let confirmed = try JSONDecoder().decode(CommaRouteOptionsState.self, from: result.bodyData)
+                guard matchesPlace(confirmed), confirmed.selectedRoute == index else { throw BridgeError.message("Refresh to check the route on your comma.") }
+                state = confirmed
+            }
+            loadedSession = session
+        } catch {
+            state = nil
+            loadedSession = nil
+            message = error.localizedDescription
+        }
     }
 }
