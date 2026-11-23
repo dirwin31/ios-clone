@@ -224,7 +224,9 @@ struct NavigationMapSettings: View {
             return "Mapbox uses reported traffic speeds to choose a route and estimate arrival. The traffic overlay under Map appearance controls which slowdowns you see."
         case "Mapbox Navigator":
             return "Opens Mapbox’s spoken turn-by-turn guidance on iPhone. Download an area in advance to use its routing data offline."
-        case "Google Maps app", "Waze app":
+        case "Google Maps app":
+            return "Opens the destination in the Google Maps app on iPhone. For Google Routes on your comma, choose Comma navigation and set its directions provider in Comma settings."
+        case "Waze app":
             return "Opens the destination in the selected service. That service calculates the trip and provides the directions."
         default:
             return "Galaxy uses Mapbox Driving when the Mapbox display map and a public token are available. Otherwise it uses Apple Maps. Choose iPhone on the destination card to use this provider independently of your comma."
@@ -239,7 +241,7 @@ struct NavigationMapSettings: View {
                         self.directions
                         self.navigator
                     }
-                    settingLink("Comma settings", icon: "car.fill", detail: "Route sharing, comma navigation and GPS") {
+                    settingLink("Comma settings", icon: "car.fill", detail: "Google Routes, Mapbox, route sharing and GPS") {
                         self.comma
                     }
                     settingLink("Map appearance", icon: "map.fill", detail: "Map style, traffic, camera and Mapbox token") {
@@ -321,9 +323,10 @@ struct NavigationMapSettings: View {
 
     @ViewBuilder private var comma: some View {
         Section {
-            NavigationLink("Map, routing and GPS") {
+                NavigationLink("Directions provider, map and GPS") {
                 CommaNavigationPreferences(connection: model.navigationServices.connection)
             }
+                Text("Choose Google Routes or Mapbox for trips started with Comma navigation.").font(.footnote)
             Toggle("Send iPhone routes to comma", isOn: $offerPhoneTrip)
             if offerPhoneTrip {
                 Text("Your iPhone uses \(effectiveProvider) and needs a public Mapbox key. Start Route sends the path and turns to your paired comma. Older comma software requires you to park before sending.").font(.footnote)
@@ -1010,6 +1013,7 @@ private struct StandardMapSettings: View {
 
 private struct CommaNavigationPreferences: View {
     let connection: CommaConnection
+    @AppStorage("navigation.offerPhoneTrip") private var sharing = false
 
     private struct Snapshot: Decodable {
         let revision: String
@@ -1017,6 +1021,8 @@ private struct CommaNavigationPreferences: View {
         let avoidHighways, avoidTolls, avoidFerries: Bool
         let hasKey, hasGoogleKey, enabled: Bool
         let network: String?
+        struct GoogleRoutesStatus: Decodable { let failure: String? }
+        let googleRoutes: GoogleRoutesStatus?
     }
 
     @State private var original: Snapshot?
@@ -1053,7 +1059,22 @@ private struct CommaNavigationPreferences: View {
                 }
                 Section {
                     providerPicker("Map provider", selection: $map)
-                    providerPicker("Directions provider", selection: $router)
+                    Picker("Directions provider", selection: $router) {
+                        Text("Mapbox").tag("mapbox")
+                        Text("Google Routes").tag("google")
+                    }
+                    if router == "google" {
+                        Text("Your comma requests a traffic-aware route from Google. If Google can’t supply it, the comma tries Mapbox.").font(.footnote)
+                        if !original.hasGoogleKey || !original.hasKey {
+                            Text("Set up both the Google Routes API key and the Mapbox key in Galaxy on your comma.").font(.footnote)
+                        }
+                        if original.routeProvider == "google", let failure = original.googleRoutes?.failure, !failure.isEmpty {
+                            LabeledContent("Last Google routing issue", value: failure)
+                        }
+                        if sharing {
+                            Text("To start a Google trip on your comma, turn off “Send iPhone routes to comma” and choose Comma navigation.").font(.footnote)
+                        }
+                    }
                     Picker("GPS source", selection: $gps) {
                         Text("Comma with phone backup").tag("backup")
                         Text("Comma only").tag("comma")
