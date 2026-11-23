@@ -24,6 +24,18 @@ enum ExternalNavigator: String, CaseIterable {
 }
 
 struct PhoneRoute {
+    static func directionsProvider(_ preference: String, sharing: Bool, automaticUsesMapbox: Bool) -> String {
+        if sharing { return preference == "Mapbox Traffic" ? preference : "Mapbox Driving" }
+        if preference == "Automatic" { return automaticUsesMapbox ? "Mapbox Driving" : "Apple Maps" }
+        return preference
+    }
+
+    var directionsProvider = "Apple Maps"
+
+    func startSummary(sharing: Bool) -> String {
+        sharing ? "\(directionsProvider) · Sends route to comma" : "\(directionsProvider) · iPhone and CarPlay only"
+    }
+
     // A junction annotation describes the map. It doesn't assign right of way.
     struct Intersection: Decodable {
         let geometry_index: Int?
@@ -192,19 +204,20 @@ extension PhoneRoute {
 
     static func mapbox(from: CLLocationCoordinate2D, to: CLLocationCoordinate2D,
                        alternatives: Bool, token: String, bearing: Int? = nil) async throws -> [PhoneRoute] {
-        let endpoint = try mapboxURL(from: from, to: to, alternatives: alternatives, token: token, bearing: bearing)
+        let traffic = UserDefaults.standard.string(forKey: "navigation.phoneRouter") == "Mapbox Traffic"
+        let endpoint = try mapboxURL(from: from, to: to, alternatives: alternatives, token: token, bearing: bearing, traffic: traffic)
         let (data, response) = try await URLSession.shared.data(from: endpoint)
         guard (response as? HTTPURLResponse)?.statusCode == 200 else { throw URLError(.badServerResponse) }
-        return try decodeMapboxRoutes(data)
+        return try decodeMapboxRoutes(data, traffic: traffic)
     }
 
     static func mapboxURL(from: CLLocationCoordinate2D, to: CLLocationCoordinate2D, alternatives: Bool,
-                          token: String, bearing: Int?) throws -> URL {
+                          token: String, bearing: Int?, traffic: Bool = false) throws -> URL {
         var url = URLComponents()
         url.scheme = "https"
         url.host = "api.mapbox.com"
         let preferences = UserDefaults.standard
-        let profile = preferences.string(forKey: "navigation.phoneRouter") == "Mapbox Traffic" ? "driving-traffic" : "driving"
+        let profile = traffic ? "driving-traffic" : "driving"
         url.path = "/directions/v5/mapbox/\(profile)/\(from.longitude),\(from.latitude);\(to.longitude),\(to.latitude)"
         url.queryItems = ["access_token": token, "alternatives": String(alternatives), "steps": "true",
                           "geometries": "geojson", "overview": "full"].map { URLQueryItem(name: $0.key, value: $0.value) }
@@ -223,7 +236,7 @@ extension PhoneRoute {
         return endpoint
     }
 
-    static func decodeMapboxRoutes(_ data: Data) throws -> [PhoneRoute] {
+    static func decodeMapboxRoutes(_ data: Data, traffic: Bool = false) throws -> [PhoneRoute] {
         return try JSONDecoder().decode(Response.self, from: data).routes.map { route in
             let segments = route.legs.flatMap(\.steps)
             // Mapbox maneuvers describe the start of each segment. Galaxy announces
@@ -257,7 +270,8 @@ extension PhoneRoute {
             let junctions = labelsByIndex.map { index, labels in
                 MappedJunction(index: index, labels: labels.sorted().joined(separator: ", "), point: line.points()[index])
             }.sorted { $0.index < $1.index }
-            return PhoneRoute(name: route.legs.map(\.summary).joined(separator: ", "), distance: route.distance,
+            return PhoneRoute(directionsProvider: traffic ? "Mapbox Traffic" : "Mapbox Driving",
+                             name: route.legs.map(\.summary).joined(separator: ", "), distance: route.distance,
                              expectedTravelTime: route.duration, polyline: line, steps: steps, commaPreview: preview, junctions: junctions)
         }
     }
@@ -318,7 +332,7 @@ final class NavigationModel: NSObject, ObservableObject, @preconcurrency CLLocat
     private var routeAcceptanceExpiry: Task<Void, Never>?
 
     func showRouteAcceptance() {
-        let confirmation = "Your comma accepted the route calculated on iPhone."
+        let confirmation = "Route received by comma."
         routeAcceptanceExpiry?.cancel()
         notice = confirmation
         routeAcceptanceExpiry = Task { [weak self] in
@@ -635,7 +649,9 @@ final class NavigationModel: NSObject, ObservableObject, @preconcurrency CLLocat
                     let corner = index == 0 ? CLLocationCoordinate2D(latitude: origin.latitude, longitude: end.longitude)
                                             : CLLocationCoordinate2D(latitude: end.latitude, longitude: origin.longitude)
                     let line = MKPolyline(coordinates: [origin, corner, end], count: 3)
-                    return PhoneRoute(name: sample.0, distance: sample.2, expectedTravelTime: sample.1, polyline: line, steps: [])
+                    let provider = PhoneRoute.directionsProvider(UserDefaults.standard.string(forKey: "navigation.phoneRouter") ?? "Automatic",
+                                                                sharing: phoneTripPreferred, automaticUsesMapbox: NavigationMapPreference.activeToken != nil)
+                    return PhoneRoute(directionsProvider: provider, name: sample.0, distance: sample.2, expectedTravelTime: sample.1, polyline: line, steps: [])
                 }
                 chooseRoute(0)
                 locationMessage = ""
@@ -647,7 +663,7 @@ final class NavigationModel: NSObject, ObservableObject, @preconcurrency CLLocat
         onEvent?("Route calculation requested; refresh: \(refresh); destination: \(destination != nil); active: \(foreground); calculating: \(recalculating)")
         guard let destination, foreground, !sendToComma, !commandRunning, !recalculating else { onEvent?("Route calculation skipped by current state"); return }
         let savedRouter = UserDefaults.standard.string(forKey: "navigation.phoneRouter") ?? "Automatic"
-        let preferredRouter = phoneTripPreferred && savedRouter != "Mapbox Traffic" ? "Mapbox Driving" : savedRouter
+        let preferredRouter = PhoneRoute.directionsProvider(savedRouter, sharing: phoneTripPreferred, automaticUsesMapbox: NavigationMapPreference.activeToken != nil)
         if !refresh, ExternalNavigator(rawValue: preferredRouter) != nil || (plannedStart == nil && preferredRouter == "Mapbox Navigator") { return }
         let token = UUID(); revision = token
         directions?.cancel()
@@ -696,7 +712,7 @@ final class NavigationModel: NSObject, ObservableObject, @preconcurrency CLLocat
                 error = "Save a Mapbox public token in Navigation settings to use Mapbox directions."
                 return
             }
-            if let accessToken = router == "Automatic" ? NavigationMapPreference.activeToken : (router.hasPrefix("Mapbox") ? savedToken : nil) {
+            if router.hasPrefix("Mapbox"), let accessToken = savedToken {
                 choices = try await PhoneRoute.mapbox(from: origin.coordinate, to: destination.coordinate,
                                                       alternatives: request.requestsAlternateRoutes, token: accessToken,
                                                       bearing: plannedStart == nil ? departureBearing(at: origin) : nil)

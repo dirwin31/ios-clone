@@ -173,7 +173,7 @@ final class IntegrationUITests: XCTestCase {
         app.launchArguments = ["--preview-navigation-planner", "--ui-testing", "-navigation.offerPhoneTrip", "YES",
                                "-navigation.mapboxSetupSeen", "NO", "-navigation.mapboxEnabled", "YES"]
         app.launch()
-        let useAppleMaps = app.buttons["Continue with Apple Maps"]
+        let useAppleMaps = app.buttons["Use Apple Maps for the map display"]
         XCTAssertTrue(useAppleMaps.waitForExistence(timeout: 15))
         XCTAssertTrue(app.staticTexts["Recommended for 3D navigation"].exists)
         XCTAssertTrue(app.staticTexts["2. On the comma, open Bluetooth settings and tap Share Mapbox key."].exists)
@@ -204,9 +204,10 @@ final class IntegrationUITests: XCTestCase {
         result.tap()
         let directions = app.buttons["Start Route"]
         XCTAssertTrue(directions.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Mapbox Driving · Sends route to comma"].exists)
         XCTAssertFalse(directions.isEnabled, "Sending the route requires a paired comma connection")
         XCTAssertTrue(app.frame.contains(directions.frame))
-        XCTAssertFalse(app.segmentedControls.buttons["Comma"].exists)
+        XCTAssertFalse(app.buttons["directions-source"].exists)
         capture("\(device) route preview")
         XCTAssertFalse(app.buttons["Save place options"].exists)
         app.buttons["Navigation options"].tap()
@@ -279,7 +280,8 @@ final class IntegrationUITests: XCTestCase {
         let tab = app.buttons["main-tab-Navigation"]
         XCTAssertTrue(tab.waitForExistence(timeout: 10))
         tab.tap()
-        if app.buttons["Continue with Apple Maps"].waitForExistence(timeout: 3) { app.buttons["Continue with Apple Maps"].tap() }
+        let appleDisplay = app.buttons["Use Apple Maps for the map display"]
+        if appleDisplay.waitForExistence(timeout: 3) { appleDisplay.tap() }
         let search = app.textFields["map-search"]
         search.tap()
         XCTAssertTrue(search.waitForExistence(timeout: 5))
@@ -303,9 +305,9 @@ final class IntegrationUITests: XCTestCase {
         XCTAssertTrue(send.waitForExistence(timeout: 3))
         XCTAssertFalse(app.buttons["Get directions"].exists)
         app.buttons["directions-source"].tap()
-        app.buttons["iPhone"].tap()
+        app.buttons["iPhone only"].tap()
         XCTAssertTrue(app.buttons["Get directions"].waitForExistence(timeout: 5))
-        XCTAssertFalse(app.buttons["Start on iPhone"].exists)
+        XCTAssertFalse(app.buttons["Start Route"].exists)
     }
     func testNavigationSettingsWithoutDeveloperMode() {
         let app = XCUIApplication()

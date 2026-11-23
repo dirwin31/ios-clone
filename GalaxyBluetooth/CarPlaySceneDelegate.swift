@@ -235,15 +235,15 @@ final class CarPlaySceneDelegate: NSObject, CPTemplateApplicationSceneDelegate, 
                         } else if nav.route?.commaPreview == nil || nav.plannedStart != nil {
                             rows.append(.init(title: "Route unavailable for handoff", detail: "Choose a shorter trip from your current location", icon: "map", action: .info))
                         } else {
-                            rows.append(.init(title: "Start Route", detail: "Use the selected iPhone route on comma", icon: "car.fill", action: .phoneTrip(destination.id)))
+                            rows.append(.init(title: "Start Route", detail: nav.route?.startSummary(sharing: true) ?? "", icon: "car.fill", action: .phoneTrip(destination.id)))
                         }
                     } else if nav.sendToComma && !services.connection.connected {
                         rows.append(.init(title: "Get iPhone directions", detail: "Comma is disconnected", icon: "iphone", action: .phone))
                     } else if !nav.sendToComma && nav.route == nil {
                         rows.append(.init(title: "Get directions", detail: "Preview the route on iPhone", icon: "arrow.triangle.turn.up.right.diamond", action: .directions))
                     } else {
-                        rows.append(.init(title: nav.sendToComma ? "Send to comma" : "Start on iPhone",
-                                          detail: nav.sendToComma ? "Comma calculates the route" : destination.name,
+                        rows.append(.init(title: nav.sendToComma ? "Send to comma" : "Start Route",
+                                          detail: nav.sendToComma ? "Sends the destination. Comma calculates the route." : nav.route?.startSummary(sharing: false) ?? "",
                                           icon: "location.fill", action: .start(destination.id)))
                     }
                 }

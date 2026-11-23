@@ -113,7 +113,7 @@ struct NavigationHome: View {
                 Section {
                     Label("Recommended for 3D navigation", systemImage: "building.2.fill").font(.headline)
                     Text("Mapbox gives you detailed 3D buildings and a street-level view of the route ahead.")
-                    Button("Continue with Apple Maps") {
+                    Button("Use Apple Maps for the map display") {
                         mapboxEnabled = false
                         showMapSetup = false
                     }
@@ -207,7 +207,7 @@ struct NavigationHome: View {
                     }
                     .accessibilityIdentifier("route-itinerary")
                     Divider()
-                    RouteStartAction(navigation: navigation, connection: connection, compact: true)
+                    RouteStartAction(navigation: navigation, connection: connection)
                         .buttonStyle(NavigationRouteButtonStyle())
                         .padding(.horizontal, 16).padding(.vertical, 9)
                 }
@@ -397,17 +397,17 @@ struct NavigationHome: View {
                 Image(systemName: handoff || navigation.sendToComma ? "car.fill" : "iphone")
                     .frame(width: 28).foregroundStyle(StarPilotTheme.guidance)
                 if handoff {
-                    Text("iPhone route to comma").font(.subheadline.weight(.semibold))
+                    Text("iPhone route on comma").font(.subheadline.weight(.semibold))
                 } else {
                     Menu {
                         Picker("Directions", selection: Binding(get: { navigation.sendToComma }, set: { value in
                             Task { await navigation.selectGuidanceSource(comma: value) }
                         })) {
-                            Text("Comma").tag(true)
-                            Text("iPhone").tag(false)
+                            Text("Comma navigation").tag(true)
+                            Text("iPhone only").tag(false)
                         }
                     } label: {
-                        HStack { Text(navigation.sendToComma ? "Comma directions" : "iPhone directions")
+                        HStack { Text(navigation.sendToComma ? "Comma navigation" : "iPhone only")
                             Image(systemName: "chevron.up.chevron.down").font(.caption2) }
                         .font(.subheadline.weight(.semibold)).frame(minHeight: 44)
                     }.disabled(navigation.busy).accessibilityIdentifier("directions-source")

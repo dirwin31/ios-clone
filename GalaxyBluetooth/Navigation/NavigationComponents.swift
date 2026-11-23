@@ -88,7 +88,6 @@ struct RouteStartAction: View {
     @ObservedObject var connection: CommaConnection
     @ObservedObject private var inbox = ShareInbox.shared
     @AppStorage("navigation.offerPhoneTrip") private var offerPhoneTrip = false
-    var compact = false
     @AppStorage("navigation.phoneRouter") private var router = "Automatic"
     @AppStorage(NavigationMapPreference.tokenKey) private var mapToken = ""
     @State private var navigatorTrip: NavigatorTrip?
@@ -105,6 +104,8 @@ struct RouteStartAction: View {
                 let queued = inbox.waiting?.place
                 let samePlace = queued != nil && queued?.latitude == navigation.destination?.coordinate.latitude
                     && queued?.longitude == navigation.destination?.coordinate.longitude
+                Text("Your iPhone sends the destination. Your comma calculates the route.")
+                    .font(.footnote).foregroundStyle(.secondary)
                 Button {
                     if connection.connected {
                         if let pending = inbox.waiting { inbox.cancelQueuedPlace(pending.id) }
@@ -116,17 +117,9 @@ struct RouteStartAction: View {
                         .font(.headline).frame(maxWidth: .infinity).padding(.vertical, 5)
                 }
                 .disabled(navigation.busy || samePlace)
-                if !compact {
-                    Text(connection.connected ? "Your comma calculates the turns. Choose iPhone above to get directions using your phone instead." : "Send when connected queues the destination for your comma. Choose iPhone above for directions now.")
-                    .font(.footnote).foregroundStyle(.secondary)
-                }
             } else if !offerPhoneTrip, let external = ExternalNavigator(rawValue: router), let place = navigation.destination,
                       let url = external.directions(to: place.coordinate) {
                 Link("Open destination in " + external.rawValue, destination: url)
-                if !compact {
-                    Text("The selected service opens with your destination and handles guidance from your location.")
-                    .font(.footnote).foregroundStyle(.secondary)
-                }
             } else if !offerPhoneTrip && router == "Mapbox Navigator" && navigation.plannedStart == nil {
                 Button("Start Mapbox Navigator on iPhone") {
                     guard let place = navigation.destination else { return }
@@ -148,15 +141,15 @@ struct RouteStartAction: View {
                 ProgressView("Getting directions…")
             } else if navigation.routes.isEmpty {
                 Button("Get directions") { Task { await navigation.calculateRoutes(refresh: false) } }
-            } else if navigation.plannedStart == nil {
-                Button(offerPhoneTrip ? "Start Route" : "Start on iPhone") {
+            } else if navigation.plannedStart == nil, let route = navigation.route {
+                Text(route.startSummary(sharing: offerPhoneTrip))
+                    .font(.footnote).foregroundStyle(.secondary)
+                Button("Start Route") {
                     Task { await navigation.start(connection: connection, phoneRouteOnComma: offerPhoneTrip) }
                 }
                 .disabled(offerPhoneTrip && (!connection.connected || navigation.route?.commaPreview == nil))
-                if offerPhoneTrip && (!compact || !connection.connected || navigation.route?.commaPreview == nil) {
-                    Text(!connection.connected ? "Connect to your paired comma to start." : navigation.route?.commaPreview == nil
-                         ? "This route exceeds the comma’s route transfer limit. Choose a shorter trip."
-                         : "Uses the selected iPhone route on your comma.").font(.footnote)
+                if offerPhoneTrip && (!connection.connected || route.commaPreview == nil) {
+                    Text(!connection.connected ? "Connect to your paired comma to start." : "This route exceeds the comma’s route transfer limit. Choose a shorter trip.").font(.footnote)
                 }
             } else {
                 Text("Preview from your chosen starting point. Use your current location to start guidance.")
