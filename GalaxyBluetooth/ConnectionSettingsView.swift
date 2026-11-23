@@ -30,6 +30,10 @@ struct ConnectionSettingsView: View {
     @AppStorage("galaxy.location.hideIndicator") private var hideLocationIndicator = false
     @Namespace private var modeSelection
     @Environment(\.reduceGalacticalMotion) private var reduceMotion
+    @AppStorage(AppPreference.startupPage) private var startupPage = "/"
+    @State private var showStartupPages = false
+    @State private var startupPages = StartupPage.cached
+    @State private var startupSearch = ""
     @State private var showToolbarOrder = false
     @AppStorage(GalaxyToolbar.orderKey) private var toolbarOrder = ""
     @State private var showOrder = false
@@ -107,6 +111,7 @@ struct ConnectionSettingsView: View {
                 NavigationMapSettings(model: model)
             }
             .onChange(of: pairing) { _, value in if value { model.autoOpenGalaxyPending = false } }
+            .sheet(isPresented: $showStartupPages) { startupPicker }
             .sheet(isPresented: $showToolbarOrder) {
                 let shortcuts = GalaxyToolbar.order(toolbarOrder)
                 NavigationStack {
@@ -470,6 +475,48 @@ struct ConnectionSettingsView: View {
         }
     }
 
+    private var startupLabel: String {
+        if let tab = CompanionTab(rawValue: startupPage) { return tab.rawValue }
+        if let page = startupPages.first(where: { $0.id == startupPage }) { return "Galaxy · " + page.name }
+        return "Galaxy · " + startupPage
+    }
+
+    private func startupOption(_ id: String, _ name: String) -> some View {
+        Button {
+            startupPage = id
+            showStartupPages = false
+        } label: {
+            HStack {
+                Text(verbatim: name)
+                Spacer()
+                if startupPage == id { Image(systemName: "checkmark").foregroundStyle(accent) }
+            }
+        }.foregroundStyle(.primary)
+    }
+
+    private var startupPicker: some View {
+        NavigationStack {
+            List {
+                Section("App") {
+                    ForEach(CompanionTab.allCases.filter { tab in
+                        tab != .galaxy && (!tab.isDeveloperPage || model.developerMode) &&
+                        (tab != .navigation || model.navigationEnabled) &&
+                        (startupSearch.isEmpty || tab.rawValue.localizedCaseInsensitiveContains(startupSearch))
+                    }) { tab in startupOption(tab.rawValue, tab.rawValue) }
+                }
+                Section("Galaxy") {
+                    ForEach(startupPages.filter { startupSearch.isEmpty || $0.name.localizedCaseInsensitiveContains(startupSearch) }) { page in
+                        startupOption(page.id, page.name)
+                    }
+                }
+            }
+            .navigationTitle("Startup page")
+            .searchable(text: $startupSearch)
+            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { showStartupPages = false } } }
+            .task { startupPages = await model.galaxyPage.startupPages() }
+        }
+    }
+
     private func preferences() -> some View {
         VStack(spacing: 0) {
             preferenceSection("Navigation", expanded: $navigationExpanded) {
@@ -489,7 +536,17 @@ struct ConnectionSettingsView: View {
             }
             separator
             preferenceSection("Phone & alerts", expanded: $phoneExpanded) {
-                toggleRow("arrow.up.forward.app", title: "Open Galaxy after connecting", subtitle: "Switch from Settings when Galaxy is ready", isOn: $autoOpenGalaxy)
+                toggleRow("arrow.up.forward.app", title: "Open a page on startup", subtitle: "Open your chosen page once when the app starts", isOn: $autoOpenGalaxy)
+                if autoOpenGalaxy {
+                    separator
+                    row("bookmark", title: "Startup page", subtitle: startupLabel) {
+                        Button("Choose") {
+                            model.autoOpenGalaxyPending = false
+                            startupSearch = ""
+                            showStartupPages = true
+                        }.font(.system(size: 12)).frame(minHeight: 44)
+                    }
+                }
                 separator
                 toggleRow("music.note", title: "Phone music", subtitle: "Pair this iPhone for Bluetooth audio", isOn: $model.phoneMusicEnabled)
                 if model.phoneMusicEnabled {

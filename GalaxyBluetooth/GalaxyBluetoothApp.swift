@@ -110,7 +110,10 @@ final class AppModel: ObservableObject {
         return value
     }()
     @Published var tab: CompanionTab = .connections {
-        didSet { autoOpenGalaxyPending = false }
+        didSet {
+            autoOpenGalaxyPending = false
+            if tab != .galaxy { galaxyPage.pendingStartupPage = nil }
+        }
     }
     @Published var developerMode = UserDefaults.standard.bool(forKey: "galaxy.app.developerMode") {
         didSet {
@@ -657,10 +660,25 @@ final class AppModel: ObservableObject {
             openGalaxyIfRequested()
         }
     }
-    private func openGalaxyIfRequested() {
-        guard phoneActive, autoOpenGalaxyPending else { return }
+    func openGalaxyIfRequested() {
+        guard phoneActive, autoOpenGalaxyPending, tab == .connections else { return }
+        let defaults = UserDefaults.standard
+        guard defaults.object(forKey: AppPreference.openGalaxy) as? Bool != false else {
+            autoOpenGalaxyPending = false
+            return
+        }
+        let choice = defaults.string(forKey: AppPreference.startupPage) ?? "/"
+        if let screen = CompanionTab(rawValue: choice), screen != .galaxy {
+            autoOpenGalaxyPending = false
+            guard (!screen.isDeveloperPage || developerMode), (screen != .navigation || navigationEnabled) else { return }
+            tab = screen
+            diagnostics.live = screen == .live
+            return
+        }
+        guard opened, transport.connected, !pairingInProgress, !offerAudioPairing, !showAudioPairing else { return }
         autoOpenGalaxyPending = false
-        if tab == .connections, UserDefaults.standard.object(forKey: AppPreference.openGalaxy) as? Bool != false { tab = .galaxy }
+        galaxyPage.pendingStartupPage = StartupPage.valid(choice) ? choice : "/"
+        tab = .galaxy
     }
     func disconnect() {
         legacyURL = nil
@@ -959,6 +977,7 @@ final class AppModel: ObservableObject {
 
 
 enum AppPreference {
+    static let startupPage = "galaxy.app.startupPage"
     static let openGalaxy = "galaxy.app.openAfterConnection"
     static let toolbarLabels = "galaxy.app.toolbarLabels"
     static let rememberDestinations = "galaxy.app.rememberDestinations"
@@ -1193,7 +1212,7 @@ struct GalaxyRootView: View {
             model.setPhoneActive(scenePhase == .active)
             model.navigationServices.setEnabled(model.navigationEnabled)
             model.navigationServices.setPhoneActive(scenePhase == .active)
-            if scenePhase == .active { ShareInbox.shared.activated(model: model); model.recoverGalaxy(reload: false); await model.checkGalaxyUpdates() }
+            if scenePhase == .active { ShareInbox.shared.activated(model: model); model.openGalaxyIfRequested(); model.recoverGalaxy(reload: false); await model.checkGalaxyUpdates() }
         }
     }
     private func presentReport() {
