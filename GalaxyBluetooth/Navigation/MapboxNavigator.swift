@@ -6,14 +6,26 @@ import MapboxMaps
 
 @MainActor
 enum GalaxyNavigationSDK {
-    private static var saved: (String, MapboxNavigationProvider)?
+    private static var saved: MapboxNavigationProvider?
 
     static func provider(token: String) -> MapboxNavigationProvider {
-        if let saved, saved.0 == token { return saved.1 }
-        saved = nil
-        MapboxOptions.accessToken = token
-        let provider = MapboxNavigationProvider(coreConfig: .init(credentials: .init(accessToken: token)))
-        saved = (token, provider)
+        let prefs = UserDefaults.standard
+        let source = prefs.string(forKey: "navigation.sdkSource")
+        var routing = RoutingConfig()
+        routing.routingProviderSource = source == "Offline" ? .offline : source == "Online" ? .online : .hybrid
+        routing.rerouteConfig.detectsReroute = prefs.object(forKey: "navigation.sdkReroute") as? Bool ?? true
+        if prefs.object(forKey: "navigation.sdkFasterRoutes") as? Bool == false { routing.fasterRouteDetectionConfig = nil }
+        if prefs.object(forKey: "navigation.offerAlternatives") as? Bool == false { routing.alternativeRoutesDetectionConfig = nil }
+        let units = prefs.string(forKey: NavigationDistanceUnits.key)
+        let config = CoreConfig(credentials: .init(accessToken: token), routingConfig: routing,
+                                unitOfMeasurement: units == "metric" ? .metric : units == "imperial" ? .imperial : .auto,
+                                ttsConfig: prefs.bool(forKey: "navigation.sdkLocalVoice") ? .localOnly : .default)
+        if let saved {
+            if saved.coreConfig != config { saved.apply(coreConfig: config) }
+            return saved
+        }
+        let provider = MapboxNavigationProvider(coreConfig: config)
+        saved = provider
         return provider
     }
 }
@@ -45,6 +57,13 @@ struct MapboxNavigatorScreen: View {
             if prefs.bool(forKey: "navigation.avoidTolls") { options.roadClassesToAvoid.insert(.toll) }
             if prefs.bool(forKey: "navigation.avoidMotorways") { options.roadClassesToAvoid.insert(.motorway) }
             if prefs.bool(forKey: "navigation.avoidFerries") { options.roadClassesToAvoid.insert(.ferry) }
+            if prefs.bool(forKey: "navigation.avoidUnpaved") { options.roadClassesToAvoid.insert(.unpaved) }
+            if prefs.bool(forKey: "navigation.avoidCashTolls") { options.roadClassesToAvoid.insert(.cashTollOnly) }
+            if prefs.bool(forKey: "navigation.vehicleLimits") {
+                options.maximumHeight = .init(value: prefs.object(forKey: "navigation.max_height") as? Double ?? 1.6, unit: .meters)
+                options.maximumWidth = .init(value: prefs.object(forKey: "navigation.max_width") as? Double ?? 1.9, unit: .meters)
+                options.maximumWeight = .init(value: prefs.object(forKey: "navigation.max_weight") as? Double ?? 2.5, unit: .metricTons)
+            }
             let request = GalaxyNavigationSDK.provider(token: token).mapboxNavigation.routingProvider().calculateRoutes(options: options)
             do {
                 let result = try await withTaskCancellationHandler { try await request.value } onCancel: { request.cancel() }

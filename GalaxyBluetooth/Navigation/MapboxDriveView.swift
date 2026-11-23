@@ -43,7 +43,7 @@ enum GalaxyAppleMap: String, CaseIterable {
     }
 }
 enum GalaxyBasemap: String, CaseIterable {
-    case standard = "Standard", standardSatellite = "Standard Satellite", streets = "Streets", outdoors = "Outdoors", light = "Light", dark = "Dark", satellite = "Satellite", satelliteStreets = "Satellite Streets"
+    case standard = "Standard", standardSatellite = "Standard Satellite", streets = "Streets", outdoors = "Outdoors", light = "Light", dark = "Dark", satellite = "Satellite", satelliteStreets = "Satellite Streets", studio = "Mapbox Studio"
     var uri: StyleURI {
         switch self {
         case .standard: .standard
@@ -53,8 +53,14 @@ enum GalaxyBasemap: String, CaseIterable {
         case .light: .light
         case .dark: .dark
         case .satellite: .satellite
+        case .studio: Self.studioURI(UserDefaults.standard.string(forKey: "navigation.studioStyle") ?? "") ?? .standard
         case .satelliteStreets: .satelliteStreets
         }
+    }
+    static func studioURI(_ input: String) -> StyleURI? {
+        guard let url = URLComponents(string: input), url.scheme == "mapbox", url.host == "styles",
+              url.path.split(separator: "/").count == 2, url.query == nil, url.fragment == nil else { return nil }
+        return StyleURI(rawValue: input)
     }
 }
 
@@ -80,12 +86,29 @@ struct NavigationMapSettings: View {
     @AppStorage("navigation.sdkIntersections") private var intersections = true
     @AppStorage("navigation.sdkDarkTunnels") private var darkTunnels = true
     @AppStorage("navigation.sdkFadeRoute") private var fadeRoute = true
+    @AppStorage("navigation.defaultComma") private var defaultComma = true
+    @AppStorage("navigation.avoidCashTolls") private var cashTolls = false
+    @AppStorage("navigation.avoidUnpaved") private var unpaved = false
+    @AppStorage("navigation.vehicleLimits") private var limits = false
+    @AppStorage("navigation.max_height") private var height = 1.6
+    @AppStorage("navigation.max_width") private var width = 1.9
+    @AppStorage("navigation.max_weight") private var weight = 2.5
+    @AppStorage("navigation.sdkSource") private var routeSource = "Automatic"
+    @AppStorage("navigation.sdkLocalVoice") private var localVoice = false
+    @AppStorage("navigation.sdkReroute") private var reroute = true
+    @AppStorage("navigation.sdkFasterRoutes") private var faster = true
+    @State private var styleEntry = ""
+    @AppStorage("navigation.studioStyle") private var studioStyle = ""
     @State private var entry = ""
     var body: some View {
         NavigationStack {
             Form {
                 Section {
                     Toggle("Enable navigation", isOn: $model.navigationEnabled)
+                    Picker("Default guidance device", selection: $defaultComma) {
+                        Text("Comma").tag(true)
+                        Text("iPhone").tag(false)
+                    }
                     Picker("Distance units", selection: $units) {
                         Text("System").tag(NavigationDistanceUnits.system)
                         Text("Metric").tag(NavigationDistanceUnits.metric)
@@ -95,13 +118,29 @@ struct NavigationMapSettings: View {
                 } header: { Text("Trips") } footer: { Text("Recents are stored on this iPhone.") }
                 Section {
                     Picker("Directions provider", selection: $router) {
-                        ForEach(["Automatic", "Apple Maps", "Mapbox Driving", "Mapbox Traffic", "Mapbox Navigator"], id: \.self) { Text($0).tag($0) }
+                        ForEach(["Automatic", "Apple Maps", "Mapbox Driving", "Mapbox Traffic", "Mapbox Navigator"] + ExternalNavigator.allCases.map(\.rawValue), id: \.self) { Text($0).tag($0) }
                     }
-                    Toggle("Offer alternative routes", isOn: $alternatives)
+                    if ExternalNavigator(rawValue: router) == nil { Toggle("Offer alternative routes", isOn: $alternatives) }
                     if router.hasPrefix("Mapbox") || (router == "Automatic" && enabled && token.hasPrefix("pk.")) {
-                        Toggle("Avoid toll roads", isOn: $tolls)
-                        Toggle("Avoid ferries", isOn: $ferries)
-                        Toggle("Avoid motorways", isOn: $motorways)
+                        NavigationLink("Roads and vehicle preferences") {
+                            Form {
+                                Section("Roads to avoid") {
+                                    Toggle("Toll roads", isOn: $tolls)
+                                    Toggle("Cash-only tolls", isOn: $cashTolls)
+                                    Toggle("Ferries", isOn: $ferries)
+                                    Toggle("Motorways", isOn: $motorways)
+                                    Toggle("Unpaved roads", isOn: $unpaved)
+                                }
+                                Section {
+                                    Toggle("Use vehicle dimensions", isOn: $limits)
+                                    if limits {
+                                        Stepper("Height · \(height.formatted()) m", value: $height, in: 0.1...10, step: 0.1)
+                                        Stepper("Width · \(width.formatted()) m", value: $width, in: 0.1...10, step: 0.1)
+                                        Stepper("Gross weight · \(weight.formatted()) t", value: $weight, in: 0.1...100, step: 0.1)
+                                    }
+                                } header: { Text("Vehicle clearance") } footer: { Text("Mapbox accounts for known road restrictions. Coverage varies by area.") }
+                            }.navigationTitle("Route preferences")
+                        }
                     }
                 } header: { Text("iPhone directions") } footer: {
                     Text("Automatic follows the selected map. Mapbox Traffic uses reported road speeds when calculating a drive. These preferences apply when you choose iPhone on the destination card. Comma guidance uses your comma’s routing settings and internet connection.")
@@ -118,6 +157,9 @@ struct NavigationMapSettings: View {
                     }
                     SecureField("Mapbox public token (pk.…)", text: $entry)
                         .textInputAutocapitalization(.never).autocorrectionDisabled()
+                    if !token.isEmpty && entry == token {
+                        Button("Remove saved token", role: .destructive) { entry = ""; token = "" }
+                    }
                     if entry != token {
                         Button("Save public token") { token = entry.trimmingCharacters(in: .whitespacesAndNewlines); entry = token }
                             .disabled(!entry.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("pk."))
@@ -126,6 +168,14 @@ struct NavigationMapSettings: View {
                     if enabled {
                         Picker("Basemap", selection: $basemap) {
                             ForEach(GalaxyBasemap.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+                        }
+                        if basemap == .studio {
+                            TextField("mapbox://styles/owner/style", text: $styleEntry)
+                                .textInputAutocapitalization(.never).autocorrectionDisabled()
+                            Button("Apply Studio style") { studioStyle = styleEntry }
+                                .disabled(GalaxyBasemap.studioURI(styleEntry) == nil || studioStyle == styleEntry)
+                            Text("Paste a published Mapbox Studio style accessible with your public token. Standard is shown until a style is saved.")
+                                .font(.footnote)
                         }
                         if [.standard, .standardSatellite].contains(basemap) {
                             NavigationLink("Labels, theme and colors") {
@@ -138,6 +188,14 @@ struct NavigationMapSettings: View {
                 } header: { Text("Map appearance") } footer: { Text("The display map is shared by iPhone and CarPlay. The traffic overlay shows reported slowdowns.") }
                 if router == "Mapbox Navigator" {
                     Section {
+                        Picker("Routing data", selection: $routeSource) {
+                            Text("Online with offline fallback").tag("Automatic")
+                            Text("Online only").tag("Online")
+                            Text("Downloaded areas only").tag("Offline")
+                        }
+                        Toggle("Use iPhone voices only", isOn: $localVoice)
+                        Toggle("Reroute after a missed turn", isOn: $reroute)
+                        Toggle("Look for faster routes", isOn: $faster)
                         Toggle("Show speed limits", isOn: $speedLimits)
                         Toggle("Show signals and stop signs", isOn: $intersections)
                         Toggle("Use night colors in tunnels", isOn: $darkTunnels)
@@ -163,7 +221,7 @@ struct NavigationMapSettings: View {
             }
             .navigationTitle("Navigation settings").navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
-        }.onAppear { entry = token }
+        }.onAppear { entry = token; styleEntry = studioStyle }
     }
 }
 final class DriveMarkerPerspective: ObservableObject {
@@ -245,6 +303,7 @@ struct MapboxDriveMap: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @AppStorage("navigation.standardOptions") private var styleData = Data()
     @AppStorage("navigation.basemap") private var basemap = GalaxyBasemap.standard
+    @AppStorage("navigation.studioStyle") private var studioStyle = ""
     @AppStorage("navigation.cameraPitch") private var cruisingPitch = 68.0
     @AppStorage("navigation.zoomAdjustment") private var zoomAdjustment = 0.0
     @State private var viewport: Viewport
@@ -356,7 +415,7 @@ struct MapboxDriveMap: View {
                         }
                     }
                 }
-                .mapStyle(BasemapOptions.decode(styleData).style(basemap: basemap, dark: colorScheme == .dark, labels: labels, places: showPlaces, driving: driving))
+                .mapStyle(basemap == .studio ? MapboxMaps.MapStyle(uri: GalaxyBasemap.studioURI(studioStyle) ?? .standard) : BasemapOptions.decode(styleData).style(basemap: basemap, dark: colorScheme == .dark, labels: labels, places: showPlaces, driving: driving))
                 .usesSafeAreaInsetsAsPadding(!anchored)
                 .ornamentOptions(mapOrnaments(headerInset: headerInset, scaleInset: 2 - max(0, phoneSafeTop - bounds.minY), panel: panel))
                 .onCameraChanged { event in

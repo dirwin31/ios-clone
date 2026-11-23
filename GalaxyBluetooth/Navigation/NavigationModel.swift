@@ -1,6 +1,28 @@
 import SwiftUI
 import MapKit
 
+enum ExternalNavigator: String, CaseIterable {
+    case google = "Google Maps app", waze = "Waze app"
+    func directions(to point: CLLocationCoordinate2D) -> URL? {
+        guard CLLocationCoordinate2DIsValid(point) else { return nil }
+        let coordinates = "\(point.latitude),\(point.longitude)"
+        var url = URLComponents()
+        url.scheme = "https"
+        switch self {
+        case .google:
+            url.host = "www.google.com"
+            url.path = "/maps/dir/"
+            url.queryItems = [URLQueryItem(name: "api", value: "1"), URLQueryItem(name: "destination", value: coordinates),
+                              URLQueryItem(name: "travelmode", value: "driving"), URLQueryItem(name: "dir_action", value: "navigate")]
+        case .waze:
+            url.host = "www.waze.com"
+            url.path = "/ul"
+            url.queryItems = [URLQueryItem(name: "ll", value: coordinates), URLQueryItem(name: "navigate", value: "yes")]
+        }
+        return url.url
+    }
+}
+
 struct PhoneRoute {
     struct Step {
         var maneuverType: String? = nil
@@ -67,9 +89,16 @@ extension PhoneRoute {
         url.path = "/directions/v5/mapbox/\(profile)/\(from.longitude),\(from.latitude);\(to.longitude),\(to.latitude)"
         url.queryItems = ["access_token": token, "alternatives": String(alternatives), "steps": "true",
                           "geometries": "geojson", "overview": "full"].map { URLQueryItem(name: $0.key, value: $0.value) }
-        let avoidances = [("navigation.avoidTolls", "toll"), ("navigation.avoidFerries", "ferry"), ("navigation.avoidMotorways", "motorway")]
+        let avoidances = [("navigation.avoidTolls", "toll"), ("navigation.avoidFerries", "ferry"), ("navigation.avoidMotorways", "motorway"),
+                          ("navigation.avoidUnpaved", "unpaved"), ("navigation.avoidCashTolls", "cash_only_tolls")]
             .filter { preferences.bool(forKey: $0.0) }.map { $0.1 }
         if !avoidances.isEmpty { url.queryItems?.append(URLQueryItem(name: "exclude", value: avoidances.joined(separator: ","))) }
+        if preferences.bool(forKey: "navigation.vehicleLimits") {
+            for (field, fallback) in [("max_height", 1.6), ("max_width", 1.9), ("max_weight", 2.5)] {
+                let value = preferences.object(forKey: "navigation." + field) as? Double ?? fallback
+                url.queryItems?.append(.init(name: field, value: String(value)))
+            }
+        }
         guard let endpoint = url.url else { throw URLError(.badURL) }
         let (data, response) = try await URLSession.shared.data(from: endpoint)
         guard (response as? HTTPURLResponse)?.statusCode == 200 else { throw URLError(.badServerResponse) }
@@ -344,6 +373,7 @@ final class NavigationModel: NSObject, ObservableObject, @preconcurrency CLLocat
         onEvent?("Destination selected; busy: \(busy); navigating: \(navigating)")
         guard !navigating, !busy else { onEvent?("Destination selection blocked by current state"); return }
         plannedStart = nil
+        if let preferred = UserDefaults.standard.object(forKey: "navigation.defaultComma") as? Bool { sendToComma = preferred }
         destination = place; routes = []; selectedRoute = 0; notice = ""; error = ""
         camera = .region(MKCoordinateRegion(center: place.coordinate, latitudinalMeters: 2500, longitudinalMeters: 2500))
         if !sendToComma { await calculateRoutes(refresh: false) }
@@ -378,7 +408,8 @@ final class NavigationModel: NSObject, ObservableObject, @preconcurrency CLLocat
         #endif
         onEvent?("Route calculation requested; refresh: \(refresh); destination: \(destination != nil); active: \(foreground); calculating: \(recalculating)")
         guard let destination, foreground, !sendToComma, !commandRunning, !recalculating else { onEvent?("Route calculation skipped by current state"); return }
-        if !refresh, plannedStart == nil, UserDefaults.standard.string(forKey: "navigation.phoneRouter") == "Mapbox Navigator" { return }
+        let preferredRouter = UserDefaults.standard.string(forKey: "navigation.phoneRouter") ?? "Automatic"
+        if !refresh, ExternalNavigator(rawValue: preferredRouter) != nil || (plannedStart == nil && preferredRouter == "Mapbox Navigator") { return }
         let token = UUID(); revision = token
         directions?.cancel()
         recalculating = true

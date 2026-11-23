@@ -1008,6 +1008,12 @@ private struct NavigationDestinationPanel: View {
                 .disabled(navigation.busy || samePlace)
                 Text(connection.connected ? "Your comma will calculate the route." : "Galaxy will send the destination when your comma connects.")
                     .font(.footnote).foregroundStyle(.secondary)
+            } else if let external = ExternalNavigator(rawValue: router), let place = navigation.destination,
+                      let url = external.directions(to: place.coordinate) {
+                Link("Open destination in " + external.rawValue, destination: url)
+                    .buttonStyle(.borderedProminent)
+                Text("The selected service opens with your destination and handles guidance from your location.")
+                    .font(.footnote).foregroundStyle(.secondary)
             } else if router == "Mapbox Navigator" && navigation.plannedStart == nil {
                 Button("Start Mapbox Navigator on iPhone") {
                     guard let place = navigation.destination else { return }
