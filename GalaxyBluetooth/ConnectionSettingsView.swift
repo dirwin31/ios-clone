@@ -34,6 +34,7 @@ struct ConnectionSettingsView: View {
     @State private var showOrder = false
     @State private var showTunnel = false
     @State private var advanced = false
+    @SceneStorage("settings.navigationExpanded") private var navigationExpanded = false
     @SceneStorage("settings.phoneExpanded") private var phoneExpanded = false
     @SceneStorage("settings.galaxyExpanded") private var galaxyExpanded = false
     @SceneStorage("settings.supportExpanded") private var supportExpanded = false
@@ -171,7 +172,6 @@ struct ConnectionSettingsView: View {
                         .scaleEffect(x: 0.62, y: 0.62).frame(width: 164, height: 64)
                 }
             }
-            navigationShortcuts
             let layout = wide ? AnyLayout(HStackLayout(alignment: .top, spacing: 22)) : AnyLayout(VStackLayout(spacing: 20))
             layout {
                 VStack(alignment: .leading, spacing: 12) {
@@ -193,35 +193,6 @@ struct ConnectionSettingsView: View {
         }
         .padding(.horizontal, wide ? 28 : 20).padding(.vertical, 18)
         .frame(maxWidth: wide ? 1100 : 560).frame(maxWidth: .infinity)
-    }
-
-    private var navigationShortcuts: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            if model.navigationEnabled {
-                Button { select(.navigation) } label: {
-                    HStack {
-                        Label("Navigation", systemImage: CompanionTab.navigation.icon).font(.headline)
-                        Spacer()
-                        Image(systemName: "chevron.right").accessibilityHidden(true)
-                    }.frame(minHeight: 44).contentShape(Rectangle())
-                }
-                .accessibilityHint("Opens the navigation map")
-                .accessibilityIdentifier("settings-open-navigation")
-                Divider()
-            }
-            Button { showMapSettings = true } label: {
-                HStack {
-                    Label("Navigation settings", systemImage: "slider.horizontal.3")
-                    Spacer()
-                    Image(systemName: "chevron.right").accessibilityHidden(true)
-                }.frame(minHeight: 44).contentShape(Rectangle())
-            }
-            .accessibilityIdentifier("navigation-map-settings")
-        }
-        .buttonStyle(.plain)
-        .padding(.horizontal, 14)
-        .padding(.vertical, 4)
-        .background(panel, in: RoundedRectangle(cornerRadius: 16))
     }
 
     private var footerLinks: some View {
@@ -483,6 +454,22 @@ struct ConnectionSettingsView: View {
 
     private func preferences() -> some View {
         VStack(spacing: 0) {
+            preferenceSection("Navigation", expanded: $navigationExpanded) {
+                if model.navigationEnabled {
+                    row(CompanionTab.navigation.icon, title: "Navigation map", subtitle: "Choose a destination or return to your trip") {
+                        Button { select(.navigation) } label: { Image(systemName: "chevron.right").frame(width: 44, height: 44) }
+                            .accessibilityLabel("Open navigation map")
+                            .accessibilityIdentifier("settings-open-navigation")
+                    }
+                    separator
+                }
+                row("map", title: "Navigation settings", subtitle: "Choose guidance, maps and route preferences") {
+                    Button { showMapSettings = true } label: { Image(systemName: "chevron.right").frame(width: 44, height: 44) }
+                        .accessibilityLabel("Open navigation settings")
+                        .accessibilityIdentifier("navigation-map-settings")
+                }
+            }
+            separator
             preferenceSection("Phone & alerts", expanded: $phoneExpanded) {
                 toggleRow("arrow.up.forward.app", title: "Open Galaxy after connecting", subtitle: "Switch from Settings when Galaxy is ready", isOn: $autoOpenGalaxy)
                 separator
