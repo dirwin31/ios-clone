@@ -5,7 +5,6 @@ private struct NavigationMapLayer: View {
     @ObservedObject var navigation: NavigationModel
     @AppStorage("navigation.appleStyle") private var appleStyle = GalaxyAppleMap.streets
     let markerPerspective: DriveMarkerPerspective
-    let safeTop: CGFloat
     let headerBottom: CGFloat
     let tripFrame: CGRect
     @AppStorage(NavigationMapPreference.enabledKey) private var useMapbox = true
@@ -14,7 +13,7 @@ private struct NavigationMapLayer: View {
     var body: some View {
         Group {
             if useMapbox && token.hasPrefix("pk.") {
-                MapboxDriveMap(navigation: navigation, token: token, markerPerspective: markerPerspective, tripFrame: tripFrame, headerBottom: headerBottom, phoneSafeTop: safeTop)
+                MapboxDriveMap(navigation: navigation, token: token, markerPerspective: markerPerspective, tripFrame: tripFrame, headerBottom: headerBottom)
                     .ignoresSafeArea(.container, edges: navigation.navigating ? .top : [])
                     .id(token)
             } else if navigation.navigating && navigation.usingComma {
@@ -36,7 +35,7 @@ private struct NavigationMapLayer: View {
                     }
                 }
                 .mapStyle(appleStyle.style)
-                .mapControls { MapCompass(); MapScaleView() }
+                .mapControls { MapCompass() }
                 .onChange(of: navigation.camera.positionedByUser) { _, moved in
                     if moved { navigation.followsUser = false }
                 }
@@ -149,7 +148,7 @@ private struct StandardNavigationHome: View {
     var body: some View {
         GeometryReader { geometry in
             NavigationMapLayer(navigation: navigation, markerPerspective: markerPerspective,
-                               safeTop: geometry.frame(in: .global).minY + geometry.safeAreaInsets.top, headerBottom: headerBottom, tripFrame: tripFrame)
+                               headerBottom: headerBottom, tripFrame: tripFrame)
             .overlay(alignment: .top) {
                 mapHeader.padding(12)
                     .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).maxY } action: { headerBottom = $0 }
@@ -616,7 +615,7 @@ private struct DuoNavigationHome: View {
     var body: some View {
         GeometryReader { geometry in
             NavigationMapLayer(navigation: navigation, markerPerspective: markerPerspective,
-                               safeTop: geometry.frame(in: .global).minY + geometry.safeAreaInsets.top, headerBottom: headerBottom, tripFrame: tripFrame)
+                               headerBottom: headerBottom, tripFrame: tripFrame)
             .modifier(NavigationMapBackground())
             .overlay(alignment: .top) {
                 mapHeader.padding(12)
@@ -923,6 +922,7 @@ private struct QueuedPlaceStatus: View {
 }
 
 private struct NavigationDestinationPanel: View {
+    @AppStorage("navigation.offerPhoneTrip") private var offerPhoneTrip = false
     @AppStorage("navigation.parkedPhonePreview") private var parkedPreview = false
     @AppStorage("navigation.phoneRouter") private var router = "Automatic"
     @AppStorage(NavigationMapPreference.tokenKey) private var mapToken = ""
@@ -1077,6 +1077,13 @@ private struct NavigationDestinationPanel: View {
                     }
                 }
                 if navigation.plannedStart == nil {
+                    if offerPhoneTrip, navigation.route?.commaPreview != nil {
+                        Button("Start this route on comma") {
+                            Task { await navigation.start(connection: connection, phoneRouteOnComma: true) }
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(!connection.connected)
+                    }
                     Button("Start on iPhone") { Task { await navigation.start(connection: connection) } }
                         .buttonStyle(.borderedProminent)
                 } else {

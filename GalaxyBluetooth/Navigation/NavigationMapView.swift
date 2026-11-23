@@ -21,6 +21,7 @@ struct CommaFollowingMap: UIViewRepresentable {
         map.delegate = context.coordinator
         map.showsUserLocation = false
         map.showsCompass = false
+        map.showsScale = false
         map.preferredConfiguration = appleStyle.configuration
         map.appearance = appleStyle
         map.onLayout = { [weak coordinator = context.coordinator] in coordinator?.layoutChanged() }

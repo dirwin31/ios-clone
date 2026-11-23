@@ -1465,6 +1465,7 @@ private final class CompanionCarPlayMap: UIViewController, MKMapViewDelegate {
         view.addSubview(map)
         map.delegate = self
         map.showsCompass = false
+        map.showsScale = false
         map.isRotateEnabled = false
     }
     func update(_ navigation: NavigationModel) {

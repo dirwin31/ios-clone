@@ -493,14 +493,14 @@ final class NavigationModel: NSObject, ObservableObject, @preconcurrency CLLocat
         }
     }
 
-    func start(connection: CommaConnection) async {
+    func start(connection: CommaConnection, phoneRouteOnComma: Bool = false) async {
         onEvent?("Go tapped; comma: \(sendToComma); connected: \(connection.connected); busy: \(busy); navigating: \(navigating); destination: \(destination != nil); route: \(route != nil)")
         guard !busy, !navigating, let destination else { onEvent?("Go blocked by current UI state"); return }
         if plannedStart != nil {
             await preview(from: nil)
             return
         }
-        let useComma = sendToComma
+        let useComma = sendToComma || phoneRouteOnComma
         guard useComma || route != nil else { error = "Get directions on iPhone before starting this route."; return }
         guard useComma || goodLocation != nil else {
             requestLocation()
@@ -533,7 +533,12 @@ final class NavigationModel: NSObject, ObservableObject, @preconcurrency CLLocat
                 let destinationPayload = try NavigationDestination(name: destination.name,
                     latitude: destination.coordinate.latitude, longitude: destination.coordinate.longitude)
                 onEvent?("Destination send requested (details omitted)")
-                _ = try await connection.navigation(.start(destinationPayload)) { sending = true }
+                if phoneRouteOnComma {
+                    guard let data = route?.commaPreview else { throw BridgeError.message("Choose a short Mapbox driving route first.") }
+                    try await connection.startPhoneTrip(destination: destinationPayload, route: data) { sending = true }
+                } else {
+                    _ = try await connection.navigation(.start(destinationPayload)) { sending = true }
+                }
                 guard generation == commandGeneration else { return }
                 onEvent?("Destination confirmed by comma")
                 commaDestination = destination.coordinate; commaIdentity = identity

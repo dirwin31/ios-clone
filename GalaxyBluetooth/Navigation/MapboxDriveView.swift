@@ -124,6 +124,7 @@ struct NavigationMapSettings: View {
     @AppStorage("navigation.sdkIntersections") private var intersections = true
     @AppStorage("navigation.sdkDarkTunnels") private var darkTunnels = true
     @AppStorage("navigation.sdkFadeRoute") private var fadeRoute = true
+    @AppStorage("navigation.offerPhoneTrip") private var offerPhoneTrip = false
     @AppStorage("navigation.parkedPhonePreview") private var parkedPreview = false
     @AppStorage("navigation.defaultComma") private var defaultComma = true
     @AppStorage("navigation.avoidCashTolls") private var cashTolls = false
@@ -234,6 +235,10 @@ struct NavigationMapSettings: View {
         Section {
             NavigationLink("Map, routing and GPS") {
                 CommaNavigationPreferences(connection: model.navigationServices.connection)
+            }
+            Toggle("Offer iPhone routes for comma assistance", isOn: $offerPhoneTrip)
+            if offerPhoneTrip {
+                Text("While parked, choose a Mapbox route on iPhone, then tap Start this route on comma. Your comma tracks the trip using its current assistance settings.").font(.footnote)
             }
             Toggle("Preview iPhone routes with comma", isOn: $parkedPreview)
             if parkedPreview {
@@ -434,7 +439,6 @@ struct MapboxDriveMap: View {
     @Environment(\.layoutDirection) private var layoutDirection
     let markerPerspective: DriveMarkerPerspective
     let carDisplay: CarDisplayMapOptions?
-    let phoneSafeTop: CGFloat
     let headerBottom: CGFloat
     let tripFrame: CGRect
     @Environment(\.colorScheme) private var colorScheme
@@ -461,11 +465,10 @@ struct MapboxDriveMap: View {
     private var following: Bool { carDisplay.map { !$0.overview } ?? navigation.followsUser }
     private var anchored: Bool { driving && following && cameraFix != nil }
 
-    init(navigation: NavigationModel, token: String, markerPerspective: DriveMarkerPerspective, tripFrame: CGRect, headerBottom: CGFloat = 0, phoneSafeTop: CGFloat = 0, carDisplay: CarDisplayMapOptions? = nil) {
+    init(navigation: NavigationModel, token: String, markerPerspective: DriveMarkerPerspective, tripFrame: CGRect, headerBottom: CGFloat = 0, carDisplay: CarDisplayMapOptions? = nil) {
         self.navigation = navigation
         self.markerPerspective = markerPerspective
         self.carDisplay = carDisplay
-        self.phoneSafeTop = phoneSafeTop
         self.headerBottom = headerBottom
         self.tripFrame = tripFrame
         if MapboxOptions.accessToken != token { MapboxOptions.accessToken = token }
@@ -559,7 +562,7 @@ struct MapboxDriveMap: View {
                 }
                 .mapStyle(basemap == .studio ? MapboxMaps.MapStyle(uri: GalaxyBasemap.studioURI(studioStyle) ?? .standard) : BasemapOptions.decode(styleData).style(basemap: basemap, dark: colorScheme == .dark, labels: labels, places: showPlaces, driving: driving))
                 .usesSafeAreaInsetsAsPadding(!anchored)
-                .ornamentOptions(mapOrnaments(headerInset: headerInset, scaleInset: 2 - max(0, phoneSafeTop - bounds.minY), panel: panel))
+                .ornamentOptions(mapOrnaments(headerInset: headerInset, panel: panel))
                 .onCameraChanged { event in
                     if driving && following { markerPerspective.update(Double(event.cameraState.pitch)) }
                 }
@@ -608,10 +611,10 @@ struct MapboxDriveMap: View {
         }
     }
 
-    private func mapOrnaments(headerInset: CGFloat, scaleInset: CGFloat, panel: CGFloat) -> OrnamentOptions {
+    private func mapOrnaments(headerInset: CGFloat, panel: CGFloat) -> OrnamentOptions {
         var options = OrnamentOptions()
+        options.scaleBar.visibility = .hidden
         if let carDisplay {
-            options.scaleBar.visibility = .hidden
             // Leave the screen edges for CarPlay’s dock and zoom buttons.
             let inset: CGFloat = carDisplay.dashboard ? 8 : 52
             let edge: OrnamentPosition = carDisplay.dashboard ? .bottomTrailing : .topTrailing
@@ -621,9 +624,6 @@ struct MapboxDriveMap: View {
             options.logo.position = edge
             options.logo.margins = CGPoint(x: inset + 28, y: y)
         } else {
-            // Scale margins are relative to the native map's safe area. Use the
-            // strip above the maneuver card without changing its layout.
-            options.scaleBar.margins = CGPoint(x: 12, y: driving ? scaleInset : headerInset)
             options.compass.margins = CGPoint(x: 12, y: headerInset)
             options.logo.margins = CGPoint(x: 8, y: panel + 6)
             options.attributionButton.margins = CGPoint(x: 8, y: panel + 6)

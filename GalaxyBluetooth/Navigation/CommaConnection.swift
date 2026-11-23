@@ -72,6 +72,29 @@ final class CommaConnection: ObservableObject {
         }
         return response.bodyData
     }
+    func startPhoneTrip(destination: NavigationDestination, route: Data, willSend: () -> Void) async throws {
+        let before = session
+        guard connected, deviceIdentity != nil, !setupInProgress else { throw BridgeError.message("Connect to your paired comma first.") }
+        let status = try await transport.request(path: "/api/navigation/status", method: "GET", headers: [:], body: Data())
+        guard before == session, status.status == 200,
+              let info = try JSONSerialization.jsonObject(with: status.bodyData) as? [String: Any],
+              info["phoneRouteTripVersion"] as? Int == 1, let revision = info["revision"] as? String else {
+            throw BridgeError.message("Your connected comma needs software that supports starting an iPhone route.")
+        }
+        let body: [String: Any] = ["revision": revision, "phoneRoute": try JSONSerialization.jsonObject(with: route),
+            "destination": ["name": destination.name, "latitude": destination.latitude, "longitude": destination.longitude]]
+        willSend()
+        let reply = try await transport.request(path: "/api/navigation/phone-trip", method: "POST",
+            headers: ["content-type": "application/json"], body: JSONSerialization.data(withJSONObject: body))
+        guard before == session else { throw BridgeError.message("Connection changed. Check the active trip on comma.") }
+        guard reply.status == 200 else {
+            throw BridgeError.message(reply.status == 409 ? "Park and check the current trip before trying again." : "Comma declined the iPhone route (HTTP \(reply.status)).")
+        }
+        struct Receipt: Decodable { let activeRouteSource: String; let destination: NavigationDestination }
+        let receipt = try JSONDecoder().decode(Receipt.self, from: reply.bodyData)
+        guard receipt.activeRouteSource == "iphone", receipt.destination.matches(destination) else { throw NavigationContractError.invalidResponse }
+    }
+
     func commaIsParked() async -> Bool? {
         guard connected else { return nil }
         let before = session
