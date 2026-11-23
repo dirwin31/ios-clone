@@ -53,6 +53,22 @@ __GATE__
     }
 }
 '''.replace('__GATE__', gate)
+acceptance = source[source.index('    private var routeAcceptanceExpiry:'):source.index('\n    }', source.index('    func showRouteAcceptance()')) + 6]
+harness += '''
+@MainActor final class TripNotice {
+    var notice = ""
+''' + acceptance + '''
+}
+'''
+harness = harness.replace('        let connection = Connection(), recovered', '''
+        let success = TripNotice(), ended = TripNotice()
+        success.showRouteAcceptance()
+        ended.showRouteAcceptance()
+        precondition(!success.notice.isEmpty)
+        ended.notice = "Route ended."
+        try await Task.sleep(for: .milliseconds(3200))
+        precondition(success.notice.isEmpty && ended.notice == "Route ended.")
+        let connection = Connection(), recovered''')
 services = Path('GalaxyBluetooth/Navigation/NavigationServices.swift').read_text()
 poll = services[services.index('    private func syncGuidancePolling()'):services.rindex('}')]
 harness += r"""

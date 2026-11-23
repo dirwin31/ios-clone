@@ -168,6 +168,13 @@ final class IntegrationUITests: XCTestCase {
         let field = app.textFields["map-search"]
         XCTAssertTrue(field.waitForExistence(timeout: 20))
         capture("Duo destination planner")
+        app.buttons["Navigation options"].tap()
+        app.buttons["Navigation settings"].tap()
+        XCTAssertTrue(app.navigationBars["Navigation settings"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["navigation-map-appearance"].exists)
+        app.buttons["navigation-distance-units"].tap()
+        app.buttons["Metric"].tap()
+        app.buttons["Done"].tap()
         field.tap()
         field.typeText("Test")
         let result = app.buttons["place-search-result"].firstMatch
@@ -180,6 +187,7 @@ final class IntegrationUITests: XCTestCase {
         XCTAssertTrue(app.frame.contains(directions.frame))
         XCTAssertFalse(app.segmentedControls.buttons["Comma"].exists)
         capture("Duo route preview")
+        XCTAssertTrue(app.buttons["duo-route-0"].label.contains("km"))
         XCUIDevice.shared.orientation = .landscapeLeft
         XCTAssertTrue(app.frame.contains(directions.frame))
         XCTAssertTrue(app.buttons["Close destination"].isHittable)
@@ -196,6 +204,11 @@ final class IntegrationUITests: XCTestCase {
         XCTAssertTrue(app.buttons["End route"].waitForExistence(timeout: 12))
         XCTAssertTrue(app.buttons["Navigation options"].isHittable)
         capture("Duo active guidance")
+        app.buttons["Navigation options"].tap()
+        app.buttons["Navigation settings"].tap()
+        XCTAssertTrue(app.navigationBars["Navigation settings"].waitForExistence(timeout: 5))
+        app.buttons["Done"].tap()
+        XCTAssertTrue(app.buttons["End route"].isHittable)
     }
 
     func testActiveRoutePreview() {

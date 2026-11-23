@@ -14,12 +14,14 @@ struct DuoNavigationHome: View {
     @AppStorage("navigation.parkedPhonePreview") private var parkedPreview = false
     @AppStorage("navigation.phoneRouter") private var router = "Automatic"
     @Environment(\.dynamicTypeSize) private var typeSize
+    @Environment(\.reduceGalacticalMotion) private var reduceMotion
     @FocusState private var searchFocused: Bool
     @State private var query = ""
     @State private var searchingPlaces = false
-    @State private var collapsed = false
+    @State private var collapsed = true
     @State private var expanded = false
     @State private var library = false
+    @State private var showNavigationSettings = false
     @State private var details = false
     @State private var auxiliarySearch: PlaceSearchPurpose?
     @State private var markerPerspective = DriveMarkerPerspective()
@@ -33,13 +35,20 @@ struct DuoNavigationHome: View {
                 drive
             } else {
                 let wide = geo.size.width >= 680 && !typeSize.isAccessibilitySize
-                let layout = wide ? AnyLayout(HStackLayout(spacing: 0)) : AnyLayout(VStackLayout(spacing: 0))
-                layout {
-                    if !wide { planningMap }
-                    planner(wide: wide)
-                        .frame(width: wide ? min(354, geo.size.width * 0.43) : nil,
-                               height: wide ? nil : plannerHeight(geo.size.height))
-                    if wide { planningMap }
+                let width = min(354, geo.size.width * 0.43)
+                let height = min(max(0, geo.size.height - 16), plannerHeight(geo.size.height, wide: wide))
+                let insets = EdgeInsets(top: 0, leading: wide ? width + 20 : 0,
+                                        bottom: wide ? 0 : height + 16, trailing: 0)
+                ZStack(alignment: wide ? .bottomLeading : .bottom) {
+                    NavigationMapLayer(navigation: navigation, markerPerspective: markerPerspective,
+                                       headerBottom: headerBottom, tripFrame: .zero, plannerInsets: insets)
+                        .ignoresSafeArea(.container)
+                    mapButtons.frame(maxHeight: .infinity, alignment: .top)
+                    planner
+                        .frame(width: wide ? width : nil, height: height)
+                        .modifier(DuoMapGlass(radius: 28))
+                        .padding(.horizontal, 10).padding(.vertical, 8)
+                        .animation(reduceMotion ? nil : CompanionMotion.selection, value: collapsed)
                 }
             }
         }
@@ -71,11 +80,13 @@ struct DuoNavigationHome: View {
                 select(saved.navigationPlace(place))
             }
         }
+        .pageSheet(isPresented: $showNavigationSettings) { NavigationMapSettings(model: connection.app) }
     }
 
-    private func plannerHeight(_ available: CGFloat) -> CGFloat {
-        if searchingPlaces { return available * (available < 420 ? 0.94 : 0.72) }
-        if collapsed { return min(available, typeSize.isAccessibilitySize ? 122 : 89) }
+    private func plannerHeight(_ available: CGFloat, wide: Bool) -> CGFloat {
+        if searchingPlaces { return min(available * (wide ? 0.95 : 0.78), 490) }
+        if collapsed { return typeSize.isAccessibilitySize ? 170 : (navigation.destination == nil ? 128 : 89) }
+        if wide { return min(available - 16, 490) }
         if expanded || typeSize.isAccessibilitySize { return available * 0.78 }
         let preview = navigation.destination != nil
         return min(available * (preview ? 0.62 : 0.49), preview ? 364 : (saved.recentDestinations.isEmpty ? 210 : 300))
@@ -86,8 +97,7 @@ struct DuoNavigationHome: View {
                            headerBottom: headerBottom, tripFrame: navigation.navigating ? tripFrame : .zero)
     }
 
-    private var planningMap: some View {
-        map.overlay(alignment: .topTrailing) {
+    private var mapButtons: some View {
             HStack {
                 if #unavailable(iOS 27.1) {
                     CompanionNavigationBar(tab: .navigation, developerMode: connection.app.developerMode,
@@ -98,21 +108,18 @@ struct DuoNavigationHome: View {
                 Button { navigation.followLocation() } label: {
                     Image(systemName: "location.fill").frame(width: 44, height: 44)
                 }
-                .background(.regularMaterial, in: Circle()).accessibilityLabel("Follow my location")
+                .modifier(DuoMapGlass(radius: 22)).accessibilityLabel("Follow my location")
             }
             .padding(10)
             .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).maxY } action: { headerBottom = $0 }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .clipped()
     }
 
-    private func planner(wide: Bool) -> some View {
+    private var planner: some View {
         VStack(alignment: .leading, spacing: 0) {
-            if !wide && !searchingPlaces { handle }
+            if !searchingPlaces { handle }
             if let place = navigation.destination {
                 destinationHeader(place)
-                if wide || !collapsed {
+                if !collapsed {
                     Divider()
                     ScrollView {
                         VStack(alignment: .leading, spacing: 12) {
@@ -131,7 +138,17 @@ struct DuoNavigationHome: View {
                 }
             } else {
                 searchField
-                if wide || !collapsed {
+                if collapsed && !searchingPlaces {
+                    Button {
+                        collapsed = false
+                    } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: "bookmark")
+                            Text("Saved places & recents")
+                            Image(systemName: "chevron.up").font(.caption2.bold())
+                        }.font(.subheadline.weight(.semibold)).frame(maxWidth: .infinity, minHeight: 44)
+                    }
+                } else {
                     ScrollView {
                         VStack(alignment: .leading, spacing: 12) {
                             alerts
@@ -146,11 +163,6 @@ struct DuoNavigationHome: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(Color(uiColor: .systemBackground))
-        .overlay(alignment: wide ? .trailing : .top) {
-            Rectangle().fill(.primary.opacity(0.12))
-                .frame(width: wide ? 1 : nil, height: wide ? nil : 1).allowsHitTesting(false)
-        }
     }
 
     private var handle: some View {
@@ -159,7 +171,7 @@ struct DuoNavigationHome: View {
             expanded = false
         } label: {
             Capsule().fill(.secondary.opacity(0.45)).frame(width: 34, height: 4)
-                .frame(maxWidth: .infinity).frame(height: 25).contentShape(Rectangle())
+                .frame(maxWidth: .infinity).frame(height: 18).contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .highPriorityGesture(DragGesture(minimumDistance: 12).onEnded { value in
@@ -185,7 +197,7 @@ struct DuoNavigationHome: View {
                 }
             }
             .padding(.horizontal, 14).frame(minHeight: 48)
-            .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 15))
+            .background(.primary.opacity(0.065), in: Capsule())
             if searchingPlaces { Button("Cancel", action: finishSearch).font(.subheadline.weight(.semibold)) }
             else { options }
         }
@@ -285,6 +297,7 @@ struct DuoNavigationHome: View {
                 if !place.address.isEmpty { Text(place.address).font(.caption).foregroundStyle(.secondary).lineLimit(1) }
             }
             Spacer(minLength: 0)
+            options
             Button { navigation.clearPreview(); collapsed = false; expanded = false } label: {
                 Image(systemName: "xmark").font(.subheadline.bold()).frame(width: 44, height: 44)
             }.disabled(navigation.busy).accessibilityLabel("Close destination")
@@ -370,7 +383,7 @@ struct DuoNavigationHome: View {
     }
 
     private var drive: some View {
-        map
+        map.ignoresSafeArea(.container)
             .overlay(alignment: .topLeading) {
                 maneuver
                     .frame(maxWidth: 450, alignment: .leading).padding(12)
@@ -391,8 +404,10 @@ struct DuoNavigationHome: View {
                         }.accessibilityElement(children: .combine)
                         Spacer(minLength: 0)
                         Button { Task { await navigation.end(connection: connection) } } label: {
-                            Image(systemName: "stop.fill").foregroundStyle(.red).frame(width: 44, height: 44)
-                                .background(.red.opacity(0.11), in: Circle())
+                            Text(navigation.endingRoute ? "Ending…" : "End")
+                                .font(.subheadline.weight(.semibold)).foregroundStyle(.red)
+                                .padding(.horizontal, 15).frame(minHeight: 44)
+                                .background(.red.opacity(0.10), in: Capsule())
                         }.disabled(navigation.busy).accessibilityLabel(navigation.endingRoute ? "Ending route" : "End route")
                         options
                     }
@@ -400,7 +415,7 @@ struct DuoNavigationHome: View {
                     messages
                 }
                 .padding(.horizontal, 16).padding(.vertical, 12).frame(maxWidth: 440)
-                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 24))
+                .modifier(DuoMapGlass(radius: 24))
                 .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { tripFrame = $0 }
                 .overlay(alignment: .top) { TripBarFollowMarker(markerPerspective: markerPerspective, navigation: navigation) }
                 .padding(12)
@@ -410,6 +425,8 @@ struct DuoNavigationHome: View {
     private var maneuver: some View {
         HStack(spacing: 14) {
             Image(systemName: turnSymbol).font(.system(size: 32, weight: .bold))
+                .contentTransition(reduceMotion ? .identity : .symbolEffect(.replace))
+                .animation(reduceMotion ? nil : CompanionMotion.selection, value: turnSymbol)
                 .foregroundStyle(.white).frame(width: 56, height: 56)
                 .background(.white.opacity(0.16), in: RoundedRectangle(cornerRadius: 16))
             VStack(alignment: .leading, spacing: 3) {
@@ -442,6 +459,7 @@ struct DuoNavigationHome: View {
 
     private var options: some View {
         Menu {
+            Button("Navigation settings", systemImage: "slider.horizontal.3") { showNavigationSettings = true }
             if navigation.navigating {
                 Button("Follow my location", systemImage: "scope") { navigation.followLocation() }
                 Button("Show full route", systemImage: "point.topleft.down.to.point.bottomright.curvepath") { navigation.showOverview() }
@@ -501,6 +519,22 @@ struct DuoNavigationHome: View {
         collapsed = false; expanded = false; details = false
         saved.rememberDestination(place)
         Task { await navigation.select(place) }
+    }
+}
+
+private struct DuoMapGlass: ViewModifier {
+    let radius: CGFloat
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+
+    func body(content: Content) -> some View {
+        let shape = RoundedRectangle(cornerRadius: radius, style: .continuous)
+        if reduceTransparency {
+            content.background(Color(uiColor: .secondarySystemBackground), in: shape)
+        } else if #available(iOS 26.0, *) {
+            content.glassEffect(.regular, in: shape)
+        } else {
+            content.background(.thinMaterial, in: shape)
+        }
     }
 }
 

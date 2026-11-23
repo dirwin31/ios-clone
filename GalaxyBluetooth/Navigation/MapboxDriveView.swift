@@ -141,6 +141,12 @@ struct NavigationMapSettings: View {
     @State private var styleEntry = ""
     @AppStorage("navigation.studioStyle") private var studioStyle = ""
     @State private var entry = ""
+    @State private var initialRouteOptions: [AnyHashable] = []
+    @State private var initialDeviceOptions: [Bool] = []
+
+    private var routeOptions: [AnyHashable] {
+        [router, enabled, token, alternatives, tolls, cashTolls, ferries, motorways, unpaved, limits, height, width, weight]
+    }
 
     private var providerExplanation: String {
         switch router {
@@ -173,7 +179,7 @@ struct NavigationMapSettings: View {
                     settingLink("Map appearance", icon: "map.fill", detail: "Map style, traffic, camera and Mapbox token") {
                         self.appearance
                         self.camera
-                    }
+                    }.accessibilityIdentifier("navigation-map-appearance")
                     downloads
                 }.listRowBackground(menuPanel)
             }
@@ -182,7 +188,20 @@ struct NavigationMapSettings: View {
             .tint(StarPilotTheme.accent)
             .navigationTitle("Navigation settings").navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
-        }.onAppear { entry = token; styleEntry = studioStyle }
+        }.onAppear {
+            entry = token; styleEntry = studioStyle
+            initialRouteOptions = routeOptions
+            initialDeviceOptions = [offerPhoneTrip, defaultComma]
+        }
+        .onDisappear {
+            let nav = model.navigationServices.navigation
+            guard model.navigationEnabled, !nav.navigating, nav.destination != nil else { return }
+            if initialDeviceOptions != [offerPhoneTrip, defaultComma] {
+                Task { await nav.refreshTripPreference() }
+            } else if !nav.sendToComma, routeOptions != initialRouteOptions {
+                Task { await nav.preview(from: nav.plannedStart) }
+            }
+        }
     }
     @Environment(\.colorScheme) private var colorScheme
 
@@ -229,7 +248,7 @@ struct NavigationMapSettings: View {
                 Text("System").tag(NavigationDistanceUnits.system)
                 Text("Metric").tag(NavigationDistanceUnits.metric)
                 Text("Imperial").tag(NavigationDistanceUnits.imperial)
-            }
+            }.accessibilityIdentifier("navigation-distance-units")
             Toggle("Remember destinations", isOn: $remember)
         } header: { Text("Trips") } footer: { Text("Remember destinations saves recent places on this iPhone.") }
     }
@@ -240,7 +259,6 @@ struct NavigationMapSettings: View {
                 CommaNavigationPreferences(connection: model.navigationServices.connection)
             }
             Toggle("Send iPhone routes to comma", isOn: $offerPhoneTrip)
-                .onChange(of: offerPhoneTrip) { _, _ in Task { await model.navigationServices.navigation.refreshTripPreference() } }
             if offerPhoneTrip {
                 Text("Start Route sends your selected iPhone route to the paired comma. This uses Mapbox Driving or Mapbox Traffic and requires a public token. Older comma software requires parking for this handoff.").font(.footnote)
             }
@@ -454,6 +472,7 @@ struct MapboxDriveMap: View {
     let carDisplay: CarDisplayMapOptions?
     let headerBottom: CGFloat
     let tripFrame: CGRect
+    let plannerInsets: EdgeInsets
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @AppStorage("navigation.standardOptions") private var styleData = Data()
@@ -479,12 +498,13 @@ struct MapboxDriveMap: View {
     private var following: Bool { carDisplay.map { !$0.overview } ?? navigation.followsUser }
     private var anchored: Bool { driving && following && cameraFix != nil }
 
-    init(navigation: NavigationModel, token: String, markerPerspective: DriveMarkerPerspective, tripFrame: CGRect, headerBottom: CGFloat = 0, carDisplay: CarDisplayMapOptions? = nil) {
+    init(navigation: NavigationModel, token: String, markerPerspective: DriveMarkerPerspective, tripFrame: CGRect, headerBottom: CGFloat = 0, plannerInsets: EdgeInsets = EdgeInsets(), carDisplay: CarDisplayMapOptions? = nil) {
         self.navigation = navigation
         self.markerPerspective = markerPerspective
         self.carDisplay = carDisplay
         self.headerBottom = headerBottom
         self.tripFrame = tripFrame
+        self.plannerInsets = plannerInsets
         if MapboxOptions.accessToken != token { MapboxOptions.accessToken = token }
         let center = navigation.usingComma ? navigation.commaPosition : navigation.location?.coordinate
         _viewport = State(initialValue: .camera(center: center, zoom: center == nil ? 1 : 16.8, pitch: 55))
@@ -525,7 +545,7 @@ struct MapboxDriveMap: View {
             let top = min(driving ? 190.0 : 90.0, geometry.size.height * 0.32)
             let bounds = geometry.frame(in: .global)
             let phoneInset = driving && !tripFrame.isEmpty ? min(bounds.height, max(0, bounds.maxY - tripFrame.minY)) : 0
-            let panel: CGFloat = carDisplay == nil ? phoneInset : min(65, geometry.size.height * 0.24)
+            let panel: CGFloat = carDisplay == nil ? max(phoneInset, plannerInsets.bottom) : min(65, geometry.size.height * 0.24)
             let headerInset = max(8, headerBottom - bounds.minY + 2)
             let rtl = layoutDirection == .rightToLeft
             let carFrame = CGRect(x: rtl ? geometry.safeAreaInsets.trailing : geometry.safeAreaInsets.leading, y: 0,
@@ -537,7 +557,7 @@ struct MapboxDriveMap: View {
                 y: max(bounds.height * 0.35, bounds.height - panel - (carDisplay == nil ? DrivePositionMarker.barClearance + DrivePositionMarker.diameter / 2 : 10)))
             let dx = 2 * anchor.x - bounds.width, dy = 2 * anchor.y - bounds.height
             let padding = driving ? EdgeInsets(top: max(0, dy), leading: max(0, dx), bottom: max(0, -dy), trailing: max(0, -dx))
-                                  : EdgeInsets(top: top, leading: 0, bottom: panel, trailing: 0)
+                                  : EdgeInsets(top: top, leading: plannerInsets.leading, bottom: panel, trailing: 0)
             TimelineView(.animation(minimumInterval: 1, paused: driving && following)) { clock in
                 MapboxMaps.Map(viewport: $viewport) {
                     if showTraffic {
@@ -647,7 +667,11 @@ struct MapboxDriveMap: View {
                 if !ready && commaTrip { cameraFix = nil }
                 follow(padding: padding)
             }
-            .onChange(of: padding) { _, _ in follow(padding: padding, layoutChanged: true) }
+            .onChange(of: padding) { _, _ in
+                if plannerInsets != EdgeInsets(), navigation.destination != nil {
+                    preview(top: top, bottom: panel, padding: padding)
+                } else { follow(padding: padding, layoutChanged: true) }
+            }
         }
     }
 
@@ -665,7 +689,7 @@ struct MapboxDriveMap: View {
             options.logo.margins = CGPoint(x: inset + 28, y: y)
         } else {
             options.compass.margins = CGPoint(x: 12, y: headerInset)
-            options.logo.margins = CGPoint(x: 8, y: panel + 6)
+            options.logo.margins = CGPoint(x: plannerInsets.leading + 8, y: panel + 6)
             options.attributionButton.margins = CGPoint(x: 8, y: panel + 6)
         }
         return options
@@ -737,14 +761,15 @@ struct MapboxDriveMap: View {
     private func overview(top: CGFloat, bottom: CGFloat) {
         guard let routeShape else { return }
         viewport = .overview(geometry: routeShape,
-                             geometryPadding: .init(top: top + 8, leading: 24, bottom: bottom + 16, trailing: 24))
+                             geometryPadding: .init(top: top + 8, leading: plannerInsets.leading + 24, bottom: bottom + 16, trailing: 24))
     }
 
     private func preview(top: CGFloat, bottom: CGFloat, padding: EdgeInsets) {
         guard !driving else { return }
         if routeShape != nil { overview(top: top, bottom: bottom) }
         else if let destination = navigation.destination {
-            viewport = .camera(center: destination.coordinate, zoom: 16.8, pitch: 50)
+            let camera = Viewport.camera(center: destination.coordinate, zoom: 16.8, pitch: 50)
+            viewport = plannerInsets == EdgeInsets() ? camera : camera.padding(padding)
         } else { follow(padding: padding) }
     }
 }

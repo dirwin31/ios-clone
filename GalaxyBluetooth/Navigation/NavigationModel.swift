@@ -315,6 +315,18 @@ final class NavigationModel: NSObject, ObservableObject, @preconcurrency CLLocat
     @Published var searching = false
     @Published var error = "" { didSet { if oldValue != error { onEvent?(error.isEmpty ? "UI error cleared" : "UI error banner shown (see preceding action)") } } }
     @Published var notice = ""
+    private var routeAcceptanceExpiry: Task<Void, Never>?
+
+    func showRouteAcceptance() {
+        let confirmation = "Your comma accepted the route calculated on iPhone."
+        routeAcceptanceExpiry?.cancel()
+        notice = confirmation
+        routeAcceptanceExpiry = Task { [weak self] in
+            do { try await Task.sleep(for: .seconds(3)) } catch { return }
+            guard let self, self.notice == confirmation else { return }
+            self.notice = ""
+        }
+    }
     @Published var instruction = ""
     @Published var distanceToTurn: CLLocationDistance = 0
     @Published var remainingDistance: CLLocationDistance = 0
@@ -757,7 +769,7 @@ final class NavigationModel: NSObject, ObservableObject, @preconcurrency CLLocat
                 guard generation == commandGeneration else { return }
                 onEvent?("Destination confirmed by comma")
                 commaDestination = destination.coordinate; commaIdentity = identity
-                notice = phoneRouteOnComma ? "Your comma accepted the route calculated on iPhone." : ""
+                if phoneRouteOnComma { showRouteAcceptance() }
             } catch {
                 guard generation == commandGeneration else { return }
                 onEvent?("Go failed; send phase: \(sending); \(LANTransport.failureCode(error))")

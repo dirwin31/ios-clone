@@ -7,13 +7,14 @@ struct NavigationMapLayer: View {
     let markerPerspective: DriveMarkerPerspective
     let headerBottom: CGFloat
     let tripFrame: CGRect
+    var plannerInsets = EdgeInsets()
     @AppStorage(NavigationMapPreference.enabledKey) private var useMapbox = true
     @AppStorage(NavigationMapPreference.tokenKey) private var token = ""
 
     var body: some View {
         Group {
             if useMapbox && token.hasPrefix("pk.") {
-                MapboxDriveMap(navigation: navigation, token: token, markerPerspective: markerPerspective, tripFrame: tripFrame, headerBottom: headerBottom)
+                MapboxDriveMap(navigation: navigation, token: token, markerPerspective: markerPerspective, tripFrame: tripFrame, headerBottom: headerBottom, plannerInsets: plannerInsets)
                     .ignoresSafeArea(.container, edges: navigation.navigating ? .top : [])
                     .id(token)
             } else if navigation.navigating && navigation.usingComma {
@@ -36,6 +37,8 @@ struct NavigationMapLayer: View {
                 }
                 .mapStyle(appleStyle.style)
                 .mapControls { MapCompass() }
+                .safeAreaPadding(.leading, plannerInsets.leading)
+                .safeAreaPadding(.bottom, plannerInsets.bottom)
                 .onChange(of: navigation.camera.positionedByUser) { _, moved in
                     if moved { navigation.followsUser = false }
                 }
@@ -131,6 +134,7 @@ private struct StandardNavigationHome: View {
     var selectAppTab: (CompanionTab) -> Void
     @State private var searchPurpose: PlaceSearchPurpose?
     @State private var showLibrary = false
+    @State private var showNavigationSettings = false
     @State private var markerPerspective = DriveMarkerPerspective()
     @State private var headerBottom: CGFloat = 0
     @State private var tripFrame = CGRect.zero
@@ -228,6 +232,7 @@ private struct StandardNavigationHome: View {
                     selectDestination(saved.navigationPlace(place))
                 }
             }
+            .pageSheet(isPresented: $showNavigationSettings) { NavigationMapSettings(model: connection.app) }
             .onChange(of: navigation.navigating) { _, active in
                 panelLevel = .standard
                 if active {
@@ -277,6 +282,7 @@ private struct StandardNavigationHome: View {
     }
     private var navigationOptions: some View {
         Menu {
+            Button("Navigation settings", systemImage: "slider.horizontal.3") { showNavigationSettings = true }
             Button("Submit report", systemImage: "bubble.left.and.exclamationmark.bubble.right") {
                 submitReport()
             }
