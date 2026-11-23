@@ -95,7 +95,9 @@ final class AppModel: ObservableObject {
         value.onSharingChanged = { [weak self] _ in self?.updateMonitoring() }
         return value
     }()
-    @Published var tab: CompanionTab = .connections
+    @Published var tab: CompanionTab = .connections {
+        didSet { autoOpenGalaxyPending = false }
+    }
     @Published var developerMode = UserDefaults.standard.bool(forKey: "galaxy.app.developerMode") {
         didSet {
             UserDefaults.standard.set(developerMode, forKey: "galaxy.app.developerMode")
@@ -341,7 +343,7 @@ final class AppModel: ObservableObject {
         return candidate
     }
     private var firstConnection: Task<Void, Never>?
-    private var openAfterFirstConnection = false
+    var autoOpenGalaxyPending = true
     private var automaticLAN: Task<Void, Never>?
     private var lanProbeTask: Task<Void, Never>?
     private var lastLANDiscovery = Date.distantPast
@@ -617,7 +619,9 @@ final class AppModel: ObservableObject {
     }
     func openIfReady() {
         if transport.connected { pairingResetNeeded = false }
-        guard wantsConnection, !pairingInProgress, !offerAudioPairing, !showAudioPairing, transport.connected, !opened, !openingGalaxy else { return }
+        guard wantsConnection, !pairingInProgress, !offerAudioPairing, !showAudioPairing, transport.connected else { return }
+        if opened { openGalaxyIfRequested(); return }
+        guard !openingGalaxy else { return }
         openingGalaxy = true
         Task { @MainActor in
             defer { openingGalaxy = false }
@@ -631,25 +635,25 @@ final class AppModel: ObservableObject {
                 guard transport.usesNetwork else { return }
                 assets.inUseRoot = nil
                 opened = true
-                finishFirstConnection()
+                openGalaxyIfRequested()
                 return
             }
             assets.inUseRoot = root
             server.useWebRoot(root)
             opened = true
-            finishFirstConnection()
+            openGalaxyIfRequested()
         }
     }
-    private func finishFirstConnection() {
-        guard openAfterFirstConnection else { return }
-        openAfterFirstConnection = false
+    private func openGalaxyIfRequested() {
+        guard phoneActive, autoOpenGalaxyPending else { return }
+        autoOpenGalaxyPending = false
         if tab == .connections, UserDefaults.standard.object(forKey: AppPreference.openGalaxy) as? Bool != false { tab = .galaxy }
     }
     func disconnect() {
         legacyURL = nil
         automaticLAN?.cancel(); lanProbeTask?.cancel()
         discovery.stop()
-        firstConnection?.cancel(); firstConnection = nil; openAfterFirstConnection = false
+        firstConnection?.cancel(); firstConnection = nil; autoOpenGalaxyPending = false
         tunnelProbeTask?.cancel(); tunnel.invalidate("Disconnected")
         wantsConnection = false; opened = false
         bluetooth.disconnect(reason: "User selected Disconnect"); lan.invalidate(reason: "User selected Disconnect")
@@ -826,8 +830,7 @@ final class AppModel: ObservableObject {
                       self.discovery.devices[0].id == candidate.id,
                       self.discovery.devices[0].address == candidate.address else { return }
                 self.connectionLog.record("First setup: verifying the only discovered comma")
-                self.openAfterFirstConnection = true
-                if !(await self.selectDiscoveredComma(candidate, userSelected: false)) { self.openAfterFirstConnection = false }
+                _ = await self.selectDiscoveredComma(candidate, userSelected: false)
             }
             return
         }
@@ -1086,7 +1089,10 @@ struct GalaxyRootView: View {
             if DuoLayout.isEnabled && page == .navigation { Color.clear }
             else { chromeBackground.ignoresSafeArea() }
         }
-        .onChange(of: page) { _, _ in showingAppTabsInGalaxy = false }
+        .onChange(of: page) { _, current in
+            showingAppTabsInGalaxy = false
+            if current == .galaxy { hasVisitedGalaxy = true }
+        }
         .ignoresSafeArea(.container, edges: editorFocused ? .all : [])
         .statusBarHidden(editorFocused)
         .onChange(of: model.showConnections) { _, show in
@@ -1162,6 +1168,7 @@ struct GalaxyRootView: View {
         }
     }
     private func presentReport() {
+        model.autoOpenGalaxyPending = false
         reportWasSent = false
         discordReport = ReportCapture(logs: captureReportLogs())
     }
@@ -1172,6 +1179,7 @@ struct GalaxyRootView: View {
                     "Galaxy screen updates\n" + model.assets.status].joined(separator: "\n\n")
     }
     private func showAppTabs() {
+        model.autoOpenGalaxyPending = false
         appTabsExpanded = true
         showingAppTabsInGalaxy = true
     }

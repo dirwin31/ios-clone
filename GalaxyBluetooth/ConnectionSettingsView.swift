@@ -42,7 +42,6 @@ struct ConnectionSettingsView: View {
     @State private var showMapSettings = false
     @State private var showPairingHelp = false
     @State private var checked = false
-    @State private var openAfterReconnect = false
     @State private var connectingCommaID: String?
     @State private var showHotspotJoin = false
 
@@ -94,7 +93,8 @@ struct ConnectionSettingsView: View {
     private func settingsContent(wide: Bool) -> some View {
         ScrollView {
             settingsPage(wide: wide)
-        }.scrollBounceBehavior(.basedOnSize).background {
+        }.simultaneousGesture(DragGesture(minimumDistance: 12).onChanged { _ in model.autoOpenGalaxyPending = false })
+        .scrollBounceBehavior(.basedOnSize).background {
             LinearGradient(stops: [
                 .init(color: Color(uiColor: StarPilotTheme.toolbarColor(dark: colorScheme == .dark)), location: 0),
                 .init(color: background, location: 0.22),
@@ -104,10 +104,7 @@ struct ConnectionSettingsView: View {
             .sheet(isPresented: $showMapSettings) {
                 NavigationMapSettings(model: model)
             }
-            .onChange(of: connected) { _, _ in openReconnectedGalaxy() }
-            .onChange(of: pairing) { _, value in if value { openAfterReconnect = false } }
-            .onChange(of: model.opened) { _, _ in openReconnectedGalaxy() }
-            .onChange(of: model.wantsConnection) { _, value in if !value { openAfterReconnect = false } }
+            .onChange(of: pairing) { _, value in if value { model.autoOpenGalaxyPending = false } }
             .sheet(isPresented: $showOrder) {
                 NavigationStack {
                     List {
@@ -145,7 +142,7 @@ struct ConnectionSettingsView: View {
             } message: { Text("This removes the saved app pairing. Pair your phone again to reconnect.") }
             .confirmationDialog("Reset app pairing and reconnect?", isPresented: $confirmPairingReset, titleVisibility: .visible) {
                 Button("Reset pairing and find comma", role: .destructive) {
-                    openAfterReconnect = false
+                    model.autoOpenGalaxyPending = false
                     model.resetPairingForReconnect()
                 }
             } message: {
@@ -182,8 +179,10 @@ struct ConnectionSettingsView: View {
                     Text("Connection").font(.title3.bold()).accessibilityAddTraits(.isHeader)
                     connectionModePanel
                     connectionExtras
+                        .simultaneousGesture(TapGesture().onEnded { model.autoOpenGalaxyPending = false })
                     Text("Preferences").font(.title3.bold()).accessibilityAddTraits(.isHeader).padding(.top, 8)
                     preferences()
+                        .simultaneousGesture(TapGesture().onEnded { model.autoOpenGalaxyPending = false })
                 }.frame(maxWidth: .infinity)
             }
             Divider()
@@ -234,12 +233,6 @@ struct ConnectionSettingsView: View {
             }.tint(accent).padding(.horizontal, 14).padding(.vertical, 7).background(panel, in: RoundedRectangle(cornerRadius: 16))
                 .overlay(RoundedRectangle(cornerRadius: 16).stroke(accent.opacity(0.16)))
         }
-    }
-
-    private func openReconnectedGalaxy() {
-        guard openAfterReconnect, !pairing, connected, model.opened else { return }
-        openAfterReconnect = false
-        if autoOpenGalaxy { select(.galaxy) }
     }
 
     private var connectionModePanel: some View {
@@ -294,9 +287,9 @@ struct ConnectionSettingsView: View {
                         discovery.devices.count == 1, let device = discovery.devices.first {
                     connectToDiscoveredComma(device)
                 } else {
-                    openAfterReconnect = true
+                    model.autoOpenGalaxyPending = true
                     model.connect()
-                    openReconnectedGalaxy()
+                    model.openIfReady()
                 }
             } label: {
                 HStack(spacing: 7) {
@@ -385,13 +378,11 @@ struct ConnectionSettingsView: View {
     private func connectToDiscoveredComma(_ device: DiscoveredComma) {
         guard connectingCommaID == nil, !model.selectingDiscoveredComma else { return }
         connectingCommaID = device.id
-        openAfterReconnect = true
+        model.autoOpenGalaxyPending = true
         Task { @MainActor in
             defer { connectingCommaID = nil }
-            if await model.selectDiscoveredComma(device) {
-                openReconnectedGalaxy()
-            } else {
-                openAfterReconnect = false
+            if !(await model.selectDiscoveredComma(device)) {
+                model.autoOpenGalaxyPending = false
                 if device.address == "172.31.254.1" { showHotspotJoin = true }
             }
         }
