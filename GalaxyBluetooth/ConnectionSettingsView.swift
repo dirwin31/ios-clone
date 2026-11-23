@@ -233,7 +233,7 @@ struct ConnectionSettingsView: View {
                     openURL(url) { accepted in if !accepted { model.legacyMessage = "Couldn’t open your browser. Try again." } }
                 } }
             }.disabled(model.loadingLegacyURL || pairing)
-            Link("Support", destination: URL(string: "https://wiki.firestar.link/ticketsystem/")!)
+            Link("Comma device support", destination: URL(string: "https://wiki.firestar.link/ticketsystem/")!)
             Link("Privacy", destination: URL(string: "https://github.com/natehuby76/starpilot-galaxy-ios/blob/ios-companion-release/docs/privacy.md")!)
         }.font(.system(size: 12)).frame(minHeight: 44)
     }
