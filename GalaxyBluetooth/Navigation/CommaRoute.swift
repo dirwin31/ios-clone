@@ -67,6 +67,12 @@ struct CommaRouteSnapshot: Decodable {
     let polyline6: String?
     let instruction: CommaInstruction?
     let error: String?
+    var phoneTripOnroad = false
+    var routeUnavailable = false
+    func needsPhoneReroute(for revision: String, offRouteSamples: Int) -> Bool {
+        ready && phoneTripOnroad && phoneTripRevision == revision &&
+            (routeUnavailable || (status == "active" && offRouteSamples >= 3))
+    }
     var phoneTripRevision: String? = nil
     var bluetoothDispatchDate: Date? = nil
     var routePoints: [RoutePoint]? = nil

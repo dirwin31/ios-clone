@@ -2,11 +2,6 @@ import Foundation
 import Combine
 import CryptoKit
 
-struct PhoneTripRejection: LocalizedError {
-    let message: String
-    var errorDescription: String? { message }
-}
-
 /// Navigation adapter only. Pairing, reconnects, GPS uploads and BLE ownership stay in AppModel.
 @MainActor
 final class CommaConnection: ObservableObject {
@@ -86,33 +81,18 @@ final class CommaConnection: ObservableObject {
               info["phoneRouteTripVersion"] as? Int == 1, let revision = info["revision"] as? String else {
             throw BridgeError.message("Your connected comma needs software that supports starting an iPhone route.")
         }
-        let body: [String: Any] = ["revision": revision, "phoneRoute": try JSONSerialization.jsonObject(with: route),
-            "destination": ["name": destination.name, "latitude": destination.latitude, "longitude": destination.longitude]]
-        willSend()
-        let reply = try await transport.request(path: "/api/navigation/phone-trip", method: "POST",
-            headers: ["content-type": "application/json"], body: JSONSerialization.data(withJSONObject: body))
-        guard before == session else { throw BridgeError.message("Connection changed. Check the active trip on comma.") }
-        guard reply.status == 200 else {
-            let detail = try? JSONSerialization.jsonObject(with: reply.bodyData) as? [String: Any]
-            let reason = detail?["error"] as? String ?? ""
-            if reply.status == 409 {
-                if detail?["code"] as? String == "trip_changed" || reason.hasPrefix("Navigation changed") {
-                    throw PhoneTripRejection(message: "The active trip changed. Review the route and send it again.")
-                }
-                if reason.hasPrefix("Park and reconnect"), info["phoneRouteTripOnroad"] as? Bool != true {
-                    throw PhoneTripRejection(message: "This comma software accepts iPhone routes while parked. For on-road handoff, update the comma to a version that supports it.")
-                }
-                throw PhoneTripRejection(message: "The comma declined this trip. Refresh the route and try again.")
-            }
-            if reply.status == 400 {
-                throw PhoneTripRejection(message: "The comma could not use this route. Check its navigation setup and choose a fresh route from your current location.")
-            }
-            throw BridgeError.message("Comma returned HTTP \(reply.status) for the iPhone route.")
-        }
-        struct Receipt: Decodable { let revision: String; let activeRouteSource: String; let destination: NavigationDestination }
-        let receipt = try JSONDecoder().decode(Receipt.self, from: reply.bodyData)
-        guard receipt.activeRouteSource == "iphone", !receipt.revision.isEmpty, receipt.destination.matches(destination) else { throw NavigationContractError.invalidResponse }
-        return receipt.revision
+        return try await sendPhoneTrip(destination: destination, route: route, revision: revision,
+                                       supportsOnroad: info["phoneRouteTripOnroad"] as? Bool == true, willSend: willSend)
+    }
+
+    // The server atomically checks this revision. A reroute must use the revision
+    // acknowledged for our trip, even if another device has since selected a route.
+    func sendPhoneTrip(destination: NavigationDestination, route: Data, revision: String, supportsOnroad: Bool, willSend: () -> Void = {}) async throws -> String {
+        let before = session
+        guard connected, deviceIdentity != nil, !setupInProgress else { throw BridgeError.message("Reconnect to your paired comma.") }
+        return try await NativeNavigationAPI.sendPhoneTrip(destination: destination, route: route, revision: revision,
+                                                           supportsOnroad: supportsOnroad, transport: transport, willSend: willSend,
+                                                           stillCurrent: { self.session == before && self.connected })
     }
 
     func commaIsParked() async -> Bool? {

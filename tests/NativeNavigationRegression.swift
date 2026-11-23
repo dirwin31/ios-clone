@@ -16,6 +16,16 @@ import Foundation
             afterRead?()
             return make(200, data)
         }
+        if path == "/api/navigation/phone-trip" {
+            precondition(method == "POST")
+            let payload = try JSONSerialization.jsonObject(with: body) as! [String: Any]
+            writes.append(payload)
+            guard payload["revision"] as? String == response["revision"] as? String else { return make(409, Data()) }
+            response["activeRouteSource"] = "iphone"
+            response["revision"] = "replacement"
+            response["destination"] = payload["destination"]
+            return make(200, try JSONSerialization.data(withJSONObject: response))
+        }
         precondition(method == "POST" && path == "/api/navigation/action")
         let payload = try JSONSerialization.jsonObject(with: body) as! [String: Any]
         writes.append(payload)
@@ -46,6 +56,34 @@ import Foundation
         handoff["activeRouteSource"] = "iphone"
         let phoneFeed = try NativeNavigationAPI.snapshot(JSONSerialization.data(withJSONObject: handoff))
         precondition(phoneFeed.phoneTripRevision == "a")
+        handoff["status"] = "routeUnavailable"
+        handoff["phoneRouteTripOnroad"] = true
+        handoff["destination"] = ["name": "Trip", "latitude": 43, "longitude": -80] as [String: Any]
+        let missed = try NativeNavigationAPI.snapshot(JSONSerialization.data(withJSONObject: handoff))
+        precondition(missed.needsPhoneReroute(for: "a", offRouteSamples: 0))
+        precondition(!missed.needsPhoneReroute(for: "new trip", offRouteSamples: 10))
+        precondition(!legacyFeed.needsPhoneReroute(for: "a", offRouteSamples: 10))
+        handoff["phoneRouteTripOnroad"] = false
+        let parkedOnly = try NativeNavigationAPI.snapshot(JSONSerialization.data(withJSONObject: handoff))
+        precondition(!parkedOnly.needsPhoneReroute(for: "a", offRouteSamples: 10))
+        let peer = NativeComma()
+        let target = try NavigationDestination(name: "Test", latitude: 43, longitude: -80)
+        let body = Data("{}".utf8)
+        let replacement = try await NativeNavigationAPI.sendPhoneTrip(destination: target, route: body, revision: "a",
+            supportsOnroad: true, transport: peer, stillCurrent: { true })
+        precondition(replacement == "replacement" && peer.writes.count == 1)
+        do {
+            _ = try await NativeNavigationAPI.sendPhoneTrip(destination: target, route: body, revision: "a",
+                supportsOnroad: true, transport: peer, stillCurrent: { true })
+            preconditionFailure("Replaced a different trip")
+        } catch is PhoneTripRejection { }
+        precondition(peer.writes.count == 2 && peer.reads.isEmpty, "A conflict must never refresh and replay the write")
+        do {
+            _ = try await NativeNavigationAPI.sendPhoneTrip(destination: target, route: body, revision: replacement,
+                supportsOnroad: true, transport: peer, stillCurrent: { false })
+            preconditionFailure("A cancelled trip was sent")
+        } catch is CancellationError { }
+        precondition(peer.writes.count == 2)
         let straight = [RoutePoint(latitude: 43, longitude: -80), RoutePoint(latitude: 43.01, longitude: -80)]
         let beside = RoutePoint(latitude: 43.005, longitude: -79.9999)
         let aligned = NavigationMapMotion.routeAligned(beside, route: straight)

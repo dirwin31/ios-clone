@@ -335,6 +335,7 @@ final class CarPlaySceneDelegate: NSObject, CPTemplateApplicationSceneDelegate, 
         nav.checkCommaFreshness()
         mapController?.update(nav)
         let status: String? = !nav.navigating ? "Trip ended" :
+            nav.reroutingPhoneTrip && !nav.commaFeedReady ? "Rerouting…" :
             nav.usingComma && !nav.commaFeedReady ? "Waiting for comma" :
             (nav.usingComma ? nav.commaPosition == nil : nav.goodLocation == nil) ? "Waiting for GPS" : nil
         if template.trailingNavigationBarButtons.first?.title != status {
@@ -344,12 +345,19 @@ final class CarPlaySceneDelegate: NSObject, CPTemplateApplicationSceneDelegate, 
                 }]
             } ?? []
         }
-        guard nav.navigating, let destination = nav.destination,
-              nav.usingComma ? nav.commaFeedReady : nav.goodLocation != nil else {
+        guard nav.navigating, let destination = nav.destination else {
             stopGuidance()
             return
         }
         let key = "\(destination.coordinate.latitude),\(destination.coordinate.longitude)"
+        guard nav.usingComma ? nav.commaFeedReady : nav.goodLocation != nil else {
+            if tripDestination != key { stopGuidance() }
+            else if maneuver != nil {
+                navigationSession?.upcomingManeuvers = []
+                maneuver = nil
+            }
+            return
+        }
         if tripDestination != key || navigationSession == nil {
             stopGuidance()
             let origin = nav.usingComma ? nav.commaPosition : nav.goodLocation?.coordinate

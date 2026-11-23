@@ -185,7 +185,7 @@ struct CommaFollowingMap: UIViewRepresentable {
                     distanceToTurn: navigation.distanceToTurn)
                 origin = displayed ?? point; target = point
                 originHeading = heading
-                targetHeading = NavigationMapMotion.heading(from: heading, to: navigation.commaHeading, fraction: 1)
+                targetHeading = navigation.commaHeading >= 0 ? navigation.commaHeading : heading
                 let jump = displayed.map {
                     CLLocation(latitude: $0.latitude, longitude: $0.longitude)
                         .distance(from: CLLocation(latitude: point.latitude, longitude: point.longitude))

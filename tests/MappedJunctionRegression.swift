@@ -17,10 +17,24 @@ struct MappedJunctionRegression {
         }
         func fix(_ lat: Double, _ lon: Double = -80, course: Double = 0, age: Double = 0, accuracy: Double = 5) -> CLLocation {
             CLLocation(coordinate: CLLocationCoordinate2D(latitude: lat, longitude: lon), altitude: 0,
-                       horizontalAccuracy: accuracy, verticalAccuracy: 5, course: course, speed: 9,
+                       horizontalAccuracy: accuracy, verticalAccuracy: 5, course: course, courseAccuracy: 10, speed: 9, speedAccuracy: 1,
                        timestamp: Date().addingTimeInterval(-age))
         }
         let route = try decode([sign, light, sign, "malformed"] as [Any])
+        for bearing in [nil, 0, 270] as [Int?] {
+            let url = try PhoneRoute.mapboxURL(from: fix(43).coordinate, to: fix(43.002).coordinate, alternatives: false,
+                                              token: "test", bearing: bearing)
+            let query = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems
+            let value = query?.first { $0.name == "bearings" }?.value
+            precondition(value == bearing.map { "\($0),45;" })
+        }
+        precondition(PhoneRoute.movingCourse(fix(43.0005, course: 359.8)) == 0)
+        precondition(PhoneRoute.movingCourse(fix(43.0005, age: 6)) == nil)
+        precondition(PhoneRoute.movingCourse(fix(43.0005, accuracy: 50)) == nil)
+        precondition(!route.offCourse(at: fix(43.0005)))
+        precondition(route.offCourse(at: fix(43.0005, course: 180)), "Reversing along the line must trigger rerouting")
+        precondition(route.offCourse(at: fix(43.0005, -80.002)))
+        precondition(!route.offCourse(at: fix(43.0005, -80.002, age: 10)))
         precondition(route.junctions.count == 1)
         let observed = route.upcomingJunction(at: fix(43.0005))
         precondition(observed?.labels == "stop sign, traffic light")
