@@ -36,6 +36,7 @@ struct PhoneRoute {
     let expectedTravelTime: Double
     let polyline: MKPolyline
     let steps: [Step]
+    var commaPreview: Data? = nil
 }
 
 extension PhoneRoute {
@@ -66,6 +67,7 @@ extension PhoneRoute {
                 let geometry: Geometry
                 let distance: Double
                 let maneuver: Maneuver
+                let duration: Double
             }
             let steps: [Segment]
             let summary: String
@@ -110,8 +112,20 @@ extension PhoneRoute {
                 Step(maneuverType: next.maneuver.type, modifier: next.maneuver.modifier,
                      instructions: next.maneuver.instruction, distance: current.distance, polyline: try current.geometry.line())
             }
+            var preview: Data?
+            if route.legs.count == 1, route.geometry.coordinates.count <= 1500, segments.count <= 256 {
+                let maneuvers: [[String: Any]] = segments.map { segment in
+                    ["distance": segment.distance, "duration": segment.duration,
+                     "maneuver": ["instruction": segment.maneuver.instruction, "type": segment.maneuver.type ?? "unknown",
+                                  "modifier": segment.maneuver.modifier ?? "none"]]
+                }
+                let document: [String: Any] = ["geometry": ["coordinates": route.geometry.coordinates],
+                    "distance": route.distance, "duration": route.duration, "legs": [["steps": maneuvers]]]
+                if let encoded = try? JSONSerialization.data(withJSONObject: ["version": 1, "route": document]),
+                   encoded.count <= 65536 { preview = encoded }
+            }
             return PhoneRoute(name: route.legs.map(\.summary).joined(separator: ", "), distance: route.distance,
-                             expectedTravelTime: route.duration, polyline: try route.geometry.line(), steps: steps)
+                             expectedTravelTime: route.duration, polyline: try route.geometry.line(), steps: steps, commaPreview: preview)
         }
     }
 }

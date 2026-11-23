@@ -124,6 +124,7 @@ struct NavigationMapSettings: View {
     @AppStorage("navigation.sdkIntersections") private var intersections = true
     @AppStorage("navigation.sdkDarkTunnels") private var darkTunnels = true
     @AppStorage("navigation.sdkFadeRoute") private var fadeRoute = true
+    @AppStorage("navigation.parkedPhonePreview") private var parkedPreview = false
     @AppStorage("navigation.defaultComma") private var defaultComma = true
     @AppStorage("navigation.avoidCashTolls") private var cashTolls = false
     @AppStorage("navigation.avoidUnpaved") private var unpaved = false
@@ -174,6 +175,11 @@ struct NavigationMapSettings: View {
                 Section {
                     NavigationLink("Comma navigation settings") {
                         CommaNavigationPreferences(connection: model.navigationServices.connection)
+                    }
+                    Toggle("Preview iPhone routes with comma", isOn: $parkedPreview)
+                    if parkedPreview {
+                        Text("While parked, choose a short Mapbox Driving or Traffic route on iPhone. Tap Preview with comma to see the route your comma reads back. This test requires compatible firmware and leaves driving assistance unchanged.")
+                            .font(.footnote)
                     }
                 } footer: { Text("Choose the map, directions provider and GPS source used by your comma. These settings are saved on the device. Sharing iPhone GPS supplies your position. The comma still calculates its own turns.") }
                 Section {

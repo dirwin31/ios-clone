@@ -923,6 +923,7 @@ private struct QueuedPlaceStatus: View {
 }
 
 private struct NavigationDestinationPanel: View {
+    @AppStorage("navigation.parkedPhonePreview") private var parkedPreview = false
     @AppStorage("navigation.phoneRouter") private var router = "Automatic"
     @AppStorage(NavigationMapPreference.tokenKey) private var mapToken = ""
     @State private var navigatorTrip: NavigatorTrip?
@@ -1057,6 +1058,14 @@ private struct NavigationDestinationPanel: View {
                     }.buttonStyle(.plain)
                     .accessibilityAddTraits(navigation.selectedRoute == index ? .isSelected : [])
                 }
+                if parkedPreview, let selected = navigation.route {
+                    if let body = selected.commaPreview {
+                        ParkedPhoneRoutePreview(bodyData: body, connection: connection)
+                            .id(body)
+                    } else {
+                        Text("Preview with comma supports short Mapbox Driving and Traffic routes.").font(.footnote)
+                    }
+                }
                 if navigation.plannedStart == nil {
                     Button("Start on iPhone") { Task { await navigation.start(connection: connection) } }
                         .buttonStyle(.borderedProminent)
@@ -1080,5 +1089,73 @@ private struct NavigationMapBackground: ViewModifier {
                     .allowsHitTesting(false)
                     .accessibilityHidden(true)
             }
+    }
+}
+
+private struct ParkedPhoneRoutePreview: View {
+    let bodyData: Data
+    @ObservedObject var connection: CommaConnection
+    @State private var loading = false
+    @State private var message = ""
+    @State private var preview: Reply?
+    private struct Reply: Decodable, Identifiable {
+        struct Point: Decodable { let latitude, longitude: Double }
+        let version, steps: Int
+        let points: [Point]
+        let firstInstruction: String
+        var id: Int { version }
+    }
+
+    var body: some View {
+        VStack {
+            Button(loading ? "Checking route…" : "Preview with comma") {
+                Task { await check() }
+            }
+            .disabled(loading || !connection.connected)
+            if !connection.connected { Text("Connect to your parked comma to preview this route.").font(.footnote) }
+            if !message.isEmpty { Text(message).font(.footnote) }
+        }.sheet(item: $preview) { reply in
+            NavigationStack {
+                VStack {
+                    Map {
+                        MapPolyline(coordinates: reply.points.map { CLLocationCoordinate2D(latitude: $0.latitude, longitude: $0.longitude) })
+                            .stroke(.purple, lineWidth: 5)
+                    }
+                    Text("Comma read \(reply.steps) route steps.").font(.headline)
+                    if !reply.firstInstruction.isEmpty { Text(reply.firstInstruction) }
+                    Text("Parked preview only").font(.footnote)
+                }
+                .navigationTitle("Route from comma")
+                .toolbar { Button("Done") { preview = nil } }
+            }
+        }
+    }
+
+    @MainActor private func check() async {
+        guard !loading else { return }
+        loading = true
+        message = ""
+        defer { loading = false }
+        let before = connection.session
+        do {
+            _ = try await connection.ensureDeviceIdentity()
+            guard connection.session == before else { throw BridgeError.message("Connection changed.") }
+            let status = try await connection.transport.request(path: "/api/navigation/status", method: "GET", headers: [:], body: Data())
+            guard status.status == 200, connection.session == before else { throw BridgeError.message("Couldn’t verify your comma.") }
+            let fields = try JSONSerialization.jsonObject(with: status.bodyData) as? [String: Any]
+            guard fields?["phoneRoutePreviewVersion"] as? Int == 1 else {
+                throw BridgeError.message("This comma firmware does not support iPhone route previews.")
+            }
+            let response = try await connection.transport.request(path: "/api/navigation/phone-preview", method: "POST",
+                headers: ["content-type": "application/json"], body: bodyData)
+            guard connection.session == before else { throw BridgeError.message("Connection changed. Try the preview again.") }
+            guard response.status == 200 else { throw BridgeError.message(response.status == 409 ? "Park and reconnect to preview the route." : "Comma could not preview this route (HTTP \(response.status)).") }
+            let reply = try JSONDecoder().decode(Reply.self, from: response.bodyData)
+            guard reply.version == 1, (1...256).contains(reply.steps), (2...512).contains(reply.points.count),
+                  reply.points.allSatisfy({ CLLocationCoordinate2DIsValid(.init(latitude: $0.latitude, longitude: $0.longitude)) }) else {
+                throw BridgeError.message("Comma returned an incomplete preview.")
+            }
+            preview = reply
+        } catch { message = error.localizedDescription }
     }
 }
