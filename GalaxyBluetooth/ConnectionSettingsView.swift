@@ -169,7 +169,7 @@ struct ConnectionSettingsView: View {
                 Spacer(minLength: 0)
                 if !dynamicTypeSize.isAccessibilitySize {
                     ConnectionOrbit(route: connected ? model.transport.label : "", pairing: pairing)
-                        .scaleEffect(0.62).frame(width: 164, height: 64)
+                        .scaleEffect(x: 0.62, y: 0.62).frame(width: 164, height: 64)
                 }
             }
             let layout = wide ? AnyLayout(HStackLayout(alignment: .top, spacing: 22)) : AnyLayout(VStackLayout(spacing: 20))

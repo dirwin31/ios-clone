@@ -55,7 +55,7 @@ struct OfflineNavigationAreas: View {
         .alert("Remove saved area?", isPresented: Binding(get: { removal != nil }, set: { if !$0 { removal = nil } })) {
             Button("Remove", role: .destructive) {
                 if let removal {
-                    TileStore.default.removeTileRegion(forId: removal) { result in
+                    TileStore.default.removeRegion(forId: removal) { result in
                         DispatchQueue.main.async {
                             if case let .failure(error) = result { status = error.localizedDescription }
                             reload()

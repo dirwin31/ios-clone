@@ -25,6 +25,44 @@ private enum PointLabels: String {
 }
 
 
+private enum DriveRouteColor: String, CaseIterable {
+    case purple, blue, orange, yellow, teal, white
+    var color: UIColor {
+        switch self {
+        case .purple: StarPilotTheme.routePurple
+        case .blue: .systemBlue
+        case .orange: .systemOrange
+        case .yellow: .systemYellow
+        case .teal: .systemTeal
+        case .white: .white
+        }
+    }
+}
+
+private struct RouteLineSettings: View {
+    @AppStorage("navigation.routeColor") private var color = DriveRouteColor.purple
+    @AppStorage("navigation.routeWidth") private var width = 7.0
+    @AppStorage("navigation.routeBorder") private var border = 1.0
+    @AppStorage("navigation.routeOcclusion") private var occlusion = 0.28
+    var body: some View {
+        Form {
+            Section("Route appearance") {
+                Picker("Line color", selection: $color) {
+                    ForEach(DriveRouteColor.allCases, id: \.self) { Text($0.rawValue.capitalized).tag($0) }
+                }
+                Stepper("Line width · \(width.formatted()) pt", value: $width, in: 2...14, step: 0.5)
+                Stepper("Outline width · \(border.formatted()) pt", value: $border, in: 0...4, step: 0.5)
+            }
+            Section {
+                LabeledContent("Visibility", value: occlusion.formatted(.percent))
+                Slider(value: $occlusion, in: 0...1).accessibilityLabel("Route visibility behind buildings")
+            } header: { Text("Behind buildings") } footer: {
+                Text("Increase visibility to see more of your route where a 3D building covers the road during guidance.")
+            }
+            Button("Restore route appearance") { color = .purple; width = 7; border = 1; occlusion = 0.28 }
+        }.navigationTitle("Route line")
+    }
+}
 enum GalaxyAppleMap: String, CaseIterable {
     case streets = "Street map", hybrid = "Satellite with labels", imagery = "Satellite imagery"
     var style: MapKit.MapStyle {
@@ -117,6 +155,11 @@ struct NavigationMapSettings: View {
                     Toggle("Remember destinations", isOn: $remember)
                 } header: { Text("Trips") } footer: { Text("Recents are stored on this iPhone.") }
                 Section {
+                    NavigationLink("Comma navigation settings") {
+                        CommaNavigationPreferences(connection: model.navigationServices.connection)
+                    }
+                } footer: { Text("Read and change the settings stored on your paired comma over the active connection.") }
+                Section {
                     Picker("Directions provider", selection: $router) {
                         ForEach(["Automatic", "Apple Maps", "Mapbox Driving", "Mapbox Traffic", "Mapbox Navigator"] + ExternalNavigator.allCases.map(\.rawValue), id: \.self) { Text($0).tag($0) }
                     }
@@ -183,6 +226,7 @@ struct NavigationMapSettings: View {
                                     set: { if let data = try? JSONEncoder().encode($0) { styleData = data } }))
                             }
                         }
+                        NavigationLink("Route line") { RouteLineSettings() }
                         Toggle("Show traffic congestion", isOn: $traffic)
                     }
                 } header: { Text("Map appearance") } footer: { Text("The display map is shared by iPhone and CarPlay. The traffic overlay shows reported slowdowns.") }
@@ -304,6 +348,10 @@ struct MapboxDriveMap: View {
     @AppStorage("navigation.standardOptions") private var styleData = Data()
     @AppStorage("navigation.basemap") private var basemap = GalaxyBasemap.standard
     @AppStorage("navigation.studioStyle") private var studioStyle = ""
+    @AppStorage("navigation.routeColor") private var routeColor = DriveRouteColor.purple
+    @AppStorage("navigation.routeWidth") private var routeWidth = 7.0
+    @AppStorage("navigation.routeBorder") private var routeBorder = 1.0
+    @AppStorage("navigation.routeOcclusion") private var occlusion = 0.28
     @AppStorage("navigation.cameraPitch") private var cruisingPitch = 68.0
     @AppStorage("navigation.zoomAdjustment") private var zoomAdjustment = 0.0
     @State private var viewport: Viewport
@@ -383,10 +431,10 @@ struct MapboxDriveMap: View {
                         GeoJSONSource(id: "galaxy-route").data(.geometry(.lineString(routeShape)))
                         LineLayer(id: "galaxy-selected-route", source: "galaxy-route")
                             .slot(.middle).lineCap(.round).lineJoin(.round)
-                            .lineOcclusionOpacity(driving ? 0.28 : 0)
-                            .lineColor(StarPilotTheme.routePurple).lineWidth(7)
+                            .lineOcclusionOpacity(driving ? occlusion : 0)
+                            .lineColor(routeColor.color).lineWidth(routeWidth)
                             .lineBorderColor(UIColor(red: 0.27, green: 0.08, blue: 0.43, alpha: 1))
-                            .lineBorderWidth(1).lineEmissiveStrength(1)
+                            .lineBorderWidth(routeBorder).lineEmissiveStrength(1)
                     }
                     if let destination = navigation.destination {
                         GeoJSONSource(id: "galaxy-destination")
@@ -708,6 +756,128 @@ private struct StandardMapSettings: View {
                 Button { settings.colors.removeValue(forKey: key) } label: { Image(systemName: "arrow.uturn.backward") }
                     .buttonStyle(.borderless).accessibilityLabel("Restore theme color for " + title)
             }
+        }
+    }
+}
+
+private struct CommaNavigationPreferences: View {
+    let connection: CommaConnection
+
+    private struct Snapshot: Decodable {
+        let revision: String
+        let mapProvider, routeProvider, gpsSource: String
+        let avoidHighways, avoidTolls, avoidFerries: Bool
+        let hasKey, hasGoogleKey, enabled: Bool
+        let network: String?
+    }
+
+    @State private var original: Snapshot?
+    @State private var loadedSession = ""
+    @State private var map = ""
+    @State private var router = ""
+    @State private var gps = ""
+    @State private var highways = false
+    @State private var tolls = false
+    @State private var ferries = false
+    @State private var busy = false
+    @State private var message = ""
+
+    private var changes: [String: Any] {
+        guard let original else { return [:] }
+        var result: [String: Any] = [:]
+        if map != original.mapProvider { result["mapProvider"] = map }
+        if router != original.routeProvider { result["routeProvider"] = router }
+        if gps != original.gpsSource { result["gpsSource"] = gps }
+        if highways != original.avoidHighways { result["avoidHighways"] = highways }
+        if tolls != original.avoidTolls { result["avoidTolls"] = tolls }
+        if ferries != original.avoidFerries { result["avoidFerries"] = ferries }
+        return result
+    }
+
+    var body: some View {
+        Form {
+            if let original {
+                Section("On your comma") {
+                    LabeledContent("Navigation", value: original.enabled ? "Enabled" : "Disabled")
+                    LabeledContent("Internet", value: (original.network ?? "unknown").capitalized)
+                    LabeledContent("Mapbox key", value: original.hasKey ? "Configured" : "Missing")
+                    LabeledContent("Google key", value: original.hasGoogleKey ? "Configured" : "Missing")
+                }
+                Section {
+                    providerPicker("Map provider", selection: $map)
+                    providerPicker("Directions provider", selection: $router)
+                    Picker("GPS source", selection: $gps) {
+                        Text("Comma with phone backup").tag("backup")
+                        Text("Comma only").tag("comma")
+                        Text("Phone").tag("phone")
+                    }
+                } header: { Text("Providers and location") } footer: {
+                    Text("Configure provider keys in Galaxy on your comma. Phone GPS requires Share phone location in the app.")
+                }
+                Section("Roads to avoid") {
+                    Toggle("Highways", isOn: $highways)
+                    Toggle("Toll roads", isOn: $tolls)
+                    Toggle("Ferries", isOn: $ferries)
+                }
+                Button("Save to comma") { Task { await update(save: true) } }
+                    .disabled(changes.isEmpty)
+            }
+            Button("Reload from comma") { Task { await update(save: false) } }
+            if busy { ProgressView() }
+            if !message.isEmpty { Text(message) }
+        }
+        .disabled(busy)
+        .navigationTitle("Comma navigation")
+        .task { await update(save: false) }
+    }
+
+    private func providerPicker(_ title: String, selection: Binding<String>) -> some View {
+        Picker(title, selection: selection) {
+            Text("Mapbox").tag("mapbox")
+            Text("Google Maps").tag("google")
+        }
+    }
+
+    @MainActor private func update(save: Bool) async {
+        guard !busy else { return }
+        busy = true
+        defer { busy = false }
+        let session = connection.session
+        do {
+            _ = try await connection.ensureDeviceIdentity()
+            guard connection.session == session else { throw BridgeError.message("Connection changed. Reload the settings.") }
+            var path = "/api/navigation/status"
+            var body = Data()
+            let patch = changes
+            if save {
+                guard let original, !patch.isEmpty, session == loadedSession else {
+                    throw BridgeError.message("Reload settings from the connected comma.")
+                }
+                path = "/api/navigation/action"
+                body = try JSONSerialization.data(withJSONObject: ["action": "configure", "revision": original.revision, "patch": patch])
+            }
+            let reply = try await connection.transport.request(path: path, method: save ? "POST" : "GET",
+                headers: save ? ["content-type": "application/json"] : [:], body: body)
+            guard connection.session == session, reply.status == 200 else {
+                throw BridgeError.message("Comma could not confirm the settings. Reload to see its current values.")
+            }
+            let state = try JSONDecoder().decode(Snapshot.self, from: reply.bodyData)
+            guard !save || (state.mapProvider == map && state.routeProvider == router && state.gpsSource == gps &&
+                state.avoidHighways == highways && state.avoidTolls == tolls && state.avoidFerries == ferries) else {
+                throw BridgeError.message("Comma returned different settings. Reload to review them.")
+            }
+            original = state
+            loadedSession = session
+            map = state.mapProvider
+            router = state.routeProvider
+            gps = state.gpsSource
+            highways = state.avoidHighways
+            tolls = state.avoidTolls
+            ferries = state.avoidFerries
+            message = save ? "Comma confirmed your settings." : ""
+        } catch {
+            original = nil
+            message = error.localizedDescription
         }
     }
 }
