@@ -17,9 +17,9 @@ enum BridgeError: Error { case message(String) }
     var status = 200
     var enrollment: String?
     func request(path: String, method: String, headers: [String: String], body: Data) async throws -> BridgeResponse {
-        precondition(path == "/api/sentry/notifications" && method == "POST")
+        precondition(["/api/sentry/notifications", "/api/sentry/notifications/photo-test"].contains(path) && method == "POST")
         requests.append(try JSONSerialization.jsonObject(with: body) as! [String: Any])
-        var value: [String: Any] = ["appPushAvailable": true]
+        var value: [String: Any] = ["appPushAvailable": true, "queued": path.hasSuffix("/photo-test")]
         if let enrollment { value["relayEnrollment"] = ["state": enrollment, "automaticConfigured": true] }
         return BridgeResponse(status: status, bodyData: try JSONSerialization.data(withJSONObject: value))
     }
@@ -67,11 +67,16 @@ enum BridgeError: Error { case message(String) }
         time = time.addingTimeInterval(61)
         await sandbox.synchronize()
         precondition(sandbox.registered)
-        await sandbox.test()
+        let beforePhotoTest = transport.requests.count
+        await sandbox.testPhoto(camera: "cabin", tunnelReady: false, over: transport)
+        precondition(transport.requests.count == beforePhotoTest, "Photo previews require Tunnel sign-in")
+        await sandbox.testPhoto(camera: "cabin", tunnelReady: true, over: transport)
         precondition(transport.requests.last?["id"] as? String == sandbox.id)
+        precondition(transport.requests.last?["camera"] as? String == "cabin")
+        precondition(sandbox.status.contains("Photo test queued"))
         let beforeDeviceChange = transport.requests.count
         defaults.set("comma-two", forKey: "galaxy.comma.identity")
-        await sandbox.test()
+        await sandbox.testPhoto(camera: "wide", tunnelReady: true, over: transport)
         precondition(transport.requests.count == beforeDeviceChange, "Do not test an enrollment belonging to another comma")
         await sandbox.synchronize()
         precondition(!sandbox.registered, "Changing comma clears registration even while throttled")
