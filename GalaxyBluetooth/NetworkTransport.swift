@@ -116,6 +116,17 @@ final class LANTransport: ObservableObject, GalaxyRequestTransport {
         }
         return url
     }
+    // The comma's local Galaxy screen encodes http://<ip>:8082/#/.
+    static func localQRAddress(_ payload: String) -> String? {
+        guard let parts = URLComponents(string: payload.trimmingCharacters(in: .whitespacesAndNewlines)),
+              parts.scheme == "http", parts.port == 8082, let host = parts.host,
+              parts.user == nil, parts.password == nil, parts.query == nil,
+              parts.percentEncodedPath.isEmpty || parts.percentEncodedPath == "/",
+              parts.percentEncodedFragment == nil || parts.percentEncodedFragment == "/",
+              let endpoint = try? Self.endpoint(host)
+        else { return nil }
+        return endpoint.host
+    }
     func configure(address: String) throws {
         let new = try Self.endpoint(address)
         if endpoint != new { endpoint = new; invalidate(reason: "Comma LAN address changed") }
