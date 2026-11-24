@@ -648,9 +648,15 @@ struct ConnectionSettingsView: View {
                 }
                 if sentry.enabled && sentry.registered {
                     row("bell", title: "Test Sentry alerts", subtitle: sentry.status) {
-                        Button("Test") { Task { await sentry.test() } }
+                        Button(sentry.testingPhoto ? "Testing…" : "Test") {
+                            Task {
+                                let route: any GalaxyRequestTransport = model.lan.connected ? model.lan : model.tunnel
+                                await sentry.testPhoto(camera: ShareGroup.sentryPreviewCamera.rawValue,
+                                    tunnelReady: model.mode == .automatic && ShareGroup.tunnel != nil, over: route)
+                            }
+                        }.disabled(sentry.testingPhoto)
                             .font(.system(size: 12)).frame(minHeight: 44)
-                            .accessibilityLabel("Send test to this iPhone")
+                            .accessibilityLabel("Send a Sentry photo test to this iPhone")
                     }
                     Divider()
                 }

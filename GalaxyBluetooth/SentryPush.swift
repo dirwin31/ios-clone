@@ -9,6 +9,7 @@ final class SentryPush: ObservableObject {
     @Published private(set) var registered = false
     @Published private(set) var status = "Phone alerts off"
     @Published var openEvents = false
+    @Published private(set) var testingPhoto = false
     private var token = ""
     private var busy = false
     private var registeredDevice = ""
@@ -140,17 +141,50 @@ final class SentryPush: ObservableObject {
             case "unenrolled", "revoked": status = (result["relayEnrollment"] as? [String: Any])?["automaticConfigured"] as? Bool == true ? "Enable alerts to enroll this comma automatically." : "Phone registered. Hosted alerts are not configured in this release yet."
             case "revoking": status = "Relay revocation pending. Push alerts are paused."
             case "actionRequired": status = "Relay authorization needs attention in Galaxy → Sentry."
-            default: status = result["appPushAvailable"] as? Bool == true ? "Registered. Send a test from Galaxy → Sentry." : "Registered. Configure the HTTPS push relay in Galaxy → Sentry."
+            default: status = result["appPushAvailable"] as? Bool == true ? "Registered. Park the car to send a photo test." : "Registered. Configure the HTTPS push relay in Galaxy → Sentry."
             }
         } catch { registered = false; status = "Couldn’t register phone alerts. Reconnect and check Galaxy’s relay settings." }
     }
 
-    func test() async {
-        guard enabled, registered, registeredDevice == identity, let transport, transport.connected else { return }
+    func testPhoto(camera: String, tunnelReady: Bool, over route: any GalaxyRequestTransport) async {
+        guard !testingPhoto, enabled, registered, registeredDevice == identity else { return }
+        guard tunnelReady else {
+            status = "Sign in to Galaxy Tunnel and use Automatic to test photo alerts."
+            return
+        }
+        guard route.connected else {
+            status = "Connect over Local Wi-Fi or Galaxy Tunnel to take a test photo."
+            return
+        }
+
+        testingPhoto = true
+        defer { testingPhoto = false }
+        let cameraName = camera == "cabin" ? "Cabin" : "Road"
+        let device = identity
+        status = "Taking a \(cameraName) camera photo…"
         do {
-            _ = try await request(["action": "test", "target": "app", "id": id], over: transport)
-            status = "Test queued. Check for a notification."
-        } catch { status = "Couldn’t send a test. Check the relay in Galaxy → Sentry." }
+            let body = try JSONSerialization.data(withJSONObject: ["id": id, "camera": camera])
+            let response = try await route.request(path: "/api/sentry/notifications/photo-test", method: "POST",
+                headers: ["Content-Type": "application/json"], body: body)
+            guard device == identity, enabled else { return }
+            switch response.status {
+            case 200:
+                let reply = try JSONSerialization.jsonObject(with: response.bodyData) as? [String: Any]
+                status = reply?["queued"] as? Bool == true
+                    ? "Photo test queued. Press and hold the notification to see the image."
+                    : "Couldn’t confirm the photo test. Check for a notification."
+            case 404:
+                status = "Photo test unavailable. Update Galaxy or reconnect to register this iPhone again."
+            case 409:
+                status = "Park the car before sending a photo test."
+            default:
+                let reply = try? JSONSerialization.jsonObject(with: response.bodyData) as? [String: Any]
+                status = reply?["error"] as? String ?? "Couldn’t send the photo test (HTTP \(response.status))."
+            }
+        } catch {
+            guard device == identity, enabled else { return }
+            status = "Couldn’t confirm the photo test. Check for a notification, then try again if needed."
+        }
     }
 }
 

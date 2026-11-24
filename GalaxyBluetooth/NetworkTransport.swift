@@ -12,9 +12,11 @@ private func galaxyMediaHeaders(_ response: HTTPURLResponse) -> [String: String]
     return headers
 }
 
-private func galaxyReadTimeout(method: String, path: String) -> TimeInterval {
+private func galaxyRequestTimeout(method: String, path: String) -> TimeInterval {
+    // The parked snapshot worker allows up to 24 seconds for the cabin camera.
+    if method == "POST", path == "/api/sentry/notifications/photo-test" { return 35 }
     // Preparing the first recording range on comma can take up to 30 seconds.
-    method == "GET" && path.hasPrefix("/api/recordings/media/") ? 45 : 8
+    return method == "GET" && path.hasPrefix("/api/recordings/media/") ? 45 : 8
 }
 
 /// Each request has an isolated, bounded buffer.
@@ -331,7 +333,7 @@ final class LANTransport: ObservableObject, GalaxyRequestTransport {
             request.httpMethod = method
             request.httpBody = body.isEmpty ? nil : body
             request.timeoutInterval = LocalRequest.isPackageUpload(method: method, target: path) ? LocalRequest.packageUploadTimeout
-                : (method == "POST" && path == LANPairing.windowPath ? 35 : method == "POST" && path == "/api/navigation/action" ? 25 : galaxyReadTimeout(method: method, path: path))
+                : (method == "POST" && path == LANPairing.windowPath ? 35 : method == "POST" && path == "/api/navigation/action" ? 25 : galaxyRequestTimeout(method: method, path: path))
             for (name, value) in headers where ["accept", "range", "content-type"].contains(name.lowercased()) {
                 request.setValue(value, forHTTPHeaderField: name)
             }
@@ -722,7 +724,7 @@ final class TunnelTransport: ObservableObject, GalaxyRequestTransport {
         request.httpMethod = method; request.httpBody = body.isEmpty ? nil : body
         // comma may follow short links and geocode before answering a shared place.
         request.timeoutInterval = LocalRequest.isPackageUpload(method: method, target: path) ? LocalRequest.packageUploadTimeout
-            : method == "POST" && path == "/api/navigation/action" ? 25 : galaxyReadTimeout(method: method, path: path)
+            : method == "POST" && path == "/api/navigation/action" ? 25 : galaxyRequestTimeout(method: method, path: path)
         request.setValue("galaxy_session=" + credential.cookie, forHTTPHeaderField: "Cookie")
         for (name, value) in headers where ["accept", "range", "content-type"].contains(name.lowercased()) { request.setValue(value, forHTTPHeaderField: name) }
         if !["GET", "HEAD"].contains(method) {

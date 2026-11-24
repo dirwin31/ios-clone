@@ -12,7 +12,7 @@ final class NotificationService: UNNotificationServiceExtension {
         let camera = ShareGroup.sentryPreviewCamera
         guard let info = content.userInfo as? [String: Any],
               info["type"] as? String == "sentry",
-              let kind = info["kind"] as? String, ["alarm", "warning"].contains(kind),
+              let kind = info["kind"] as? String, ["alarm", "warning", "test"].contains(kind),
               let event = info["eventId"] as? String,
               event.range(of: "^[a-f0-9]{32}$", options: .regularExpression) != nil,
               ShareGroup.settings.mode == "automatic" || ShareGroup.settings.mode == nil,
@@ -20,7 +20,7 @@ final class NotificationService: UNNotificationServiceExtension {
               let base = ShareClient.tunnelEndpoint(tunnel.url),
               !tunnel.cookie.isEmpty, tunnel.cookie.utf8.count <= 4096,
               tunnel.cookie.utf8.allSatisfy({ $0 > 32 && $0 < 127 && $0 != 59 }),
-              let url = URL(string: base.absoluteString + "/api/sentry/image/" + event + "/" + camera.rawValue)
+              let url = URL(string: base.absoluteString + "/api/sentry/image/" + event + "/" + (kind == "test" ? "test" : camera.rawValue))
         else { handler(content); return }
 
         lock.withLock {
@@ -28,7 +28,8 @@ final class NotificationService: UNNotificationServiceExtension {
             task = Task {
                 let preview = try? await Self.photo(url: url, cookie: tunnel.cookie)
                 guard !Task.isCancelled else { return }
-                guard ShareGroup.tunnel == tunnel, ShareGroup.sentryPreviewCamera == camera, let preview,
+                guard ShareGroup.tunnel == tunnel, ShareGroup.settings.mode == "automatic" || ShareGroup.settings.mode == nil,
+                      kind == "test" || ShareGroup.sentryPreviewCamera == camera, let preview,
                       let updated = content.mutableCopy() as? UNMutableNotificationContent else {
                     finish()
                     return
