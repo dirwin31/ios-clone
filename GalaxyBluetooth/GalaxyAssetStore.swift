@@ -141,7 +141,7 @@ final class GalaxyAssetStore: ObservableObject {
                             if let saved, let bytes = try? Data(contentsOf: saved.appendingPathComponent(file.path)), matches(bytes) { return (file.path, bytes) }
                             let (code, bytes) = try await fetch("/" + file.path, max(file.size, 1))
                             guard code == 200 else { throw BridgeError.message("Galaxy update: \(file.path) returned HTTP \(code).") }
-                            guard matches(bytes) else { throw BridgeError.message("Galaxy update: \(file.path) did not match comma’s file inventory.") }
+                            guard matches(bytes) else { throw BridgeError.message("Galaxy update verification failed for \(file.path).") }
                             return (file.path, bytes)
                         }
                     }
