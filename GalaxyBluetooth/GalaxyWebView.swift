@@ -186,11 +186,12 @@ struct GalaxyWebView: View {
     @ObservedObject var diagnostics: GalaxyPageDiagnostics
     @AppStorage("galaxy.app.followGalaxyLanguage") private var followGalaxyLanguage = true
     var isActive = true
+    var localWiFi = false
     var bluetooth = false
     let report: () -> String
     var body: some View {
         ZStack {
-            GalaxyPage(url: url, requestKey: requestKey, diagnostics: diagnostics, isActive: isActive, bluetooth: bluetooth, followGalaxyLanguage: followGalaxyLanguage)
+            GalaxyPage(url: url, requestKey: requestKey, diagnostics: diagnostics, isActive: isActive, localWiFi: localWiFi, bluetooth: bluetooth, followGalaxyLanguage: followGalaxyLanguage)
                 .id(url.absoluteString + diagnostics.reloadID.uuidString)
             if diagnostics.stalled {
                 VStack(spacing: 16) {
@@ -238,11 +239,13 @@ private struct GalaxyPage: UIViewRepresentable {
 
     let diagnostics: GalaxyPageDiagnostics
     let isActive: Bool
+    let localWiFi: Bool
     let bluetooth: Bool
     let followGalaxyLanguage: Bool
     func makeCoordinator() -> Coordinator {
         let coordinator = Coordinator(origin: url, requestKey: requestKey, diagnostics: diagnostics)
         coordinator.isVisible = isActive
+        coordinator.localWiFi = localWiFi
         return coordinator
     }
 
@@ -648,6 +651,7 @@ private struct GalaxyPage: UIViewRepresentable {
         uiView.evaluateJavaScript("window.__galaxyBluetooth = \(bluetooth ? "true" : "false")", completionHandler: nil)
         if isActive, let startup = diagnostics.takeStartupURL(url) { uiView.load(URLRequest(url: startup)) }
         context.coordinator.isVisible = isActive
+        context.coordinator.localWiFi = localWiFi
         context.coordinator.syncVisibility(uiView)
         context.coordinator.syncPush(uiView)
         context.coordinator.syncShare(uiView)
@@ -664,6 +668,7 @@ private struct GalaxyPage: UIViewRepresentable {
     }
 
     final class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessageHandler, WKDownloadDelegate {
+        var localWiFi = false
         private var replayExport: Task<Void, Never>?
         private var downloads: [ObjectIdentifier: (WKDownload, URL?)] = [:]
         var isVisible = true
@@ -858,7 +863,7 @@ private struct GalaxyPage: UIViewRepresentable {
                 let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
                 do {
                     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-                    let destination = try await Self.writeReplay(request, in: directory)
+                    let destination = try await Self.writeReplay(request, in: directory, chunkLimit: { self.localWiFi ? 8 * Wire.maxBody : 2 * Wire.maxBody })
                     try Task.checkCancellation()
                     diagnostics.offerDownload(destination)
                 } catch {
@@ -868,8 +873,7 @@ private struct GalaxyPage: UIViewRepresentable {
             }
         }
 
-        private static func writeReplay(_ original: URLRequest, in directory: URL) async throws -> URL {
-            let chunkSize = 2 * 1024 * 1024
+        private static func writeReplay(_ original: URLRequest, in directory: URL, chunkLimit: () -> Int) async throws -> URL {
             var offset = 0
             var total: Int?
             var destination: URL?
@@ -877,6 +881,7 @@ private struct GalaxyPage: UIViewRepresentable {
             defer { try? file?.close() }
             repeat {
                 try Task.checkCancellation()
+                let chunkSize = chunkLimit()
                 var request = original
                 let end = min(total ?? Int.max, offset + chunkSize) - 1
                 request.setValue("bytes=\(offset)-\(end)", forHTTPHeaderField: "Range")
@@ -887,7 +892,7 @@ private struct GalaxyPage: UIViewRepresentable {
                 } else {
                     let range = response.value(forHTTPHeaderField: "Content-Range") ?? ""
                     guard response.statusCode == 206, let rawSize = range.split(separator: "/").last,
-                          let size = Int(rawSize), size > offset, size <= Int.max - chunkSize,
+                          let size = Int(rawSize), size > offset, size <= Int.max - 8 * Wire.maxBody,
                           total == nil || total == size,
                           data.count == min(size - offset, chunkSize),
                           range == "bytes \(offset)-\(offset + data.count - 1)/\(size)" else {

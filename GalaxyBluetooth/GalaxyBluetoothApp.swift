@@ -1085,7 +1085,7 @@ struct GalaxyRootView: View {
                 if model.opened, let url = server.url {
                     GalaxyWebView(url: url, requestKey: server.localSecret, diagnostics: model.galaxyPage,
                                   isActive: model.tab == .galaxy && scenePhase == .active,
-                                  bluetooth: model.transport.label == "Bluetooth") {
+                                  localWiFi: model.transport.usesLAN, bluetooth: model.transport.label == "Bluetooth") {
                         model.galaxyPage.report(server: server, connection: model.transport.label)
                     }
                         .modifier(CompanionWebSafeArea())

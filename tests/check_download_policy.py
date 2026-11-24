@@ -29,6 +29,7 @@ writer = source[source.index('        private static func writeReplay'):source.i
 writer = writer.replace('private static func', 'static func')
 fixture = r"""
 import Foundation
+enum Wire { static let maxBody = 1024 * 1024 }
 enum BoundedHTTP {
     static func load(_ request: URLRequest, limit: Int) async throws -> (Data, HTTPURLResponse) {
         let url = request.url!
@@ -49,15 +50,15 @@ enum BoundedHTTP {
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: folder) }
         let request = URLRequest(url: URL(string: "http://localhost/export")!)
-        let url = try await writeReplay(request, in: folder)
+        let url = try await writeReplay(request, in: folder, chunkLimit: { 8 * Wire.maxBody })
         let data = try Data(contentsOf: url, options: .mappedIfSafe)
         precondition(data.count == 53_200_001)
-        for start in stride(from: 0, to: data.count, by: 2_097_152) {
-            precondition(data[start] == UInt8(start / 2_097_152))
-            precondition(data[min(start + 2_097_151, data.count - 1)] == data[start])
+        for start in stride(from: 0, to: data.count, by: 8_388_608) {
+            precondition(data[start] == UInt8(start / 8_388_608))
+            precondition(data[min(start + 8_388_607, data.count - 1)] == data[start])
         }
         do {
-            _ = try await writeReplay(URLRequest(url: URL(string: "http://localhost/broken")!), in: folder)
+            _ = try await writeReplay(URLRequest(url: URL(string: "http://localhost/broken")!), in: folder, chunkLimit: { 2 * Wire.maxBody })
             fatalError("accepted incomplete range")
         } catch URLError.badServerResponse {}
     }
