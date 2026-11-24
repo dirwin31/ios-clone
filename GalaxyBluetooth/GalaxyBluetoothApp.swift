@@ -313,6 +313,17 @@ final class AppModel: ObservableObject {
         }
     }
     @Published var showConnections = false
+    var bluetoothSetupRequired: Bool {
+        mode == .bluetooth && (Data(hex: pairingKey)?.count != 32 || !bluetooth.hasSavedDevice)
+    }
+
+    var connectionStatusLabel: String {
+        if transport.connected { return transport.label }
+        if pairingInProgress { return "Pairing with comma…" }
+        if bluetoothSetupRequired { return "Bluetooth pairing required" }
+        return transport.label
+    }
+
     @Published var pairingInProgress = false
     @Published var pairingFailure = ""
     @Published private(set) var pairingResetNeeded = false
@@ -1725,7 +1736,7 @@ final class ConnectionEventLog: ObservableObject {
         \(model.connectionControllerDiagnostics)
         Network path: \(model.networkPathDiagnostics)
         Mode: \(model.mode.title)
-        Selected route: \(model.transport.label)
+        Selected route: \(model.connectionStatusLabel)
         Tunnel verified: \(model.tunnel.connected)
         Tunnel status: \(model.tunnel.status)
         Tunnel detail: \(model.tunnel.diagnosticSummary)

@@ -346,13 +346,17 @@ final class LoopbackServer: ObservableObject {
               const response = await this.fetcher(`./api/settings/pages/${encodeURIComponent(page)}`,
                 { credentials: 'same-origin', cache: 'no-store', signal: timed.signal })
               if (response.status === 401) { this.stop(); this.unauthorized(); return null }
+              if (response.status === 503 && response.headers?.get('X-Galaxy-Disconnected') === '1') {
+                return null
+              }
               if (!response.ok) throw new Error('Settings unavailable')
               const data = await response.json()
               if (data?.page !== page || !Array.isArray(data.rows) || typeof data.title !== 'string') throw new Error('Invalid settings page')
               return data
             })()
             const data = await Promise.race([read, expired])
-            if (!current() || !data) return
+            if (!current()) return
+            if (!data) { failed++; break }
             const section = PAGE_SECTIONS.get(page.split('/')[0]) || 'Toggles'
             for (const row of data.rows) {
               if (typeof row?.label !== 'string' || !row.label) continue
@@ -433,7 +437,7 @@ final class LoopbackServer: ObservableObject {
         let dynamic = path.hasPrefix("/api/") || path == "/data/runtime.json"
         if dynamic {
             guard request.headers["x-galaxy-local"] == localSecret else { return .error(403, "Missing app request key.") }
-            guard transport.connected else { return .error(503, "Your comma is disconnected. Open Connections to reconnect.") }
+            guard transport.connected else { return .error(503, "Your comma is disconnected. Open Connections to reconnect.", headers: ["X-Galaxy-Disconnected": "1"]) }
             do {
                 let response = try await transport.request(path: request.target, method: request.method,
                                                           headers: request.headers, body: request.body)

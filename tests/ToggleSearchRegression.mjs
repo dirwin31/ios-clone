@@ -69,4 +69,20 @@ const response = (page, rows = []) => ({ ok: true, status: 200, json: async () =
   await index.load()
   assert.equal(unauthorized, 1); assert.equal(calls, 1); assert.equal(index.status, 'idle')
 }
+{
+  const api = probe()
+  let offline = true, calls = 0
+  const index = new api.SettingsSearchIndex({ fetcher: async url => {
+    calls++
+    if (offline) return {status: 503, headers: {get: key => key === 'X-Galaxy-Disconnected' ? '1' : null}}
+    return response(decodeURIComponent(url.split('/').at(-1)), [{label: 'Recovered setting'}])
+  }})
+  await index.load()
+  assert.equal(calls, 1, 'Stop reading pages once the phone reports no route')
+  assert.equal(index.status, 'partial')
+  offline = false
+  await index.load()
+  assert.equal(index.status, 'ready')
+  assert(index.entries.length > 0)
+}
 console.log('Toggle search: incremental matches, serial reads, nested pages, close cancellation, bounded timeout and expired sessions passed')

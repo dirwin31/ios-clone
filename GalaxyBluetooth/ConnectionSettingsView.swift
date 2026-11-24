@@ -58,7 +58,7 @@ struct ConnectionSettingsView: View {
     private var connected: Bool { model.transport.connected }
     private var pairing: Bool { model.pairingInProgress }
     private var needsPairing: Bool {
-        (model.mode == .bluetooth && (Data(hex: model.pairingKey)?.count != 32 || !bluetooth.hasSavedDevice))
+        model.bluetoothSetupRequired
             || (model.mode != .lan && bluetooth.pairingRecoveryNeeded)
     }
     private var needsTunnelLogin: Bool { model.mode == .automatic && tunnel.loginRequired }
@@ -79,7 +79,13 @@ struct ConnectionSettingsView: View {
         return "Connect"
     }
     private var checking: Bool { model.matchingGalaxy || assets.checking }
-    private var status: String { pairing ? "Pairing with comma…" : connected ? "Connected via \(model.transport.label)" : connecting ? "Connecting to comma…" : "Not connected" }
+    private var status: String {
+        if pairing { return "Pairing with comma…" }
+        if connected { return "Connected via \(model.transport.label)" }
+        if connecting { return "Connecting to comma…" }
+        if model.bluetoothSetupRequired { return model.connectionStatusLabel }
+        return "Not connected"
+    }
 
     init(model: AppModel, returningFromGalaxy: Bool, select: @escaping (CompanionTab) -> Void, submitReport: @escaping () -> Void) {
         self.model = model; self.returningFromGalaxy = returningFromGalaxy; self.select = select

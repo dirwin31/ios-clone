@@ -59,8 +59,8 @@ struct LocalResponse {
     let headers: [String: String]
     let body: Data
 
-    static func error(_ status: Int, _ message: String) -> LocalResponse {
-        LocalResponse(status: status, headers: ["content-type": "application/json"],
+    static func error(_ status: Int, _ message: String, headers: [String: String] = [:]) -> LocalResponse {
+        LocalResponse(status: status, headers: headers.merging(["content-type": "application/json"]) { _, type in type },
                       body: (try? JSONSerialization.data(withJSONObject: ["error": message])) ?? Data())
     }
 
