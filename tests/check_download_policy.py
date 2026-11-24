@@ -23,3 +23,48 @@ with tempfile.TemporaryDirectory() as folder:
  p=Path(folder);(p/'probe.swift').write_text(probe)
  subprocess.run(['swiftc','-module-cache-path',str(p/'cache'),str(p/'probe.swift'),'-o',str(p/'probe')],check=True)
  subprocess.run([str(p/'probe')],check=True)
+
+# Exercise the same file writer used by the web view with a range-capable export.
+writer = source[source.index('        private static func writeReplay'):source.index('        private func track(_ download')]
+writer = writer.replace('private static func', 'static func')
+fixture = r"""
+import Foundation
+enum BoundedHTTP {
+    static func load(_ request: URLRequest, limit: Int) async throws -> (Data, HTTPURLResponse) {
+        let url = request.url!
+        let size = 53_200_001
+        let range = request.value(forHTTPHeaderField: "Range")!.dropFirst(6).split(separator: "-")
+        let start = Int(range[0])!, end = min(Int(range[1])!, size - 1)
+        precondition(start % limit == 0 && end - start < limit)
+        let headers = ["Content-Type": "video/mp4", "Content-Range": "bytes \(start)-\(end)/\(size)"]
+        let count = end - start + (url.path == "/broken" && start > 0 ? 0 : 1)
+        return (Data(repeating: UInt8(start / limit), count: count),
+                HTTPURLResponse(url: url, statusCode: 206, httpVersion: nil, headerFields: headers)!)
+    }
+}
+@main struct Check {
+""" + writer + r"""
+    static func main() async throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let request = URLRequest(url: URL(string: "http://localhost/export")!)
+        let url = try await writeReplay(request, in: folder)
+        let data = try Data(contentsOf: url, options: .mappedIfSafe)
+        precondition(data.count == 53_200_001)
+        for start in stride(from: 0, to: data.count, by: 2_097_152) {
+            precondition(data[start] == UInt8(start / 2_097_152))
+            precondition(data[min(start + 2_097_151, data.count - 1)] == data[start])
+        }
+        do {
+            _ = try await writeReplay(URLRequest(url: URL(string: "http://localhost/broken")!), in: folder)
+            fatalError("accepted incomplete range")
+        } catch URLError.badServerResponse {}
+    }
+}
+"""
+with tempfile.TemporaryDirectory() as folder:
+    p = Path(folder)
+    (p/'export.swift').write_text(fixture)
+    subprocess.run(['swiftc', '-parse-as-library', '-module-cache-path', str(p/'cache'), str(p/'export.swift'), '-o', str(p/'export')], check=True)
+    subprocess.run([str(p/'export')], check=True)

@@ -664,6 +664,7 @@ private struct GalaxyPage: UIViewRepresentable {
     }
 
     final class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessageHandler, WKDownloadDelegate {
+        private var replayExport: Task<Void, Never>?
         private var downloads: [ObjectIdentifier: (WKDownload, URL?)] = [:]
         var isVisible = true
         var wasFollowingLanguage = false
@@ -798,7 +799,10 @@ private struct GalaxyPage: UIViewRepresentable {
                      decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
             guard let url = action.request.url else { decisionHandler(.cancel); return }
             if isLocal(url) {
-                if action.shouldPerformDownload {
+                if action.request.httpMethod == "GET", url.path == "/api/replay/export-download" {
+                    decisionHandler(.cancel)
+                    saveReplay(authorized(action.request))
+                } else if action.shouldPerformDownload {
                     decisionHandler(.cancel)
                     webView.startDownload(using: authorized(action.request)) { [weak self] download in
                         self?.track(download)
@@ -846,8 +850,70 @@ private struct GalaxyPage: UIViewRepresentable {
         func webView(_ webView: WKWebView, navigationResponse: WKNavigationResponse, didBecome download: WKDownload) {
             track(download)
         }
+        private func saveReplay(_ request: URLRequest) {
+            guard replayExport == nil, downloads.isEmpty, diagnostics.downloadedFile == nil else { return }
+            diagnostics.record("Replay export download started")
+            replayExport = Task {
+                defer { replayExport = nil }
+                let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+                do {
+                    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+                    let destination = try await Self.writeReplay(request, in: directory)
+                    try Task.checkCancellation()
+                    diagnostics.offerDownload(destination)
+                } catch {
+                    try? FileManager.default.removeItem(at: directory)
+                    if !Task.isCancelled { diagnostics.downloadFailed(error) }
+                }
+            }
+        }
+
+        private static func writeReplay(_ original: URLRequest, in directory: URL) async throws -> URL {
+            let chunkSize = 2 * 1024 * 1024
+            var offset = 0
+            var total: Int?
+            var destination: URL?
+            var file: FileHandle?
+            defer { try? file?.close() }
+            repeat {
+                try Task.checkCancellation()
+                var request = original
+                let end = min(total ?? Int.max, offset + chunkSize) - 1
+                request.setValue("bytes=\(offset)-\(end)", forHTTPHeaderField: "Range")
+                let (data, response) = try await BoundedHTTP.load(request, limit: chunkSize)
+                guard response.mimeType == "video/mp4", !data.isEmpty else { throw URLError(.badServerResponse) }
+                if response.statusCode == 200, offset == 0, response.value(forHTTPHeaderField: "Content-Range") == nil {
+                    total = data.count
+                } else {
+                    let range = response.value(forHTTPHeaderField: "Content-Range") ?? ""
+                    guard response.statusCode == 206, let rawSize = range.split(separator: "/").last,
+                          let size = Int(rawSize), size > offset, size <= Int.max - chunkSize,
+                          total == nil || total == size,
+                          data.count == min(size - offset, chunkSize),
+                          range == "bytes \(offset)-\(offset + data.count - 1)/\(size)" else {
+                        throw URLError(.badServerResponse)
+                    }
+                    total = size
+                }
+                if file == nil {
+                    let name = response.suggestedFilename ?? ""
+                    let safe = name.range(of: #"^[A-Za-z0-9_-]+\.mp4$"#, options: .regularExpression) != nil
+                    let url = directory.appendingPathComponent(safe ? name : "replay.mp4")
+                    guard FileManager.default.createFile(atPath: url.path, contents: nil) else { throw CocoaError(.fileWriteUnknown) }
+                    file = try FileHandle(forWritingTo: url)
+                    destination = url
+                }
+                try file?.write(contentsOf: data)
+                offset += data.count
+            } while offset != total
+            try file?.close()
+            file = nil
+            guard let destination else { throw URLError(.zeroByteResource) }
+            return destination
+        }
+
         private func track(_ download: WKDownload) {
-            guard downloads.isEmpty, diagnostics.downloadedFile == nil else {
+            guard replayExport == nil, downloads.isEmpty, diagnostics.downloadedFile == nil else {
                 download.cancel { _ in }
                 return
             }
@@ -891,6 +957,7 @@ private struct GalaxyPage: UIViewRepresentable {
             diagnostics.downloadFailed(error)
         }
         func cancelDownloads() {
+            replayExport?.cancel()
             let active = downloads.values
             downloads.removeAll()
             for (download, destination) in active {
