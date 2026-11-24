@@ -213,20 +213,22 @@ struct ConnectionSettingsView: View {
                 }
             }
             let layout = wide ? AnyLayout(HStackLayout(alignment: .top, spacing: 22)) : AnyLayout(VStackLayout(spacing: 20))
+            // Bound SwiftUI type depth on the launch screen. The device runtime can
+            // exhaust the main thread stack when resolving all panels as one type.
             layout {
                 VStack(alignment: .leading, spacing: 12) {
-                    connectionPanel()
+                    AnyView(connectionPanel())
                     if !model.legacyMessage.isEmpty { message(model.legacyMessage) }
                     if !server.error.isEmpty { message(server.error) }
                 }.frame(maxWidth: .infinity)
                 VStack(alignment: .leading, spacing: 12) {
                     Text("Connection").font(.title3.bold()).accessibilityAddTraits(.isHeader)
-                    connectionModePanel
-                    connectionExtras
-                        .simultaneousGesture(TapGesture().onEnded { model.autoOpenGalaxyPending = false })
+                    AnyView(connectionModePanel)
+                    AnyView(connectionExtras
+                        .simultaneousGesture(TapGesture().onEnded { model.autoOpenGalaxyPending = false }))
                     Text("Preferences").font(.title3.bold()).accessibilityAddTraits(.isHeader).padding(.top, 8)
-                    preferences()
-                        .simultaneousGesture(TapGesture().onEnded { model.autoOpenGalaxyPending = false })
+                    AnyView(preferences()
+                        .simultaneousGesture(TapGesture().onEnded { model.autoOpenGalaxyPending = false }))
                 }.frame(maxWidth: .infinity)
             }
             Divider()
@@ -720,15 +722,15 @@ struct ConnectionSettingsView: View {
     }
 
     private func preferenceSection<Content: View>(_ title: LocalizedStringKey, expanded: Binding<Bool>,
-                                                  @ViewBuilder content: @escaping () -> Content) -> some View {
-        DisclosureGroup(isExpanded: expanded) {
-            VStack(alignment: .leading, spacing: 8, content: content)
+                                                  @ViewBuilder content: @escaping () -> Content) -> AnyView {
+        AnyView(DisclosureGroup(isExpanded: expanded) {
+            VStack(alignment: .leading, spacing: 8) { AnyView(content()) }
                 .padding(.bottom, 12)
         } label: {
             Text(title).font(.subheadline.weight(.semibold))
                 .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
                 .contentShape(Rectangle())
-        }.tint(accent).padding(.horizontal, 14)
+        }.tint(accent).padding(.horizontal, 14))
     }
 
     private var advancedControls: some View {
