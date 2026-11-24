@@ -1695,7 +1695,8 @@ final class ConnectionEventLog: ObservableObject {
     }
     // No published changes or disk/network work on the connection callback path.
     func record(_ event: String) {
-        let bounded = Self.redact(String(event.prefix(1000)))
+        let redacted = Self.redact(event)
+        let bounded = redacted.count > 2000 ? String(redacted.prefix(2000)) + " [event shortened]" : redacted
         guard bounded != lastEvent else { repeats += 1; return }
         if repeats > 0 { append("Previous event repeated \(repeats) additional times"); repeats = 0 }
         lastEvent = bounded
@@ -1725,7 +1726,7 @@ final class ConnectionEventLog: ObservableObject {
         let info = Bundle.main.infoDictionary ?? [:]
         return """
         StarPilot BT connection diagnostics
-        Connection diagnostics revision: 5 (discovered-device decisions and per-candidate verification)
+        Connection diagnostics revision: 6 (setup stages and route state)
         \(ISO8601DateFormatter().string(from: Date()))
         App: \(info["CFBundleShortVersionString"] ?? "?") (\(info["CFBundleVersion"] ?? "?"))
         Build distribution: \(model.buildDistribution)
@@ -1737,12 +1738,13 @@ final class ConnectionEventLog: ObservableObject {
         Network path: \(model.networkPathDiagnostics)
         Mode: \(model.mode.title)
         Selected route: \(model.connectionStatusLabel)
+        Available transports: local Wi-Fi=\(model.lan.connected); Tunnel=\(model.tunnel.connected); Bluetooth=\(model.bluetooth.connected)
         Tunnel verified: \(model.tunnel.connected)
         Tunnel status: \(model.tunnel.status)
         Tunnel detail: \(model.tunnel.diagnosticSummary)
         Connection order: \(model.connectionPriority.map(\.title).joined(separator: " → "))
         \(model.commaSoftwareDiagnostics)
-        Saved comma identity: \(model.lan.expectedDeviceID ?? "none")
+        Saved comma identity present: \(model.lan.expectedDeviceID != nil)
         LAN verified: \(model.lan.connected)
         LAN endpoint: \(model.lan.endpoint?.host ?? "none"):8082
         LAN status: \(model.lan.status)
@@ -1769,6 +1771,72 @@ final class ConnectionEventLog: ObservableObject {
         Recent connection events:
         \(events.suffix(eventLimit ?? retained).joined(separator: "\n"))
         """
+    }
+}
+
+// A single-entry ZIP stores the full UTF-8 report without a third-party dependency.
+enum DiagnosticArchive {
+    private static let crcTable: [UInt32] = (0..<256).map { value in
+        (0..<8).reduce(UInt32(value)) { crc, _ in
+            (crc >> 1) ^ (crc & 1 == 0 ? 0 : 0xedb88320)
+        }
+    }
+
+    static func zip(_ text: String) -> Data {
+        let name = Data("diagnostics.txt".utf8)
+        let contents = Data(text.utf8)
+        let size = UInt32(contents.count)
+        let crc = contents.reduce(UInt32.max) { crc, byte in
+            (crc >> 8) ^ crcTable[Int((crc ^ UInt32(byte)) & 0xff)]
+        } ^ UInt32.max
+        var archive = Data()
+        func word(_ value: UInt16) {
+            var little = value.littleEndian
+            withUnsafeBytes(of: &little) { archive.append(contentsOf: $0) }
+        }
+        func long(_ value: UInt32) {
+            var little = value.littleEndian
+            withUnsafeBytes(of: &little) { archive.append(contentsOf: $0) }
+        }
+        func entryFields() {
+            word(20) // ZIP version needed
+            word(0) // flags
+            word(0) // stored data
+            word(0) // time
+            word(33) // 1980-01-01
+            long(crc)
+            long(size)
+            long(size)
+            word(UInt16(name.count))
+            word(0) // extra field length
+        }
+
+        long(0x04034b50)
+        entryFields()
+        archive.append(name)
+        archive.append(contents)
+        let directoryOffset = UInt32(archive.count)
+
+        long(0x02014b50)
+        word(20)
+        entryFields()
+        word(0) // comment length
+        word(0) // disk number
+        word(0) // internal attributes
+        long(0) // external attributes
+        long(0) // local header offset
+        archive.append(name)
+        let directorySize = UInt32(archive.count) - directoryOffset
+
+        long(0x06054b50)
+        word(0)
+        word(0)
+        word(1)
+        word(1)
+        long(directorySize)
+        long(directoryOffset)
+        word(0)
+        return archive
     }
 }
 
@@ -1849,7 +1917,7 @@ private struct DeveloperLogsView: View {
                             }
                         }.font(.subheadline).tint(muted)
                         Divider()
-                        Button(exporting ? "Preparing report…" : "Export logs (.txt)") {
+                        Button(exporting ? "Preparing report…" : "Export logs (.zip)") {
                             guard !exporting else { return }
                             exporting = true; exportStatus = ""
                             let report = allReports()
@@ -1859,9 +1927,9 @@ private struct DeveloperLogsView: View {
                                         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
                                         do {
                                             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-                                            let name = "StarPilot-diagnostics-" + ISO8601DateFormatter().string(from: Date()).replacingOccurrences(of: ":", with: "-") + ".txt"
+                                            let name = "StarPilot-diagnostics-" + ISO8601DateFormatter().string(from: Date()).replacingOccurrences(of: ":", with: "-") + ".zip"
                                             let url = directory.appendingPathComponent(name)
-                                            try report.write(to: url, atomically: true, encoding: .utf8)
+                                            try DiagnosticArchive.zip(report).write(to: url, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
                                             return url
                                         } catch {
                                             try? FileManager.default.removeItem(at: directory)
@@ -1874,7 +1942,7 @@ private struct DeveloperLogsView: View {
                                 exporting = false
                             }
                         }.buttonStyle(.plain).font(.footnote).foregroundStyle(muted)
-                            .frame(minHeight: 44, alignment: .leading).disabled(exporting).accessibilityIdentifier("save-diagnostics-txt")
+                            .frame(minHeight: 44, alignment: .leading).disabled(exporting).accessibilityIdentifier("save-diagnostics-zip")
                         if !exportStatus.isEmpty { Text(exportStatus).font(.caption).foregroundStyle(.secondary) }
                         Text("For manual troubleshooting when needed.")
                             .font(.caption).foregroundStyle(muted)

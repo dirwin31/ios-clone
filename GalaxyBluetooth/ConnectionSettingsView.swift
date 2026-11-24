@@ -437,17 +437,21 @@ struct ConnectionSettingsView: View {
         Task { @MainActor in
             localQRError = ""
             guard DataScannerViewController.isSupported else {
+                model.connectionLog.record("Local Wi-Fi QR scanner blocked: unsupported device")
                 localQRError = "QR scanning isn’t supported on this device. Enter the comma IP under Advanced connection options."
                 return
             }
             guard await AVCaptureDevice.requestAccess(for: .video) else {
+                model.connectionLog.record("Local Wi-Fi QR scanner blocked: camera permission denied")
                 localQRError = "Allow camera access in iPhone Settings, or enter the comma IP under Advanced connection options."
                 return
             }
             guard DataScannerViewController.isAvailable else {
+                model.connectionLog.record("Local Wi-Fi QR scanner blocked: camera unavailable")
                 localQRError = "Camera unavailable. Enter the comma IP under Advanced connection options."
                 return
             }
+            model.connectionLog.record("Local Wi-Fi QR scanner opened")
             showLocalQR = true
         }
     }
@@ -460,11 +464,14 @@ struct ConnectionSettingsView: View {
                 GalaxyQRScanner { value in
                     showLocalQR = false
                     guard let address = LANTransport.localQRAddress(value) else {
+                        model.connectionLog.record("Local Wi-Fi QR rejected: expected a local Galaxy address")
                         localQRError = "Scan the local Galaxy QR code, or enter the comma IP under Advanced connection options."
                         return
                     }
+                    model.connectionLog.record("Local Wi-Fi QR accepted: starting LAN verification")
                     connectToDiscoveredComma(DiscoveredComma(id: address, name: "comma", address: address))
                 } failed: { message in
+                    model.connectionLog.record("Local Wi-Fi QR scanner failed")
                     localQRError = message + " Enter the comma IP under Advanced connection options."
                     showLocalQR = false
                 }
@@ -858,8 +865,12 @@ private struct TunnelSetupView: View {
                             defer { saving = false }
                             model.connectionLog.record("Tunnel login: Use tunnel tapped; checking session cookie")
                             let cookies = await store.httpCookieStore.allCookies()
-                            model.connectionLog.record("Tunnel login: cookie check; session present=\(cookies.contains { $0.name == "galaxy_session" }); valid session=\(TunnelTransport.loginCookie(cookies, url: loginURL) != nil)")
-                            guard let cookie = TunnelTransport.loginCookie(cookies, url: loginURL) else {
+                            let cookie = TunnelTransport.loginCookie(cookies, url: loginURL)
+                            let sessions = cookies.filter { $0.name == "galaxy_session" }
+                            let secure = sessions.filter(\.isSecure).count
+                            let expired = sessions.filter { $0.expiresDate.map { $0 <= Date() } ?? false }.count
+                            model.connectionLog.record("Tunnel login: cookie check; session count=\(sessions.count); secure=\(secure); expired=\(expired); usable=\(cookie != nil)")
+                            guard let cookie else {
                                 model.connectionLog.record("Tunnel login rejected: no valid secure unexpired session cookie")
                                 error = "Finish signing in to Galaxy first."; return
                             }
@@ -888,6 +899,7 @@ private struct TunnelSetupView: View {
                             } label: { Label("Scan comma’s QR code", systemImage: "qrcode.viewfinder") }
                             Button("Sign in") {
                                 guard let url = TunnelTransport.endpoint(address) else { error = "Paste your full Galaxy link, including its 16-character code."; return }
+                                model.connectionLog.record("Tunnel login started from entered link")
                                 error = ""; loginURL = url
                             }
                             if model.transport.connected {
@@ -917,6 +929,7 @@ private struct TunnelSetupView: View {
                             guard let url = TunnelTransport.endpoint(value) else {
                                 error = "That isn’t a Galaxy tunnel link. Scan the Galaxy link QR code on comma."; showScanner = false; return
                             }
+                            model.connectionLog.record("Tunnel login started from Galaxy QR")
                             address = url.absoluteString; error = ""; showScanner = false; loginURL = url
                         } failed: { message in error = message + " Paste your Galaxy link instead."; showScanner = false }
                         .navigationTitle("Scan Galaxy link").navigationBarTitleDisplayMode(.inline)

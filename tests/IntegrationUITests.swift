@@ -152,7 +152,7 @@ final class IntegrationUITests: XCTestCase {
         XCTAssertTrue(app.buttons["Developer options"].waitForExistence(timeout: 10))
         app.buttons["Developer options"].tap()
         app.buttons["Dev / Logs"].tap()
-        let save = app.buttons["save-diagnostics-txt"]
+        let save = app.buttons["save-diagnostics-zip"]
         XCTAssertTrue(save.waitForExistence(timeout: 5))
         save.tap()
         XCTAssertTrue(app.cells["Save to Files"].waitForExistence(timeout: 10))
