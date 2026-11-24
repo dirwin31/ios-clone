@@ -9,6 +9,7 @@ final class NotificationService: UNNotificationServiceExtension {
     override func didReceive(_ request: UNNotificationRequest,
                              withContentHandler handler: @escaping (UNNotificationContent) -> Void) {
         let content = request.content
+        let camera = ShareGroup.sentryPreviewCamera
         guard let info = content.userInfo as? [String: Any],
               info["type"] as? String == "sentry",
               let kind = info["kind"] as? String, ["alarm", "warning"].contains(kind),
@@ -19,7 +20,7 @@ final class NotificationService: UNNotificationServiceExtension {
               let base = ShareClient.tunnelEndpoint(tunnel.url),
               !tunnel.cookie.isEmpty, tunnel.cookie.utf8.count <= 4096,
               tunnel.cookie.utf8.allSatisfy({ $0 > 32 && $0 < 127 && $0 != 59 }),
-              let url = URL(string: base.absoluteString + "/api/sentry/image/" + event + "/wide")
+              let url = URL(string: base.absoluteString + "/api/sentry/image/" + event + "/" + camera.rawValue)
         else { handler(content); return }
 
         lock.withLock {
@@ -27,7 +28,7 @@ final class NotificationService: UNNotificationServiceExtension {
             task = Task {
                 let preview = try? await Self.photo(url: url, cookie: tunnel.cookie)
                 guard !Task.isCancelled else { return }
-                guard ShareGroup.tunnel == tunnel, let preview,
+                guard ShareGroup.tunnel == tunnel, ShareGroup.sentryPreviewCamera == camera, let preview,
                       let updated = content.mutableCopy() as? UNMutableNotificationContent else {
                     finish()
                     return
@@ -78,7 +79,7 @@ final class NotificationService: UNNotificationServiceExtension {
         let target = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString).appendingPathExtension("jpg")
         try data.write(to: target, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
-        return try UNNotificationAttachment(identifier: "sentry-road", url: target)
+        return try UNNotificationAttachment(identifier: "sentry-image", url: target)
     }
 
     private final class NoRedirects: NSObject, URLSessionTaskDelegate {

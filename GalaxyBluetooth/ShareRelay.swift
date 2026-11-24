@@ -8,6 +8,14 @@ enum ShareGroup {
     static let pendingNotification = "link.galaxy.bluetooth.natehuby76.share.pending"
     static let maxAge: TimeInterval = 12 * 3600
 
+    enum SentryPreviewCamera: String {
+        case wide, cabin
+    }
+    static let sentryPreviewCameraKey = "sentry.previewCamera"
+    static var sentryPreviewCamera: SentryPreviewCamera {
+        defaults?.string(forKey: sentryPreviewCameraKey).flatMap(SentryPreviewCamera.init(rawValue:)) ?? .wide
+    }
+
     struct Tunnel: Codable, Equatable { let url: String; let cookie: String }
     struct Place: Codable, Equatable {
         let name: String

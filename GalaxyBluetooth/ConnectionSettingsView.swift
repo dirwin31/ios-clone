@@ -13,6 +13,8 @@ struct ConnectionSettingsView: View {
     @ObservedObject var location: PhoneLocation
     @ObservedObject var audio: AudioPairing
     @ObservedObject private var sentry = SentryPush.shared
+    @AppStorage(ShareGroup.sentryPreviewCameraKey, store: UserDefaults(suiteName: ShareGroup.id))
+    private var sentryPreviewCamera = ShareGroup.SentryPreviewCamera.wide
     @ObservedObject private var tunnel: TunnelTransport
     let returningFromGalaxy: Bool
     let select: (CompanionTab) -> Void
@@ -628,6 +630,15 @@ struct ConnectionSettingsView: View {
                               Task { await sentry.setEnabled(enabled) }
                           }))
                 separator
+                if sentry.enabled {
+                    row("camera", title: "Sentry preview camera", subtitle: "Photo shown in notifications when Galaxy Tunnel is available") {
+                        Picker("Sentry preview camera", selection: $sentryPreviewCamera) {
+                            Text("Road").tag(ShareGroup.SentryPreviewCamera.wide)
+                            Text("Cabin").tag(ShareGroup.SentryPreviewCamera.cabin)
+                        }.pickerStyle(.menu).labelsHidden()
+                    }
+                    separator
+                }
                 if sentry.enabled && sentry.registered {
                     row("bell", title: "Test Sentry alerts", subtitle: sentry.status) {
                         Button("Test") { Task { await sentry.test() } }
