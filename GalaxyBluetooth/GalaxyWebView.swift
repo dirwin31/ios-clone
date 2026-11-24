@@ -279,7 +279,8 @@ private struct GalaxyPage: UIViewRepresentable {
             localStorage.setItem('galaxy-preview-theme', theme);
             document.documentElement.dataset.theme = theme;
           };
-          syncTheme();
+          if (document.documentElement) syncTheme();
+          else document.addEventListener('DOMContentLoaded', syncTheme, {once: true});
           document.addEventListener('click', event => {
             if (event.isTrusted && event.target.closest?.('.gx-theme-toggle')) {
               const dark = document.documentElement.dataset.theme !== 'dark';

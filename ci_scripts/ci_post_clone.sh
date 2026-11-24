@@ -58,6 +58,7 @@ swiftc -module-cache-path "$test_dir/module-cache" -swift-version 5 -parse-as-li
 "$test_dir/loopback-recovery-tests"
 
 if command -v node >/dev/null 2>&1; then
+  node tests/GalaxyThemeStartup.mjs
   node tests/ToggleSearchRegression.mjs
   node tests/RouteFootageRegression.mjs
 else
