@@ -67,6 +67,7 @@ struct CommaRouteSnapshot: Decodable {
     let polyline6: String?
     let instruction: CommaInstruction?
     let error: String?
+    var arrived = false
     var phoneTripOnroad = false
     var routeUnavailable = false
     func needsPhoneReroute(for revision: String, offRouteSamples: Int) -> Bool {
@@ -96,6 +97,21 @@ struct CommaRouteSnapshot: Decodable {
             guard destination != nil, routeVersion != nil, instruction != nil,
                   let age = ageSeconds, age <= 3 else { throw NavigationContractError.invalidResponse }
         }
+    }
+}
+
+struct TripArrival {
+    private var firstSample: Date?
+
+    mutating func update(distance: Double, remaining: Double, sample: Date) -> Bool {
+        guard distance <= 25, remaining <= 50 else { firstSample = nil; return false }
+        if let firstSample {
+            let elapsed = sample.timeIntervalSince(firstSample)
+            if (3...8).contains(elapsed) { return true }
+            if (0..<3).contains(elapsed) { return false }
+        }
+        firstSample = sample
+        return false
     }
 }
 

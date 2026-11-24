@@ -299,8 +299,9 @@ final class CarPlaySceneDelegate: NSObject, CPTemplateApplicationSceneDelegate, 
         menu.updateSections([CPListSection(items: items)])
     }
 
-    private func stopGuidance() {
-        navigationSession?.cancelTrip()
+    private func stopGuidance(arrived: Bool = false) {
+        if arrived { navigationSession?.finishTrip() }
+        else { navigationSession?.cancelTrip() }
         navigationSession = nil; trip = nil; maneuver = nil; tripDestination = ""
     }
 
@@ -332,7 +333,7 @@ final class CarPlaySceneDelegate: NSObject, CPTemplateApplicationSceneDelegate, 
             } ?? []
         }
         guard nav.navigating, let destination = nav.destination else {
-            stopGuidance()
+            stopGuidance(arrived: nav.arrivedAtDestination)
             return
         }
         let key = "\(destination.coordinate.latitude),\(destination.coordinate.longitude)"

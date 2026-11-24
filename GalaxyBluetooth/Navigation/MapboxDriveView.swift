@@ -802,7 +802,12 @@ struct MapboxDriveMap: View {
         let accepted = previous != nil && displacement < 15 && !moving ? previous?.coordinate ?? point : point
         let center = aligned(accepted)
         cameraFix = CLLocation(coordinate: accepted, altitude: 0, horizontalAccuracy: -1, verticalAccuracy: -1, timestamp: stamp)
-        let camera = Viewport.camera(center: center, zoom: CGFloat(cameraZoom - log2(carDisplay?.zoomFactor ?? 1)), bearing: cameraBearing,
+        // A short CarPlay screen otherwise shows only a narrow band of detailed ground.
+        // Pull back while cruising and restore the close view as the turn approaches.
+        let lookAheadZoom = driving && carDisplay != nil
+            ? 0.65 * min(1, max(0, speed / 10)) * (navigation.distanceToTurn > 0 ? min(1, navigation.distanceToTurn / 180) : 1)
+            : 0
+        let camera = Viewport.camera(center: center, zoom: CGFloat(cameraZoom - lookAheadZoom - log2(carDisplay?.zoomFactor ?? 1)), bearing: cameraBearing,
                                      pitch: CGFloat(cameraPitch))
             .padding(padding)
         if reduceMotion || !continuous || layoutChanged { viewport = camera }

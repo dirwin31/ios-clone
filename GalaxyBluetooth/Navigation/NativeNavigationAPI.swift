@@ -187,6 +187,7 @@ enum NativeNavigationAPI {
                 "waitingForLocation": "Destination received. Waiting for GPS on comma.",
                 "routing": "Destination received. Comma is calculating the route.",
                 "routeUnavailable": "Comma couldn’t calculate a route.", "stale": "Waiting for fresh navigation from comma…"][state.status])
+        result.arrived = state.status == "arrived"
         result.phoneTripOnroad = state.phoneRouteTripOnroad == true
         result.routeUnavailable = state.status == "routeUnavailable"
         result.phoneTripRevision = state.activeRouteSource == "iphone" ? state.revision : nil

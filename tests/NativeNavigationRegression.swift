@@ -177,6 +177,19 @@ import Foundation
         state["instruction"] = ["text":"Turn left", "maneuverType":"turn", "maneuverModifier":"left", "distanceMeters":100, "remainingDistanceMeters":1000, "remainingDurationSeconds":200]
         func snapshot() throws -> CommaRouteSnapshot { try NativeNavigationAPI.snapshot(JSONSerialization.data(withJSONObject: state)) }
         let active = try snapshot()
+        var proximity = TripArrival()
+        let now = Date()
+        precondition(!proximity.update(distance: 12, remaining: 450, sample: now))
+        precondition(!proximity.update(distance: 12, remaining: 20, sample: now))
+        precondition(!proximity.update(distance: 90, remaining: 20, sample: now.addingTimeInterval(2)))
+        precondition(!proximity.update(distance: 12, remaining: 20, sample: now.addingTimeInterval(4)))
+        precondition(!proximity.update(distance: 12, remaining: 20, sample: now.addingTimeInterval(15)))
+        precondition(proximity.update(distance: 12, remaining: 20, sample: now.addingTimeInterval(18)))
+        precondition(!active.arrived)
+        state["status"] = "arrived"
+        let arrival = try snapshot()
+        precondition(arrival.arrived)
+        state["status"] = "guiding"
         precondition(active.status == "active" && active.ageSeconds == 3 && active.routePoints?.count == 2 && active.position != nil)
         precondition(tryPath(active.routeVersion) == "/api/navigation/status?routeKey=0123456789abcdef")
         state["location"] = ["latitude":40, "longitude":-110, "validForMs":2500] as [String:Any]
