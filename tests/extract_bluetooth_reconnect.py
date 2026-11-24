@@ -17,6 +17,8 @@ ui_property = settings[ui_start:ui_end].replace('private var needsPairing', 'var
 title_start = settings.index('    private var primaryTitle: String {')
 title_end = settings.index('    private var checking:', title_start)
 ui_property += settings[title_start:title_end].replace('private var primaryTitle', 'var primaryTitle')
+model_source = Path('GalaxyBluetooth/GalaxyBluetoothApp.swift').read_text()
+setup = model_source[model_source.index('    var bluetoothSetupRequired:'):model_source.index('    var connectionStatusLabel:')]
 probe = r'''
 import Foundation
 struct NearbyDevice { let id: UUID; let name: String; let signal: Int }
@@ -61,6 +63,8 @@ tests = r'''
 }
 enum Mode { case automatic, bluetooth, lan }
 struct Model {
+    let bluetooth = Probe()
+    SETUP_PROPERTY
     var mode = Mode.bluetooth
     var pairingKey = String(repeating: "a", count: 64)
     var opened = false, hasLANPairingSetup = false, pairingResetNeeded = false
@@ -70,7 +74,7 @@ struct TunnelProbe { var loginRequired = false }
 struct SettingsProbe {
     var tunnel = TunnelProbe()
     var model = Model()
-    let bluetooth = Probe()
+    var bluetooth: Probe { model.bluetooth }
     var pairing = false, connected = false, connecting = false
     UI_PROPERTY
 }
@@ -165,4 +169,4 @@ struct SettingsProbe {
     }
 }
 '''
-Path(sys.argv[1]).write_text(probe + methods + tests.replace('UI_PROPERTY', ui_property))
+Path(sys.argv[1]).write_text(probe + methods + tests.replace('UI_PROPERTY', ui_property).replace('SETUP_PROPERTY', setup))

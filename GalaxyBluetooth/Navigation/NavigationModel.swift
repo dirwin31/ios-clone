@@ -427,6 +427,21 @@ final class NavigationModel: NSObject, ObservableObject, @preconcurrency CLLocat
         return location
     }
 
+    // A CarPlay map can still show the phone's position between guidance updates.
+    func carPlayLocation(at date: Date, commaSpeed: Double = -1) -> CLLocation? {
+        guard navigating && usingComma else { return goodLocation }
+        let comma = commaFeedReady && (0...4).contains(date.timeIntervalSince(commaPositionSampleDate))
+            ? commaPosition.map { CLLocation(coordinate: $0, altitude: 0, horizontalAccuracy: -1,
+                verticalAccuracy: -1, course: commaHeading, speed: commaSpeed, timestamp: commaPositionSampleDate) }
+            : nil
+        if let phone = goodLocation, phone.horizontalAccuracy <= 15,
+           (0...3).contains(date.timeIntervalSince(phone.timestamp)),
+           comma.map({ phone.distance(from: $0) <= 30 }) ?? true {
+            return phone
+        }
+        return comma
+    }
+
     override init() {
         super.init()
         manager.delegate = self

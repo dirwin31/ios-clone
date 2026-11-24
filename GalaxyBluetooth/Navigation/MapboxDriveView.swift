@@ -579,6 +579,7 @@ struct MapboxDriveMap: View {
     }
 
     private func position(at date: Date) -> CLLocationCoordinate2D? {
+        if carDisplay != nil { return navigation.carPlayLocation(at: date)?.coordinate }
         if commaTrip {
             guard navigation.commaFeedReady, date.timeIntervalSince(navigation.commaPositionSampleDate) <= 4 else { return nil }
             return navigation.commaPosition
@@ -589,6 +590,7 @@ struct MapboxDriveMap: View {
     // Bluetooth status can arrive between phone fixes. A newer nearby fix moves
     // only the display camera while comma guidance and its own position are live.
     private var cameraLocation: CLLocation? {
+        if carDisplay != nil { return navigation.carPlayLocation(at: .now, commaSpeed: commaSpeed) }
         guard commaTrip else { return navigation.goodLocation }
         guard let point = position(at: .now) else { return nil }
         let sample = CLLocation(coordinate: point, altitude: 0, horizontalAccuracy: -1, verticalAccuracy: -1,
@@ -676,18 +678,15 @@ struct MapboxDriveMap: View {
                         navigation.notice = "Mapbox couldn’t load. Check your internet connection and public token in Navigation map settings."
                     }
                 }
-                .overlay(alignment: .topLeading) {
-                    if carDisplay != nil, anchored {
-                        TimelineView(.periodic(from: .now, by: 1)) { clock in
-                            let live = position(at: clock.date) != nil
-                            let recent = commaTrip && navigation.commaFeedReady && (0...4).contains(clock.date.timeIntervalSince(navigation.commaPositionSampleDate))
-                            if live || recent {
-                                Image(uiImage: Self.carArrow)
-                                    .opacity(live ? 1 : 0.45)
-                                    .position(anchor)
-                                    .allowsHitTesting(false)
-                                    .accessibilityHidden(true)
-                            }
+            }
+            .overlay(alignment: .topLeading) {
+                if carDisplay != nil, driving && following {
+                    TimelineView(.periodic(from: .now, by: 1)) { _ in
+                        if position(at: .now) != nil {
+                            Image(uiImage: Self.carArrow)
+                                .position(anchor)
+                                .allowsHitTesting(false)
+                                .accessibilityHidden(true)
                         }
                     }
                 }
@@ -809,14 +808,14 @@ struct MapboxDriveMap: View {
         if reduceMotion || !continuous || layoutChanged { viewport = camera }
         else {
             let duration = carDisplay != nil
-                ? NavigationMapMotion.carPlayAnimationDuration(interval: dt, fixAge: -stamp.timeIntervalSinceNow)
+                ? NavigationMapMotion.carPlayAnimationDuration(interval: dt)
                 : min(2.5, max(0.1, dt))
             withViewportAnimation(.linear(duration: duration)) { viewport = camera }
         }
     }
 
     private func updateCommaSpeed() {
-        guard let point = position(at: .now) else { lastCommaFix = nil; commaSpeed = 0; return }
+        guard navigation.commaFeedReady, let point = navigation.commaPosition else { lastCommaFix = nil; commaSpeed = 0; return }
         let fix = CLLocation(coordinate: point, altitude: 0, horizontalAccuracy: -1, verticalAccuracy: -1,
                              timestamp: navigation.commaPositionSampleDate)
         defer { lastCommaFix = fix }

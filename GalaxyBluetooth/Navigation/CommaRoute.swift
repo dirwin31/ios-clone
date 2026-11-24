@@ -152,10 +152,9 @@ enum NavigationMapMotion {
         speed >= 2.5 && (hasMeasuredSpeed || displacement >= 3)
     }
 
-    static func carPlayAnimationDuration(interval: TimeInterval, fixAge: TimeInterval) -> TimeInterval {
-        // Shorten late updates without turning every delayed Bluetooth sample into a jump and pause.
-        let cadence = min(1.2, max(0.15, interval))
-        return min(cadence, max(cadence * 0.65, cadence - max(0, fixAge)))
+    static func carPlayAnimationDuration(interval: TimeInterval) -> TimeInterval {
+        // Use the sample cadence so the camera keeps moving between Bluetooth fixes.
+        min(4, max(0.1, interval))
     }
 
     // At the same street-detail zoom, a shorter map covers less ground ahead.
