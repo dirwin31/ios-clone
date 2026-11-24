@@ -140,7 +140,8 @@ final class GalaxyAssetStore: ObservableObject {
                             func matches(_ bytes: Data) -> Bool { bytes.count == file.size && GalaxyAssetManifest.digest(bytes) == file.sha256 }
                             if let saved, let bytes = try? Data(contentsOf: saved.appendingPathComponent(file.path)), matches(bytes) { return (file.path, bytes) }
                             let (code, bytes) = try await fetch("/" + file.path, max(file.size, 1))
-                            guard code == 200, matches(bytes) else { throw BridgeError.message("Galaxy update verification failed.") }
+                            guard code == 200 else { throw BridgeError.message("Galaxy update: \(file.path) returned HTTP \(code).") }
+                            guard matches(bytes) else { throw BridgeError.message("Galaxy update: \(file.path) did not match comma’s file inventory.") }
                             return (file.path, bytes)
                         }
                     }

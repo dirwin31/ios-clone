@@ -112,7 +112,8 @@ final class AppModel: ObservableObject {
     @Published var tab: CompanionTab = .connections {
         didSet {
             autoOpenGalaxyPending = false
-            if tab != .galaxy { galaxyPage.pendingStartupPage = nil }
+            if tab == .galaxy { applyMatchedGalaxy() }
+            else { galaxyPage.pendingStartupPage = nil }
         }
     }
     @Published var developerMode = UserDefaults.standard.bool(forKey: "galaxy.app.developerMode") {
@@ -579,7 +580,7 @@ final class AppModel: ObservableObject {
         guard opened, let root = assets.readyRoot, root != assets.inUseRoot else { return }
         assets.inUseRoot = root
         server.useWebRoot(root)
-        recoverGalaxy(automatic: false)
+        galaxyPage.retry()
     }
 
     private var softwareReportSession = ""
@@ -625,24 +626,33 @@ final class AppModel: ObservableObject {
         matchingGalaxy = true
         lastGalaxyMatch = Date()
         defer { matchingGalaxy = false }
-        let session = connectionSession
-        await collectSoftwareDiagnostics()
-        guard connectionSession == session, transport.connected else { return }
-        let stillCurrent = { self.wantsConnection && self.transport.connected && self.connectionSession == session }
-        if transport.usesNetwork {
-            // Pages come straight from comma, never through the Bluetooth bridge or the read cache.
-            let lan = self.transport
+        // Pin both the manifest and asset files to one verified network session.
+        let mode = self.mode
+        let screenRoute = transport.galaxyScreenRoute
+        if let screenRoute {
+            let source: any GalaxyRequestTransport = screenRoute == .lan ? lan : tunnel
+            let generation = screenRoute == .lan ? lan.generation : tunnel.generation
+            let stillCurrent = {
+                self.wantsConnection && self.mode == mode && source.connected &&
+                generation == (screenRoute == .lan ? self.lan.generation : self.tunnel.generation)
+            }
+            connectionLog.recordState("galaxy-screen-source", "Galaxy screens: checking over " + screenRoute.title)
             await assets.check(fetch: { path, _ in
-                let response = path.hasPrefix("/api/") ? try await lan.request(path: path, method: "GET", headers: [:], body: Data()) : try await lan.page(path: path)
+                let response = path.hasPrefix("/api/") ? try await source.request(path: path, method: "GET", headers: [:], body: Data()) : try await source.page(path: path)
                 return (response.status, response.bodyData)
             }, stillCurrent: stillCurrent)
+            if stillCurrent(), tab != .galaxy || !galaxyPage.mounted { applyMatchedGalaxy() }
         } else {
-            let bluetooth = self.transport
+            let bluetooth = self.bluetooth
+            let session = bluetooth.sessionIdentifier
+            connectionLog.recordState("galaxy-screen-source", "Galaxy screens: checking version over Bluetooth")
             await assets.checkBluetoothManifest(fetch: { path, _ in
                 let response = try await bluetooth.request(path: path, method: "GET", headers: [:], body: Data())
                 return (response.status, response.bodyData)
-            }, stillCurrent: stillCurrent)
+            }, stillCurrent: { self.wantsConnection && self.mode == mode && bluetooth.connected && bluetooth.sessionIdentifier == session })
         }
+        connectionLog.recordState("galaxy-screen-status", "Galaxy screens: " + assets.status)
+        await collectSoftwareDiagnostics()
     }
     func openIfReady() {
         if transport.connected { pairingResetNeeded = false }
@@ -652,7 +662,7 @@ final class AppModel: ObservableObject {
         openingGalaxy = true
         Task { @MainActor in
             defer { openingGalaxy = false }
-            if transport.usesNetwork ? Date().timeIntervalSince(lastGalaxyMatch) > 15 : assets.readyRoot != nil && !matchingGalaxy {
+            if transport.galaxyScreenRoute != nil ? Date().timeIntervalSince(lastGalaxyMatch) > 15 : assets.readyRoot != nil && !matchingGalaxy {
                 await checkGalaxyUpdates()
             }
             guard wantsConnection, !pairingInProgress, !offerAudioPairing, !showAudioPairing, transport.connected, !opened else { return }
@@ -1249,7 +1259,7 @@ struct GalaxyRootView: View {
         if tab != .connections { discovery.stop() }
         model.connectionLog.record("UI tab selected: \(model.tab.rawValue) → \(tab.rawValue)")
         model.tab = tab
-        if tab == .galaxy { hasVisitedGalaxy = true; model.applyMatchedGalaxy() }
+        if tab == .galaxy { hasVisitedGalaxy = true }
         model.diagnostics.live = tab == .live
     }
     private let brandPurple = Color(red: 139.0 / 255, green: 92.0 / 255, blue: 246.0 / 255)

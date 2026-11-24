@@ -263,8 +263,17 @@ import Foundation
         precondition(cancellationEvents.count == 2 && cancellationEvents.last!.contains("cancelled before dispatch"))
         preferred.mode = .lan
         precondition(preferred.label == "Local Wi-Fi")
+        precondition(preferred.galaxyScreenRoute == .lan)
         preferred.mode = .bluetooth
         precondition(preferred.label == "Bluetooth")
+        precondition(preferred.galaxyScreenRoute == nil, "Bluetooth-only pauses screen transfers")
+
+        preferred.mode = .automatic
+        preferred.priority = [.bluetooth, .tunnel, .lan]
+        remote.connected = true
+        precondition(preferred.selectedRoute == .bluetooth && preferred.galaxyScreenRoute == .tunnel)
+        remote.connected = false
+        precondition(preferred.selectedRoute == .bluetooth && preferred.galaxyScreenRoute == .lan)
         precondition(preferred.localRefreshDelay == nil)
         print("Tunnel identity/auth, origin and cookie isolation, priority, fallback and no-write-replay checks passed")
     }

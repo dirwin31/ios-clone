@@ -429,6 +429,8 @@ final class PreferredTransport: ObservableObject, GalaxyRequestTransport {
         switch route { case .lan: lan; case .tunnel: tunnel; case .bluetooth: bluetooth }
     }
     var selectedRoute: ConnectionRoute? { routes.first { transport($0)?.connected == true } }
+    /// Screen transfers can use a verified network route even when regular requests prefer Bluetooth.
+    var galaxyScreenRoute: ConnectionRoute? { routes.first { $0 != .bluetooth && transport($0)?.connected == true } }
     var connected: Bool { selectedRoute != nil }
     var usesLAN: Bool { selectedRoute == .lan }
     private var localDelay: TimeInterval = 0.2
