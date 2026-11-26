@@ -1,6 +1,62 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "Expanded Galaxy view": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Vista ampliada de Galaxy"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Vue Galaxy agrandie"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Galaxy 확장 보기"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Galaxy 扩展视图"
+          }
+        }
+      }
+    },
+    "Move Galaxy controls into the app toolbar to give the page more room": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mueve los controles de Galaxy a la barra de la app para dar más espacio a la página"
+          }
+        },
+        "fr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Place les commandes Galaxy dans la barre de l’app pour agrandir la page"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Galaxy 컨트롤을 앱 도구 막대로 옮겨 페이지 공간을 넓힙니다"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "将 Galaxy 控件移到 App 工具栏，为页面留出更多空间"
+          }
+        }
+      }
+    },
     "Phone & alerts": {
       "localizations": {
         "es": {

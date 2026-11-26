@@ -56,8 +56,9 @@ final class IntegrationUITests: XCTestCase {
         app.buttons["Settings"].firstMatch.tap()
         XCTAssertTrue(app.staticTexts["Your comma"].waitForExistence(timeout: 8))
     }
-    private func launchGalaxyFixture(_ app: XCUIApplication, motionEnabled: Bool = true) {
-        app.launchArguments = ["--preview-galaxy", "-galaxy.galacticalAnimations", motionEnabled ? "YES" : "NO"]
+    private func launchGalaxyFixture(_ app: XCUIApplication, motionEnabled: Bool = true, expanded: Bool = true) {
+        app.launchArguments = ["--preview-galaxy", "-galaxy.galacticalAnimations", motionEnabled ? "YES" : "NO",
+                               "-galaxy.app.expandedGalaxyView", expanded ? "YES" : "NO"]
         app.launchEnvironment["GALAXY_UI_FIXTURE"] = """
         <!doctype html><meta name="viewport" content="width=device-width,initial-scale=1">
         <style>body{font:18px system-ui;margin:0}header,nav{height:55px}main{padding:12px}h1{margin-top:0}</style>
@@ -73,6 +74,26 @@ final class IntegrationUITests: XCTestCase {
         document.getElementById('selection').textContent=b.textContent+' selected';}};</script>
         """
         app.launch()
+    }
+
+    func testClassicGalaxyLayout() {
+        let app = XCUIApplication()
+        launchGalaxyFixture(app, expanded: false)
+        defer { XCUIDevice.shared.orientation = .portrait }
+        for orientation: UIDeviceOrientation in [.portrait, .landscapeLeft] {
+            XCUIDevice.shared.orientation = orientation
+            let tools = app.webViews.buttons["Tools"]
+            XCTAssertTrue(tools.waitForExistence(timeout: 20))
+            XCTAssertTrue(tools.isHittable)
+            XCTAssertTrue(app.webViews.buttons["Menu"].isHittable)
+            XCTAssertFalse(app.buttons["galaxy-pill-options"].exists)
+            tools.tap()
+            XCTAssertTrue(app.webViews.staticTexts["Tools selected"].waitForExistence(timeout: 5))
+            let shot = XCTAttachment(screenshot: app.screenshot())
+            shot.name = orientation == .portrait ? "Classic Galaxy portrait" : "Classic Galaxy landscape"
+            shot.lifetime = .keepAlways
+            add(shot)
+        }
     }
 
     func testGalaxyPillMotion() {

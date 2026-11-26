@@ -1000,6 +1000,7 @@ final class AppModel: ObservableObject {
 enum AppPreference {
     static let startupPage = "galaxy.app.startupPage"
     static let openGalaxy = "galaxy.app.openAfterConnection"
+    static let expandedGalaxyView = "galaxy.app.expandedGalaxyView"
     static let toolbarLabels = "galaxy.app.toolbarLabels"
     static let rememberDestinations = "galaxy.app.rememberDestinations"
     static let liveScreenAwake = "galaxy.app.liveScreenAwake"
@@ -1036,6 +1037,7 @@ struct GalaxyRootView: View {
     @State private var hasVisitedGalaxy = false
     @State private var appTabsExpanded = true
     @State private var showingAppTabsInGalaxy = false
+    @AppStorage(AppPreference.expandedGalaxyView) private var expandedGalaxyView = true
     @AppStorage(GalaxyToolbar.orderKey) private var galaxyToolbarOrder = ""
     private var motionDisabled: Bool { reduceMotion || !galacticalAnimations || scenePhase != .active }
     @AppStorage("galaxy.galacticalAnimations") private var galacticalAnimations = true
@@ -1051,7 +1053,7 @@ struct GalaxyRootView: View {
         return LinearGradient(colors: [edge, farEdge], startPoint: .topLeading, endPoint: .bottomTrailing)
     }
     private var showsGalaxyPill: Bool {
-        page == .galaxy && !showingAppTabsInGalaxy && !galaxyPage.barItems.isEmpty && !galaxyPage.stalled && !editorFocused
+        expandedGalaxyView && page == .galaxy && !showingAppTabsInGalaxy && !galaxyPage.barItems.isEmpty && !galaxyPage.stalled && !editorFocused
     }
     private var editorFocused: Bool { page == .galaxy && galaxyPage.landscapeEditor }
     @Environment(\.openURL) private var openURL
@@ -1095,7 +1097,7 @@ struct GalaxyRootView: View {
                 if model.opened, let url = server.url {
                     GalaxyWebView(url: url, requestKey: server.localSecret, diagnostics: model.galaxyPage,
                                   isActive: model.tab == .galaxy && scenePhase == .active,
-                                  localWiFi: model.transport.usesLAN, bluetooth: model.transport.label == "Bluetooth") {
+                                  expandedView: expandedGalaxyView, localWiFi: model.transport.usesLAN, bluetooth: model.transport.label == "Bluetooth") {
                         model.galaxyPage.report(server: server, connection: model.transport.label)
                     }
                         .modifier(CompanionWebSafeArea())

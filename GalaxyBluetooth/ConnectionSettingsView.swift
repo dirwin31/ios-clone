@@ -23,6 +23,7 @@ struct ConnectionSettingsView: View {
     @Environment(\.openURL) private var openURL
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @AppStorage(AppPreference.openGalaxy) private var autoOpenGalaxy = true
+    @AppStorage(AppPreference.expandedGalaxyView) private var expandedGalaxyView = true
     @AppStorage(AppPreference.toolbarLabels) private var toolbarLabels = true
     @AppStorage(AppPreference.liveScreenAwake) private var keepLiveAwake = true
     @AppStorage(AppAppearance.key) private var appearance = AppAppearance.system
@@ -678,15 +679,19 @@ struct ConnectionSettingsView: View {
                 separator
                 toggleRow("sparkles", title: "Galactical Animations", subtitle: "Animate button presses, tab selection, and connection changes", isOn: $galacticalAnimations)
                 separator
-                if !DuoLayout.isEnabled {
-                    row("arrow.up.arrow.down", title: "Galaxy toolbar", subtitle: "Choose and arrange four shortcuts") {
-                        Button("Edit") { showToolbarOrder = true }
-                            .font(.system(size: 12)).frame(minHeight: 44)
+                toggleRow("arrow.up.left.and.arrow.down.right", title: "Expanded Galaxy view", subtitle: "Move Galaxy controls into the app toolbar to give the page more room", isOn: $expandedGalaxyView)
+                separator
+                if expandedGalaxyView {
+                    if !DuoLayout.isEnabled {
+                        row("arrow.up.arrow.down", title: "Galaxy toolbar", subtitle: "Choose and arrange four shortcuts") {
+                            Button("Edit") { showToolbarOrder = true }
+                                .font(.system(size: 12)).frame(minHeight: 44)
+                        }
+                        separator
                     }
+                    toggleRow("textformat", title: "Galaxy toolbar labels", subtitle: "Show names below icons when the toolbar has room", isOn: $toolbarLabels)
                     separator
                 }
-                toggleRow("textformat", title: "Galaxy toolbar labels", subtitle: "Show names below icons when the toolbar has room", isOn: $toolbarLabels)
-                separator
                 row("rectangle.on.rectangle", title: "Galaxy screens", subtitle: pairing ? "Waiting for pairing" : checking ? "Checking version…" : assets.status == "Galaxy matches comma." ? "Up to date · just checked" : assets.status.contains("screens have changed") ? "Update available · connect over Wi-Fi or Tunnel" : assets.readyRoot != nil ? "Saved from your comma" : "Not downloaded · needs Local Wi-Fi or Tunnel") {
                     Button {
                         Task { await model.checkGalaxyUpdates(); checked = true }

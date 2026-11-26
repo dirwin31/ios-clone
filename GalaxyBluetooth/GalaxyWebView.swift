@@ -186,12 +186,13 @@ struct GalaxyWebView: View {
     @ObservedObject var diagnostics: GalaxyPageDiagnostics
     @AppStorage("galaxy.app.followGalaxyLanguage") private var followGalaxyLanguage = true
     var isActive = true
+    var expandedView = true
     var localWiFi = false
     var bluetooth = false
     let report: () -> String
     var body: some View {
         ZStack {
-            GalaxyPage(url: url, requestKey: requestKey, diagnostics: diagnostics, isActive: isActive, localWiFi: localWiFi, bluetooth: bluetooth, followGalaxyLanguage: followGalaxyLanguage)
+            GalaxyPage(url: url, requestKey: requestKey, diagnostics: diagnostics, isActive: isActive, expandedView: expandedView, localWiFi: localWiFi, bluetooth: bluetooth, followGalaxyLanguage: followGalaxyLanguage)
                 .id(url.absoluteString + diagnostics.reloadID.uuidString)
             if diagnostics.stalled {
                 VStack(spacing: 16) {
@@ -239,11 +240,13 @@ private struct GalaxyPage: UIViewRepresentable {
 
     let diagnostics: GalaxyPageDiagnostics
     let isActive: Bool
+    let expandedView: Bool
     let localWiFi: Bool
     let bluetooth: Bool
     let followGalaxyLanguage: Bool
     func makeCoordinator() -> Coordinator {
         let coordinator = Coordinator(origin: url, requestKey: requestKey, diagnostics: diagnostics)
+        coordinator.expandedView = expandedView
         coordinator.isVisible = isActive
         coordinator.localWiFi = localWiFi
         return coordinator
@@ -462,7 +465,7 @@ private struct GalaxyPage: UIViewRepresentable {
             const el = buttons.get(id);
             if (el?.isConnected && !el.disabled && !el.closest('[inert]')) el.click();
           };
-          window.__galaxyBarReady = () => document.documentElement.classList.toggle('native-galaxy-pill', buttons.size > 0);
+          window.__galaxyBarReady = expanded => document.documentElement.classList.toggle('native-galaxy-pill', expanded && buttons.size > 0);
           const startBar = () => {
             if (window !== window.top) return;
             let queued = false;
@@ -651,6 +654,10 @@ private struct GalaxyPage: UIViewRepresentable {
     func updateUIView(_ uiView: WKWebView, context: Context) {
         uiView.evaluateJavaScript("window.__galaxyBluetooth = \(bluetooth ? "true" : "false")", completionHandler: nil)
         if isActive, let startup = diagnostics.takeStartupURL(url) { uiView.load(URLRequest(url: startup)) }
+        if context.coordinator.expandedView != expandedView {
+            context.coordinator.expandedView = expandedView
+            context.coordinator.syncBar(uiView)
+        }
         context.coordinator.isVisible = isActive
         context.coordinator.localWiFi = localWiFi
         context.coordinator.syncVisibility(uiView)
@@ -673,6 +680,10 @@ private struct GalaxyPage: UIViewRepresentable {
         private var replayExport: Task<Void, Never>?
         private var downloads: [ObjectIdentifier: (WKDownload, URL?)] = [:]
         var isVisible = true
+        var expandedView = true
+        func syncBar(_ webView: WKWebView) {
+            webView.evaluateJavaScript("window.__galaxyBarReady?.(\(expandedView ? "true" : "false"))", completionHandler: nil)
+        }
         var wasFollowingLanguage = false
         func syncVisibility(_ webView: WKWebView) {
             webView.evaluateJavaScript("window.__galaxySetVisible?.(\(isVisible ? "true" : "false"))", completionHandler: nil)
@@ -726,7 +737,7 @@ private struct GalaxyPage: UIViewRepresentable {
                 if diagnostics.barItems != bar { diagnostics.barItems = bar }
                 let status = body["status"] as? String ?? ""
                 if diagnostics.deviceStatus != status { diagnostics.deviceStatus = status }
-                webView.evaluateJavaScript("window.__galaxyBarReady?.()", completionHandler: nil)
+                syncBar(webView)
             case "language":
                 guard message.frameInfo.isMainFrame,
                       UserDefaults.standard.object(forKey: "galaxy.app.followGalaxyLanguage") as? Bool ?? true,
