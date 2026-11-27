@@ -466,23 +466,28 @@ final class LoopbackServer: ObservableObject {
             data = live.bodyData
         }
         if ["js/snapshot-feed.js", "js/settings.js"].contains(assetPath), let source = String(data: data, encoding: .utf8) {
-            data = Data(Self.nativeReadDeadlines(source, asset: assetPath).utf8)
+            let adapted = Self.nativeReadDeadlines(source, asset: assetPath)
+            if adapted == source { record("Galaxy patch failed: read deadlines in \(assetPath)") }
+            data = Data(adapted.utf8)
         }
-        if assetPath == "js/app.js", let source = String(data: data, encoding: .utf8),
-           source.contains("\ncreateApp({"), source.contains(".mount(\"#galaxy-app\")"),
-           source.contains("import { SettingsPage"), source.contains("visibleTools()") {
-            let entry = source.replacingOccurrences(of: "\ncreateApp({", with: "\n" + Self.startupSettingsScript + "\nconst startupApp = createApp({")
-            data = Data((entry + "\n" + Self.startupCatalogScript).utf8)
+        if assetPath == "js/app.js", let source = String(data: data, encoding: .utf8) {
+            if source.contains("\ncreateApp({"), source.contains(".mount(\"#galaxy-app\")"),
+               source.contains("import { SettingsPage"), source.contains("visibleTools()") {
+                let entry = source.replacingOccurrences(of: "\ncreateApp({", with: "\n" + Self.startupSettingsScript + "\nconst startupApp = createApp({")
+                data = Data((entry + "\n" + Self.startupCatalogScript).utf8)
+            } else { record("Galaxy patch failed: startup page in js/app.js") }
         }
         let pathExtension = (assetPath as NSString).pathExtension
-        if assetPath == "js/camera-viewer.js", let source = String(data: data, encoding: .utf8),
-           source.contains("export const CameraViewer") {
-            data.append(Data(("\n" + Self.nativeCameraPlaybackScript).utf8))
+        if assetPath == "js/camera-viewer.js", let source = String(data: data, encoding: .utf8) {
+            if source.contains("export const CameraViewer") {
+                data.append(Data(("\n" + Self.nativeCameraPlaybackScript).utf8))
+            } else { record("Galaxy patch failed: camera playback in js/camera-viewer.js") }
         }
-        if assetPath == "js/toggle-search.js", let source = String(data: data, encoding: .utf8),
-           source.contains("export class SettingsSearchIndex"), source.contains("export const ToggleSearch") {
-            data.append(Data(("\n" + Self.nativeSearchScript).utf8))
-            record("Native incremental toggle search enabled")
+        if assetPath == "js/toggle-search.js", let source = String(data: data, encoding: .utf8) {
+            if source.contains("export class SettingsSearchIndex"), source.contains("export const ToggleSearch") {
+                data.append(Data(("\n" + Self.nativeSearchScript).utf8))
+                record("Native incremental toggle search enabled")
+            } else { record("Galaxy patch failed: toggle search in js/toggle-search.js") }
         }
         let mime: String
         switch pathExtension {
