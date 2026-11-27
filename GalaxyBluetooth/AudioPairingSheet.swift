@@ -6,7 +6,7 @@ struct AudioPairingSheet: View {
 
     var body: some View {
         VStack(spacing: 18) {
-            Image(systemName: "music.note").font(.system(size: 40))
+            Image(systemName: "music.note").accessibilityHidden(true).font(.system(size: 40))
             Text("Bluetooth music").font(.title3.weight(.semibold))
             switch pairing.phase {
             case .idle, .opening:

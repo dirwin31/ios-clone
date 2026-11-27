@@ -196,7 +196,7 @@ struct GalaxyWebView: View {
                 .id(url.absoluteString + diagnostics.reloadID.uuidString)
             if diagnostics.stalled {
                 VStack(spacing: 16) {
-                    Image(systemName: "exclamationmark.bubble").font(.largeTitle).foregroundStyle(.purple)
+                    Image(systemName: "exclamationmark.bubble").accessibilityHidden(true).font(.largeTitle).foregroundStyle(.purple)
                     Text("Galaxy hasn’t loaded").font(.title2.bold())
                     Text("Copy the report so we can find what failed, or try loading the page again.")
                         .foregroundStyle(.secondary).multilineTextAlignment(.center)

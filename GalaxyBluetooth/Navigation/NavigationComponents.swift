@@ -275,9 +275,10 @@ struct CommaRouteOptionsView: View {
                                         Text(NavigationDuration.text(choice.durationSeconds))
                                         Text(units.text(choice.distanceMeters)).foregroundStyle(.secondary)
                                         Spacer()
-                                        if choice.index == state.selectedRoute { Image(systemName: "checkmark") }
+                                        if choice.index == state.selectedRoute { Image(systemName: "checkmark").accessibilityHidden(true) }
                                     }
                                 }.disabled(choice.index == state.selectedRoute || busy || !connection.connected)
+                                .accessibilityAddTraits(choice.index == state.selectedRoute ? .isSelected : [])
                             }
                         }
                     } else {

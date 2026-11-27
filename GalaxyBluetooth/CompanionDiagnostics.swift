@@ -217,7 +217,7 @@ struct CompanionView: View {
                         .padding(8).background(purple.opacity(0.18), in: Capsule()).foregroundStyle(purple)
                 }
                 HStack(spacing: 12) {
-                    Image(systemName: "car.side.fill").font(.title2).foregroundStyle(purple)
+                    Image(systemName: "car.side.fill").accessibilityHidden(true).font(.title2).foregroundStyle(purple)
                     VStack(alignment: .leading, spacing: 4) {
                         Text(drivingStatus).font(.headline)
                         Text(diagnostics.fresh ? "Telemetry connected" : "Waiting for fresh telemetry")

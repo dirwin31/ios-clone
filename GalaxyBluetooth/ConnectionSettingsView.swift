@@ -519,7 +519,7 @@ struct ConnectionSettingsView: View {
                         if connectingCommaID == device.id {
                             ProgressView().controlSize(.small).tint(accent)
                         } else {
-                            Image(systemName: "chevron.right").font(.caption2.weight(.semibold)).foregroundStyle(accent)
+                            Image(systemName: "chevron.right").accessibilityHidden(true).font(.caption2.weight(.semibold)).foregroundStyle(accent)
                         }
                     }.padding(.horizontal, 14).frame(minHeight: 58)
                         .background(LinearGradient(colors: [accent.opacity(0.18), panel], startPoint: .leading, endPoint: .trailing), in: RoundedRectangle(cornerRadius: 16))
@@ -565,9 +565,9 @@ struct ConnectionSettingsView: View {
             HStack {
                 Text(verbatim: name)
                 Spacer()
-                if startupPage == id { Image(systemName: "checkmark").foregroundStyle(accent) }
+                if startupPage == id { Image(systemName: "checkmark").accessibilityHidden(true).foregroundStyle(accent) }
             }
-        }.foregroundStyle(.primary)
+        }.foregroundStyle(.primary).accessibilityAddTraits(startupPage == id ? .isSelected : [])
     }
 
     private var startupPicker: some View {
@@ -802,7 +802,7 @@ struct ConnectionSettingsView: View {
     }
     private func row<Control: View>(_ symbol: String, title: String, subtitle: String, @ViewBuilder control: () -> Control) -> some View {
         HStack(spacing: 10) {
-            Image(systemName: symbol).foregroundStyle(accent).frame(width: 20)
+            Image(systemName: symbol).accessibilityHidden(true).foregroundStyle(accent).frame(width: 20)
             VStack(alignment: .leading, spacing: 2) {
                 Text(LocalizedStringKey(title)).font(.footnote.weight(.medium))
                 Text(LocalizedStringKey(subtitle)).font(.caption2).foregroundStyle(muted).fixedSize(horizontal: false, vertical: true)

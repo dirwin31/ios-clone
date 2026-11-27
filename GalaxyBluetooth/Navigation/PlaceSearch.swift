@@ -42,7 +42,7 @@ struct PlaceSearch: View {
                                 ForEach(saved.recentDestinations) { place in
                                     Button { onSelect(saved.navigationPlace(place)); dismiss() } label: {
                                         VStack(alignment: .leading, spacing: 6) {
-                                            Image(systemName: "clock.arrow.circlepath").foregroundStyle(StarPilotTheme.accent)
+                                            Image(systemName: "clock.arrow.circlepath").accessibilityHidden(true).foregroundStyle(StarPilotTheme.accent)
                                             Text(place.name).font(.headline).lineLimit(2)
                                             Text(place.address).font(.caption).foregroundStyle(.secondary).lineLimit(2)
                                         }
@@ -152,7 +152,7 @@ struct RecentDestinationRow: View {
     var body: some View {
         Button(action: action) {
             HStack(spacing: 14) {
-                Image(systemName: "clock").font(.title3).foregroundStyle(.secondary)
+                Image(systemName: "clock").accessibilityHidden(true).font(.title3).foregroundStyle(.secondary)
                 VStack(alignment: .leading, spacing: 4) {
                     Text(place.name).font(.headline).foregroundStyle(.primary).lineLimit(1)
                     Text(place.address).font(.caption).foregroundStyle(.secondary).lineLimit(1)

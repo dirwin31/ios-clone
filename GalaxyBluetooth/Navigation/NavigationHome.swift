@@ -230,9 +230,9 @@ struct NavigationHome: View {
                         collapsed = false
                     } label: {
                         HStack(spacing: 6) {
-                            Image(systemName: "bookmark")
+                            Image(systemName: "bookmark").accessibilityHidden(true)
                             Text("Saved places & recents")
-                            Image(systemName: "chevron.up").font(.caption2.bold())
+                            Image(systemName: "chevron.up").accessibilityHidden(true).font(.caption2.bold())
                         }.font(.subheadline.weight(.semibold)).frame(maxWidth: .infinity, minHeight: 44)
                     }
                 } else {
@@ -308,7 +308,7 @@ struct NavigationHome: View {
 
     private func placeRow(_ title: String, subtitle: String, symbol: String) -> some View {
         HStack(spacing: 12) {
-            Image(systemName: symbol).frame(width: 28).foregroundStyle(StarPilotTheme.guidance)
+            Image(systemName: symbol).accessibilityHidden(true).frame(width: 28).foregroundStyle(StarPilotTheme.guidance)
             VStack(alignment: .leading, spacing: 2) {
                 Text(title).font(.headline).foregroundStyle(.primary).lineLimit(2)
                 if !subtitle.isEmpty { Text(subtitle).font(.caption).foregroundStyle(.secondary).lineLimit(2) }
@@ -379,7 +379,7 @@ struct NavigationHome: View {
 
     private func destinationHeader(_ place: NavigationPlace) -> some View {
         HStack(spacing: 12) {
-            Image(systemName: "mappin.and.ellipse").font(.title3.weight(.semibold))
+            Image(systemName: "mappin.and.ellipse").accessibilityHidden(true).font(.title3.weight(.semibold))
                 .foregroundStyle(.white).frame(width: 42, height: 42)
                 .background(StarPilotTheme.guidance.gradient, in: RoundedRectangle(cornerRadius: 14))
             VStack(alignment: .leading, spacing: 2) {
@@ -425,7 +425,7 @@ struct NavigationHome: View {
                 let selected = index == navigation.selectedRoute
                 Button { navigation.chooseRoute(index) } label: {
                     HStack(spacing: 12) {
-                        Image(systemName: selected ? "checkmark.circle.fill" : "circle")
+                        Image(systemName: selected ? "checkmark.circle.fill" : "circle").accessibilityHidden(true)
                             .foregroundStyle(selected ? StarPilotTheme.guidance : Color.secondary)
                         VStack(alignment: .leading, spacing: 3) {
                             Text(NavigationDuration.text(route.expectedTravelTime)).font(.title3.bold()).monospacedDigit()
@@ -499,7 +499,7 @@ struct NavigationHome: View {
 
     private var maneuver: some View {
         HStack(spacing: 14) {
-            Image(systemName: turnSymbol).font(.system(size: 32, weight: .bold))
+            Image(systemName: turnSymbol).accessibilityHidden(true).font(.system(size: 32, weight: .bold))
                 .contentTransition(reduceMotion ? .identity : .symbolEffect(.replace))
                 .animation(reduceMotion ? nil : CompanionMotion.selection, value: turnSymbol)
                 .foregroundStyle(.white).frame(width: 56, height: 56)

@@ -287,7 +287,7 @@ struct NavigationMapSettings: View {
                 .navigationTitle(title)
         } label: {
             HStack(spacing: 12) {
-                Image(systemName: icon)
+                Image(systemName: icon).accessibilityHidden(true)
                     .foregroundStyle(StarPilotTheme.accent)
                     .frame(width: 36, height: 36)
                     .background(StarPilotTheme.accent.opacity(0.13), in: RoundedRectangle(cornerRadius: 10))
