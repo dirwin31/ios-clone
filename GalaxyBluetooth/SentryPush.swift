@@ -15,6 +15,7 @@ final class SentryPush: ObservableObject {
     private var registeredDevice = ""
     private var permissionRequest = UUID()
     private var lastAttempt = Date.distantPast
+    private var refreshInterval: TimeInterval = 60
     var transport: (any GalaxyRequestTransport)?
     private let defaults: UserDefaults
     private let environment: String
@@ -93,8 +94,9 @@ final class SentryPush: ObservableObject {
 
     func synchronize() async {
         if registeredDevice != identity { registered = false }
+        let settled = registered && subscribed[identity] == token && !defaults.bool(forKey: "galaxy.sentry.enrollRequested")
         guard !busy, let transport, transport.connected, !identity.isEmpty,
-              now().timeIntervalSince(lastAttempt) >= 60 else { return }
+              now().timeIntervalSince(lastAttempt) >= (settled ? refreshInterval : 60) else { return }
         let device = identity
         guard enabled ? !token.isEmpty : subscribed[device] != nil else { return }
         busy = true
@@ -136,6 +138,7 @@ final class SentryPush: ObservableObject {
             registered = true
             registeredDevice = device
             let enrollment = (result["relayEnrollment"] as? [String: Any])?["state"] as? String
+            refreshInterval = enrollment == nil || enrollment == "enrolled" ? 300 : 60
             switch enrollment {
             case "enrolling", "rotating", "confirming": status = "Phone registered. Waiting for relay enrollment in Galaxy → Sentry."
             case "unenrolled", "revoked": status = (result["relayEnrollment"] as? [String: Any])?["automaticConfigured"] as? Bool == true ? "Enable alerts to enroll this comma automatically." : "Phone registered. Hosted alerts are not configured in this release yet."

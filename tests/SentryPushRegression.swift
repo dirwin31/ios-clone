@@ -107,6 +107,16 @@ enum BridgeError: Error { case message(String) }
             if state == "actionRequired" { precondition(sandbox.status.contains("authorization needs attention")) }
             if state == "revoking" { precondition(sandbox.status.contains("revocation pending")) }
         }
+        transport.enrollment = "enrolled"
+        time = time.addingTimeInterval(61)
+        await sandbox.synchronize()
+        let settledCount = transport.requests.count
+        time = time.addingTimeInterval(61)
+        await sandbox.synchronize()
+        precondition(transport.requests.count == settledCount, "A settled registration refreshes less often")
+        time = time.addingTimeInterval(240)
+        await sandbox.synchronize()
+        precondition(transport.requests.count == settledCount + 1)
         print("Sentry registration, rotation, retry, unsubscribe and test regressions passed")
     }
 }
