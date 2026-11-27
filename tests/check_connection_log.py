@@ -6,7 +6,7 @@ end = source.index("    func report(model:", start)
 probe = "import Foundation\nimport Combine\n" + source[start:end] + "}\n" + r''' 
 @main struct LogRegression {
     @MainActor static func main() {
-        let log = ConnectionEventLog()
+        let log = ConnectionEventLog(persistenceURL: nil)
         var publications = 0
         let observation = log.objectWillChange.sink { publications += 1 }
         let start = ProcessInfo.processInfo.systemUptime
@@ -54,6 +54,26 @@ probe = "import Foundation\nimport Combine\n" + source[start:end] + "}\n" + r'''
         precondition(publications == beforeStates, "Detailed state logging must not invalidate SwiftUI")
         log.clear(); precondition(log.events.isEmpty)
         log.record("fresh"); precondition(log.events.count == 1)
+        let saved = URL(fileURLWithPath: CommandLine.arguments[1])
+        let first = ConnectionEventLog(persistenceURL: saved)
+        precondition(first.previousSession.isEmpty)
+        first.record("tunnel failed Bearer hidden-token")
+        for index in 0..<5000 { first.record("poll \(index) " + String(repeating: "x", count: 200)) }
+        first.persist(reason: "left foreground")
+        var waited = 0
+        while !FileManager.default.fileExists(atPath: saved.path) && waited < 200 { usleep(10_000); waited += 1 }
+        usleep(50_000)
+        let size = (try? FileManager.default.attributesOfItem(atPath: saved.path)[.size] as? Int) ?? 0
+        precondition(size > 0 && size <= ConnectionEventLog.persistedBytes, "Saved session must stay within its size cap")
+        let second = ConnectionEventLog(persistenceURL: saved)
+        precondition(second.previousSession.contains("left foreground"))
+        precondition(second.previousSession.contains("tunnel failed"), "Failures must survive into the next session")
+        precondition(!second.previousSession.contains("hidden-token"))
+        precondition(second.previousSession.contains("poll 4999"))
+        precondition(second.events.isEmpty)
+        second.clear()
+        usleep(100_000)
+        precondition(second.previousSession.isEmpty && !FileManager.default.fileExists(atPath: saved.path))
         withExtendedLifetime(observation) {}
         print("Connection log: ordering, bounds, redaction, repeat summary, clear, and zero UI publications passed; 30000 events in \(elapsed)s")
     }
@@ -63,4 +83,4 @@ with tempfile.TemporaryDirectory() as folder:
     path = Path(folder)
     (path / "LogProbe.swift").write_text(probe)
     subprocess.run(["swiftc", "-parse-as-library", "-module-cache-path", str(path / "cache"), str(path / "LogProbe.swift"), "-o", str(path / "probe")], check=True)
-    subprocess.run([str(path / "probe")], check=True)
+    subprocess.run([str(path / "probe"), str(path / "saved" / "previous-session.txt")], check=True)

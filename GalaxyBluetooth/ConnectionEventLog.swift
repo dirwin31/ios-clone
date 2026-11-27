@@ -43,10 +43,46 @@ final class ConnectionEventLog: ObservableObject {
     // Error descriptions can contain private tunnel URLs or key material.
     private static let privateValues = try! NSRegularExpression(pattern:
         #"https?://[^\s]+|\b[0-9a-fA-F]{64}\b|(?i:bearer)\s+[^\s]+"#)
-    private static func redact(_ text: String) -> String {
+    static func redact(_ text: String) -> String {
         privateValues.stringByReplacingMatches(in: text, range: NSRange(text.startIndex..., in: text), withTemplate: "[redacted]")
     }
     private var stateEvents: [String: String] = [:]
+    nonisolated static let defaultPersistenceURL = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?
+        .appendingPathComponent("Diagnostics", isDirectory: true).appendingPathComponent("previous-session.txt")
+    private let persistenceURL: URL?
+    private let persistQueue = DispatchQueue(label: "connection-log-persist", qos: .utility)
+    private var persistTimer: Timer?
+    private var persistedSequence = -1
+    private(set) var previousSession = ""
+    init(persistenceURL: URL? = ConnectionEventLog.defaultPersistenceURL) {
+        self.persistenceURL = persistenceURL
+        if let persistenceURL, let data = try? Data(contentsOf: persistenceURL) {
+            previousSession = String(decoding: data.suffix(Self.persistedBytes), as: UTF8.self)
+        }
+        guard persistenceURL != nil else { return }
+        persistTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.persist(reason: "periodic") }
+        }
+    }
+    static let persistedBytes = 512 * 1024
+    static let persistedEvents = 2000
+    func persist(reason: String) {
+        guard let persistenceURL, sequence != persistedSequence else { return }
+        persistedSequence = sequence
+        let info = Bundle.main.infoDictionary ?? [:]
+        var body = (["Retained failure events:"] + failureEvents + ["Recent connection events:"] + events.suffix(Self.persistedEvents)).joined(separator: "\n")
+        let header = "App: \(info["CFBundleShortVersionString"] ?? "?") (\(info["CFBundleVersion"] ?? "?")); session started: \(formatter.string(from: started)); saved: \(formatter.string(from: Date())) (\(reason)); events recorded: \(sequence)\n"
+        let limit = Self.persistedBytes - header.utf8.count
+        if body.utf8.count > limit { body = "[older events shortened]\n" + String(decoding: Data(body.utf8).suffix(limit - 32), as: UTF8.self) }
+        let data = Data((header + body).utf8)
+        persistQueue.async {
+            let directory = persistenceURL.deletingLastPathComponent()
+            try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            var values = URLResourceValues(); values.isExcludedFromBackup = true
+            var url = directory; try? url.setResourceValues(values)
+            try? data.write(to: persistenceURL, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+        }
+    }
     func recordState(_ key: String, _ event: String) {
         guard stateEvents[key] != event else { return }
         if stateEvents.count >= 32 && stateEvents[key] == nil { stateEvents.removeAll(keepingCapacity: true) }
@@ -81,6 +117,8 @@ final class ConnectionEventLog: ObservableObject {
         nextFailure = 0; failureCount = 0; totalFailures = 0
         nextEvent = 0; retained = 0; dropped = 0; repeats = 0
         lastEvent = ""; stateEvents.removeAll(keepingCapacity: true); detail = ""; copied = false
+        previousSession = ""; persistedSequence = sequence
+        if let persistenceURL { persistQueue.async { try? FileManager.default.removeItem(at: persistenceURL) } }
     }
     func report(model: AppModel, eventLimit: Int? = nil) -> String {
         let info = Bundle.main.infoDictionary ?? [:]
@@ -130,6 +168,8 @@ final class ConnectionEventLog: ObservableObject {
         \(failureEvents.suffix(eventLimit ?? failureCount).joined(separator: "\n"))
         Recent connection events:
         \(events.suffix(eventLimit ?? retained).joined(separator: "\n"))
+        Previous app session (saved when the app left the foreground or every minute; survives app restarts):
+        \(previousSession.isEmpty ? "none saved" : eventLimit == nil ? previousSession : "included in copied and shared reports")
         """
     }
 }
@@ -214,13 +254,11 @@ struct DeveloperLogsView: View {
     private var panel: Color { colorScheme == .dark ? Color(red: 0.09, green: 0.065, blue: 0.145) : Color(red: 0.88, green: 0.83, blue: 0.95) }
     private var background: Color { colorScheme == .dark ? Color(red: 0.035, green: 0.035, blue: 0.078) : Color(red: 0.93, green: 0.90, blue: 0.98) }
     private var muted: Color { colorScheme == .dark ? Color(red: 0.70, green: 0.65, blue: 0.77) : Color(red: 0.36, green: 0.29, blue: 0.46) }
-    private func allReports() -> String {
-        [log.report(model: model), model.galaxyPage.report(server: model.server, connection: model.transport.label), model.diagnostics.diagnosticLog(), "Galaxy screen updates\n" + model.assets.status].joined(separator: "\n\n")
-    }
+    private func allReports() -> String { model.supportReport() }
     private func selectedReport() -> String {
         switch log.section {
-        case "Galaxy": return model.galaxyPage.report(server: model.server, connection: model.transport.label)
-        case "Live View": return model.diagnostics.diagnosticLog()
+        case "Galaxy": return ConnectionEventLog.redact(model.galaxyPage.report(server: model.server, connection: model.transport.label))
+        case "Live View": return ConnectionEventLog.redact(model.diagnostics.diagnosticLog())
         default: return log.report(model: model)
         }
     }

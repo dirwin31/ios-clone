@@ -12,8 +12,9 @@ private struct DiscordCredentials: Codable {
 }
 
 // Budget the encoded request, including JSON escaping, rather than character count.
+// Discord rejects attachments over 10 MiB on servers without boosts.
 enum DiagnosticReportBudget {
-    static let maximumBytes = 16 * 1024 * 1024
+    static let maximumBytes = 8 * 1024 * 1024
     private static let datedEvent = try! NSRegularExpression(pattern: #"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}.* "#)
     private static let benignStatus = try! NSRegularExpression(pattern:
         #"\b(?:fail(?:ed|ures?)?|errors?|disconnect(?:ed|s|ions?)?|cancel(?:led|ed|lations?)?|unavailable|unconfirmed|timeouts?)\s*=\s*(?:false|no|none|nil|null|0(?:\.0+)?)(?=$|[\s,;)\]}])"#,

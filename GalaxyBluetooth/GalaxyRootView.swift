@@ -231,12 +231,7 @@ struct GalaxyRootView: View {
         reportWasSent = false
         discordReport = ReportCapture(logs: captureReportLogs())
     }
-    private func captureReportLogs() -> String {
-        [model.connectionLog.report(model: model),
-                    model.galaxyPage.report(server: model.server, connection: model.transport.label),
-                    model.diagnostics.diagnosticLog(),
-                    "Galaxy screen updates\n" + model.assets.status].joined(separator: "\n\n")
-    }
+    private func captureReportLogs() -> String { model.supportReport() }
     private func showAppTabs() {
         model.autoOpenGalaxyPending = false
         appTabsExpanded = true

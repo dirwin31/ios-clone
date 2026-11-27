@@ -166,7 +166,13 @@ final class AppModel: ObservableObject {
     private var phoneActive = false
     private var carPlayActive = false
     private var monitorTask: Task<Void, Never>?
-    func setPhoneActive(_ active: Bool) { connectionLog.record("Lifecycle: phone active=\(active); tab=\(tab.rawValue); navigation=\(navigationActive)"); phoneActive = active; if !active { automaticLAN?.cancel(); firstConnection?.cancel(); firstConnection = nil }; diagnostics.phoneActive = active; discovery.setActive(active); updateMonitoring() }
+    func setPhoneActive(_ active: Bool) { connectionLog.record("Lifecycle: phone active=\(active); tab=\(tab.rawValue); navigation=\(navigationActive)"); if !active { connectionLog.persist(reason: "left foreground") }; phoneActive = active; if !active { automaticLAN?.cancel(); firstConnection?.cancel(); firstConnection = nil }; diagnostics.phoneActive = active; discovery.setActive(active); updateMonitoring() }
+    func supportReport() -> String {
+        ConnectionEventLog.redact([connectionLog.report(model: self),
+                                   galaxyPage.report(server: server, connection: transport.label),
+                                   diagnostics.diagnosticLog(),
+                                   "Galaxy screen updates\n" + assets.status].joined(separator: "\n\n"))
+    }
     func setCarPlayActive(_ active: Bool) { connectionLog.record("Lifecycle: CarPlay active=\(active)"); carPlayActive = active; diagnostics.carPlayActive = active; updateMonitoring() }
     private func updateMonitoring() {
         // Sharing phone GPS keeps the app running in the background, so keep reconnecting too.

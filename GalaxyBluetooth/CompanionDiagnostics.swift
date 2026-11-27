@@ -327,7 +327,7 @@ struct CompanionView: View {
     }
     private var copyButton: some View {
         Button(diagnostics.copiedLog ? "Copied diagnostics" : "Copy diagnostics", systemImage: diagnostics.copiedLog ? "checkmark" : "doc.on.doc") {
-            UIPasteboard.general.string = diagnostics.diagnosticLog()
+            UIPasteboard.general.string = ConnectionEventLog.redact(diagnostics.diagnosticLog())
             diagnostics.copiedLog = true
         }.buttonStyle(.bordered).tint(purple)
     }
