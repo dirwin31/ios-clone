@@ -7,7 +7,7 @@ import MapKit
 import Combine
 
 @MainActor
-final class CarPlayDashboardSceneDelegate: NSObject, CPTemplateApplicationDashboardSceneDelegate {
+final class CarPlayDashboardSceneDelegate: NSObject, @preconcurrency CPTemplateApplicationDashboardSceneDelegate {
     private var window: UIWindow?
     private var dashboardController: CPDashboardController?
     private var mapController: CompanionCarPlayMap?

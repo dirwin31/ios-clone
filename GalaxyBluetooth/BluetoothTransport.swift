@@ -320,7 +320,8 @@ final class BluetoothTransport: NSObject, ObservableObject, GalaxyRequestTranspo
                 pump()
             }
         }, onCancel: { [weak self] in
-            DispatchQueue.main.async { self?.cancel(id) }
+            let transport = self
+            DispatchQueue.main.async { transport?.cancel(id) }
         })
     }
 

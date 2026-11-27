@@ -1,7 +1,7 @@
 import Foundation
 
 @MainActor
-protocol GalaxyRequestTransport: AnyObject {
+protocol GalaxyRequestTransport: AnyObject, Sendable {
     var connected: Bool { get }
     var catalogSHA256: String? { get }
     var localRefreshDelay: TimeInterval? { get }
