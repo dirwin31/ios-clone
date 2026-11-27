@@ -209,6 +209,7 @@ final class AppModel: ObservableObject {
     }
     private var tunnelProbeTask: Task<Void, Never>?
     private var lastTunnelProbe = Date.distantPast
+    private var lastHealthyLANProbe = Date.distantPast
     private func resumeAutomaticTunnel() {
         guard mode == .automatic else { return }
         // A user returning to Automatic should not inherit the paused route's cooldown.
@@ -943,7 +944,8 @@ final class AppModel: ObservableObject {
     }
 
     private func probeLocalConnection() {
-        guard !selectingDiscoveredComma, lanProbeTask == nil else { return }
+        guard !selectingDiscoveredComma, lanProbeTask == nil,
+              !lan.connected || Date().timeIntervalSince(lastHealthyLANProbe) >= 10 else { return }
         lanProbeTask = Task { @MainActor in
             defer { self.lanProbeTask = nil }
             await self.learnAddress()
@@ -953,7 +955,7 @@ final class AppModel: ObservableObject {
                 catch { self.connectionMessage = error.localizedDescription }
             }
             _ = await self.lan.probe()
-            if !Task.isCancelled, self.lan.connected { self.discovery.stop() }
+            if !Task.isCancelled, self.lan.connected { self.lastHealthyLANProbe = Date(); self.discovery.stop() }
         }
     }
 

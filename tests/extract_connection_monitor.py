@@ -80,6 +80,7 @@ enum ConnectionMode: String { case automatic, bluetooth, lan }
     var tunnelProbeTask: Task<Void, Never>?
     var phoneActive = true, carPlayActive = false
     var lanProbeTask: Task<Void, Never>?
+    var lastHealthyLANProbe = Date.distantPast
     func learnAddress() async {}
     func discoverAutomaticLAN() {}
     func logConnection(_ reason: String) {}
