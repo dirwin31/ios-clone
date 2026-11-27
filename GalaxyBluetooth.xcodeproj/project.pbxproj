@@ -67,6 +67,10 @@ D15C00000000000000000901 = {isa = PBXBuildFile; fileRef = D15C000000000000000009
 		D92135C445C249E6A5DC0011 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = D92135C445C249E6A5DC0012 /* PrivacyInfo.xcprivacy */; };
 		140107256F4F4DF2910BED61 /* BluetoothTransport.swift in Sources */ = {isa = PBXBuildFile; fileRef = D47658A09FCC6A6C73D1A1A3 /* BluetoothTransport.swift */; };
 		1698566BBEF2185D9C80B6BB /* HTTP.swift in Sources */ = {isa = PBXBuildFile; fileRef = 34DE7063A67F0755E6E69BF7 /* HTTP.swift */; };
+		315EB57C35FC47F82987AA49 /* GalaxyRootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B40B7A4985462994C14EA006 /* GalaxyRootView.swift */; };
+		51F5D048D6E142EF9D41B0FE /* CompanionChrome.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A9C4A73E714DFE22BEA06DB /* CompanionChrome.swift */; };
+		BC2912077A73095B75579779 /* ConnectionEventLog.swift in Sources */ = {isa = PBXBuildFile; fileRef = B9FD525366E5943C30A6047B /* ConnectionEventLog.swift */; };
+		85669798E34C11F110C374F6 /* CarPlayDashboard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 31C1668461F20C4BF0E0F8FE /* CarPlayDashboard.swift */; };
 		28D504D2BD92FF8A8AEB68A7 /* CompanionDiagnostics.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8AD85D1A585138AF80FEADB9 /* CompanionDiagnostics.swift */; };
 		36EBF9BB2BE027F139572ADA /* GalaxyBluetoothApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3356A9DC86451A9D92F074F8 /* GalaxyBluetoothApp.swift */; };
 		5992DC6B04748581DE47AA02 /* LoopbackServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = B07071562661895558F74EE6 /* LoopbackServer.swift */; };
@@ -123,6 +127,10 @@ D15C00000000000000000902 = {isa = PBXFileReference; lastKnownFileType = sourceco
 		43A1199899003FF3F5F30831 /* PairingKeyStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairingKeyStore.swift; sourceTree = "<group>"; };
 		5492C1BC71EB8D0DBF12896E /* PrivateLANHTTP.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrivateLANHTTP.swift; sourceTree = "<group>"; };
 		80D0F5CDB02B33E408C75D8C /* GalaxyRequestTransport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GalaxyRequestTransport.swift; sourceTree = "<group>"; };
+		B40B7A4985462994C14EA006 /* GalaxyRootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GalaxyRootView.swift; sourceTree = "<group>"; };
+		4A9C4A73E714DFE22BEA06DB /* CompanionChrome.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompanionChrome.swift; sourceTree = "<group>"; };
+		B9FD525366E5943C30A6047B /* ConnectionEventLog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionEventLog.swift; sourceTree = "<group>"; };
+		31C1668461F20C4BF0E0F8FE /* CarPlayDashboard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CarPlayDashboard.swift; sourceTree = "<group>"; };
 		8AD85D1A585138AF80FEADB9 /* CompanionDiagnostics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompanionDiagnostics.swift; sourceTree = "<group>"; };
 		8F213860FC7A532DBD355109 /* CarPlaySceneDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CarPlaySceneDelegate.swift; sourceTree = "<group>"; };
 		9CEEC13202AFBF12EE3ABB99 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
@@ -236,6 +244,10 @@ D15C00000000000000000902 /* DiscordReports.swift */,
 				43A1199899003FF3F5F30831 /* PairingKeyStore.swift */,
 				F48B8D06AA8D8C4AC21E5982 /* Wire.swift */,
 				9CEEC13202AFBF12EE3ABB99 /* Info.plist */,
+				B40B7A4985462994C14EA006 /* GalaxyRootView.swift */,
+				4A9C4A73E714DFE22BEA06DB /* CompanionChrome.swift */,
+				B9FD525366E5943C30A6047B /* ConnectionEventLog.swift */,
+				31C1668461F20C4BF0E0F8FE /* CarPlayDashboard.swift */,
 				8AD85D1A585138AF80FEADB9 /* CompanionDiagnostics.swift */,
 				8F213860FC7A532DBD355109 /* CarPlaySceneDelegate.swift */,
 				9F0B8B04FE0E80BA046C0042 /* Resources/Branding.xcassets */,
@@ -361,6 +373,10 @@ D15C00000000000000000902 /* DiscordReports.swift */,
 				140107256F4F4DF2910BED61 /* BluetoothTransport.swift in Sources */,
 				FACE00000000000000000001 /* PairingCode.swift in Sources */,
 				C1A100000000000000000001 /* ClaimPairing.swift in Sources */,
+				315EB57C35FC47F82987AA49 /* GalaxyRootView.swift in Sources */,
+				51F5D048D6E142EF9D41B0FE /* CompanionChrome.swift in Sources */,
+				BC2912077A73095B75579779 /* ConnectionEventLog.swift in Sources */,
+				85669798E34C11F110C374F6 /* CarPlayDashboard.swift in Sources */,
 				28D504D2BD92FF8A8AEB68A7 /* CompanionDiagnostics.swift in Sources */,
 				A6D597850E6DD0CDFB754EF8 /* CarPlaySceneDelegate.swift in Sources */,
 				36EBF9BB2BE027F139572ADA /* GalaxyBluetoothApp.swift in Sources */,

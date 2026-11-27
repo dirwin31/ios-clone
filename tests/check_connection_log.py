@@ -1,6 +1,6 @@
 from pathlib import Path
 import subprocess, tempfile
-source = Path("GalaxyBluetooth/GalaxyBluetoothApp.swift").read_text()
+source = Path("GalaxyBluetooth/ConnectionEventLog.swift").read_text()
 start = source.index("@MainActor\nfinal class ConnectionEventLog")
 end = source.index("    func report(model:", start)
 probe = "import Foundation\nimport Combine\n" + source[start:end] + "}\n" + r''' 
