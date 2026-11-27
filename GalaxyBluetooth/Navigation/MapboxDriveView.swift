@@ -742,15 +742,17 @@ struct MapboxDriveMap: View {
     private func mapOrnaments(headerInset: CGFloat, panel: CGFloat) -> OrnamentOptions {
         var options = OrnamentOptions()
         options.scaleBar.visibility = .hidden
-        if let carDisplay {
+        if let carDisplay, carDisplay.dashboard {
+            options.logo.position = .topLeading
+            options.logo.margins = CGPoint(x: 8, y: 8)
+            options.attributionButton.position = .topLeading
+            options.attributionButton.margins = CGPoint(x: 96, y: 8)
+        } else if carDisplay != nil {
             // Leave the screen edges for CarPlay’s dock and zoom buttons.
-            let inset: CGFloat = carDisplay.dashboard ? 8 : 52
-            let edge: OrnamentPosition = carDisplay.dashboard ? .bottomTrailing : .topTrailing
-            let y: CGFloat = carDisplay.dashboard ? panel + 6 : 8
-            options.attributionButton.position = edge
-            options.attributionButton.margins = CGPoint(x: inset, y: y)
-            options.logo.position = edge
-            options.logo.margins = CGPoint(x: inset + 28, y: y)
+            options.attributionButton.position = .topTrailing
+            options.attributionButton.margins = CGPoint(x: 52, y: 8)
+            options.logo.position = .topTrailing
+            options.logo.margins = CGPoint(x: 80, y: 8)
         } else {
             options.compass.margins = CGPoint(x: 12, y: headerInset)
             options.logo.margins = CGPoint(x: plannerInsets.leading + 8, y: panel + 6)
