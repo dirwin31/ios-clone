@@ -330,7 +330,7 @@ final class AppModel: ObservableObject {
     @Published private(set) var pairingResetNeeded = false
     @Published var showBluetoothPermission = false
     @Published var opened = false
-    @Published var connectionMessage = "Choose a connection, or use Automatic to follow your connection priority."
+    @Published var connectionMessage = String(localized: "Choose a connection, or use Automatic to follow your connection priority.")
     @Published var wantsConnection = true
     @Published var loadingLegacyURL = false
     @Published var legacyMessage = ""
@@ -393,7 +393,7 @@ final class AppModel: ObservableObject {
         offerAudioPairing = false
         showAudioPairing = false
         bluetooth.disconnect(reason: "Starting new phone pairing")
-        connectionMessage = "Preparing Bluetooth setup over Local Wi-Fi…"
+        connectionMessage = String(localized: "Preparing Bluetooth setup over Local Wi-Fi…")
         pairingTask = Task { @MainActor in
             defer { pairingInProgress = false; pairingTask = nil }
             do {
@@ -402,7 +402,7 @@ final class AppModel: ObservableObject {
                 let pairingLAN = discoveryTransport(for: address, context: "Bluetooth pairing via LAN")
                 pairingLAN.bind(to: lan.expectedDeviceID)
                 if !lan.connected, !address.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    connectionMessage = "Checking comma over Local Wi-Fi before Bluetooth pairing…"
+                    connectionMessage = String(localized: "Checking comma over Local Wi-Fi before Bluetooth pairing…")
                     try pairingLAN.configure(address: address)
                     _ = await pairingLAN.probe()
                 }
@@ -421,12 +421,12 @@ final class AppModel: ObservableObject {
                 guard try await LANPairing.openWindow(over: windowLAN, progress: { self.connectionMessage = $0 }) else {
                     throw BridgeError.message("Local Wi-Fi disconnected before Bluetooth setup. Reconnect to comma over Local Wi-Fi and try again.")
                 }
-                connectionMessage = "Opened comma’s pairing window over Local Wi-Fi. Looking for comma…"
+                connectionMessage = String(localized: "Opened comma’s pairing window over Local Wi-Fi. Looking for comma…")
                 connectionLog.record("Phone pairing window opened over verified LAN")
                 try Task.checkCancellation()
                 importClaim(try await claimer.claim(name: UIDevice.current.name, expectedAdapterAddress: expectedAdapter))
             }
-            catch is CancellationError { connectionMessage = "Pairing cancelled." }
+            catch is CancellationError { connectionMessage = String(localized: "Pairing cancelled.") }
             catch {
                 pairingFailure = error.localizedDescription
                 connectionMessage = pairingFailure
@@ -451,7 +451,7 @@ final class AppModel: ObservableObject {
         UserDefaults.standard.set(outcome.deviceID.uuidString, forKey: "galaxy.bluetooth.device")
         pairingKey = outcome.result.key
         if mode == .lan { mode = .automatic }
-        connectionMessage = "Paired. Connecting to comma…"
+        connectionMessage = String(localized: "Paired. Connecting to comma…")
         offerAudioPairing = phoneMusicEnabled
         audioWindowOpen = phoneMusicEnabled
         lastReconnect = Date()
@@ -500,9 +500,9 @@ final class AppModel: ObservableObject {
             guard let self else { return }
             self.connectionLog.record(reason)
             if self.pairingInProgress {
-                if reason == "Phone pairing started" { self.connectionMessage = "Starting Bluetooth…" }
-                else if reason == "Phone pairing found comma; connecting" { self.connectionMessage = "Connecting to comma…" }
-                else if reason == "Phone pairing connected; discovering service" { self.connectionMessage = "Checking Bluetooth service…" }
+                if reason == "Phone pairing started" { self.connectionMessage = String(localized: "Starting Bluetooth…") }
+                else if reason == "Phone pairing found comma; connecting" { self.connectionMessage = String(localized: "Connecting to comma…") }
+                else if reason == "Phone pairing connected; discovering service" { self.connectionMessage = String(localized: "Checking Bluetooth service…") }
             }
         }
         pathMonitor.pathUpdateHandler = { [weak self] path in
@@ -560,7 +560,7 @@ final class AppModel: ObservableObject {
             lastTunnelProbe = .distantPast
             lastAddressCheck = .distantPast
             localAddressNetwork = ""
-            connectionMessage = "Checking your comma…"
+            connectionMessage = String(localized: "Checking your comma…")
         } catch { connectionMessage = error.localizedDescription }
     }
     func startAudioPairing() {
@@ -709,7 +709,7 @@ final class AppModel: ObservableObject {
         tunnelProbeTask?.cancel(); tunnel.invalidate("Disconnected")
         wantsConnection = false; opened = false
         bluetooth.disconnect(reason: "User selected Disconnect"); lan.invalidate(reason: "User selected Disconnect")
-        connectionMessage = "Disconnected."
+        connectionMessage = String(localized: "Disconnected.")
     }
     func resetPairingForReconnect() {
         cancelPairing()
@@ -728,7 +728,7 @@ final class AppModel: ObservableObject {
         mode = .lan
         wantsConnection = true
         initialDiscoveryStarted = true
-        connectionMessage = "Looking for your comma. After Local Wi-Fi connects, choose Bluetooth to set up pairing again."
+        connectionMessage = String(localized: "Looking for your comma. After Local Wi-Fi connects, choose Bluetooth to set up pairing again.")
         discovery.start()
         connectionLog.record("User reset app pairing; searching Local Wi-Fi")
     }
@@ -758,12 +758,12 @@ final class AppModel: ObservableObject {
                     && lan.generation == originalGeneration && mode == originalMode {
                     pairingResetNeeded = true
                 }
-                connectionMessage = "Couldn’t connect to \(device.address): \(candidate.status)"
+                connectionMessage = String(localized: "Couldn’t connect to \(device.address): \(candidate.status)")
                 discoveryCheck("Selected comma \(device.address) rejected: \(candidate.status)")
                 return false
             }
             guard !Task.isCancelled, lan.generation == originalGeneration, mode == originalMode, phoneActive else {
-                connectionMessage = "Connection changed. Select the comma again."
+                connectionMessage = String(localized: "Connection changed. Select the comma again.")
                 discoveryCheck("Selected comma check interrupted after verification; connection or app state changed")
                 return false
             }
@@ -773,7 +773,7 @@ final class AppModel: ObservableObject {
             address = device.address
             connect()
             guard await lan.probe() else {
-                connectionMessage = "Couldn’t connect to \(device.address): \(lan.status)"
+                connectionMessage = String(localized: "Couldn’t connect to \(device.address): \(lan.status)")
                 discoveryCheck("Selected comma \(device.address) failed final verification: \(lan.status)")
                 return false
             }
@@ -781,7 +781,7 @@ final class AppModel: ObservableObject {
             discoveryCheck("Discovered comma selected; LAN verification passed")
             return true
         } catch {
-            connectionMessage = "Couldn’t connect to the discovered comma. Try again or enter its IP."
+            connectionMessage = String(localized: "Couldn’t connect to the discovered comma. Try again or enter its IP.")
             discoveryCheck("Selected comma address rejected before verification: \(LANTransport.failureCode(error))")
             return false
         }
@@ -982,13 +982,13 @@ final class AppModel: ObservableObject {
                             Task { await self.checkGalaxyUpdates() }
                         }
                     }
-                    connectionMessage = "Connected over \(transport.label)." + (opened || assets.readyRoot != nil ? "" : " " + assets.status)
+                    connectionMessage = String(localized: "Connected over \(transport.label).") + (opened || assets.readyRoot != nil ? "" : " " + assets.status)
                 } else if mode == .bluetooth {
                     connectionMessage = bluetooth.status
                 } else {
                     connectionMessage = discovery.searching || lan.endpoint == nil
                         ? discovery.status
-                        : "Comma is not reachable on the local network yet. Use the same Wi-Fi or connect comma to this iPhone’s hotspot, then search again."
+                        : String(localized: "Comma is not reachable on the local network yet. Use the same Wi-Fi or connect comma to this iPhone’s hotspot, then search again.")
                 }
             }
             do { try await Task.sleep(nanoseconds: 3_000_000_000) } catch { return }

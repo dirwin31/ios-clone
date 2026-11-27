@@ -396,7 +396,7 @@ struct ConnectionSettingsView: View {
                 Button("Cancel pairing") { model.cancelPairing() }.font(.system(size: 12)).frame(maxWidth: .infinity, minHeight: 30)
             } else if !model.pairingFailure.isEmpty {
                 connectionMessage(model.pairingFailure)
-            } else if model.connectionMessage != "Connected over \(model.transport.label)." && !connected {
+            } else if model.connectionMessage != String(localized: "Connected over \(model.transport.label).") && !connected {
                 connectionMessage(model.connectionMessage)
             }
             if !pairing && (!model.pairingFailure.isEmpty || (bluetooth.connectionFailed && model.mode != .lan)) {

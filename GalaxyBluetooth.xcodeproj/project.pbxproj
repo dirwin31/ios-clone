@@ -387,6 +387,7 @@ D15C00000000000000000901 /* DiscordReports.swift in Sources */,
 				CLANG_ENABLE_MODULES = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				SDKROOT = iphoneos;
+				SWIFT_EMIT_LOC_STRINGS = YES;
 			};
 			name = Release;
 		};
@@ -398,6 +399,7 @@ D15C00000000000000000901 /* DiscordReports.swift in Sources */,
 				CLANG_ENABLE_MODULES = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				SDKROOT = iphoneos;
+				SWIFT_EMIT_LOC_STRINGS = YES;
 			};
 			name = Debug;
 		};
