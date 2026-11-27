@@ -26,10 +26,19 @@ final class BoundedHTTP: NSObject, URLSessionDataDelegate, @unchecked Sendable {
     private var buffer = Data()
     private var response: HTTPURLResponse?
     private var task: URLSessionDataTask?
-    private var session: URLSession?
     private var cancelled = false
     private let limit: Int
     init(limit: Int) { self.limit = limit }
+
+    private static let session: URLSession = {
+        let config = URLSessionConfiguration.ephemeral
+        config.urlCache = nil
+        config.httpCookieStorage = nil
+        config.httpShouldSetCookies = false
+        config.requestCachePolicy = .reloadIgnoringLocalCacheData
+        config.connectionProxyDictionary = [:]
+        return URLSession(configuration: config)
+    }()
 
     static func load(_ request: URLRequest, limit: Int) async throws -> (Data, HTTPURLResponse) {
         let client = BoundedHTTP(limit: limit)
@@ -42,15 +51,10 @@ final class BoundedHTTP: NSObject, URLSessionDataDelegate, @unchecked Sendable {
         lock.lock(); defer { lock.unlock() }
         guard !cancelled else { continuation.resume(throwing: CancellationError()); return }
         self.continuation = continuation
-        let config = URLSessionConfiguration.ephemeral
-        config.urlCache = nil
-        config.httpCookieStorage = nil
-        config.requestCachePolicy = .reloadIgnoringLocalCacheData
-        config.connectionProxyDictionary = [:]
-        let session = URLSession(configuration: config, delegate: self, delegateQueue: nil)
-        self.session = session
-        task = session.dataTask(with: request)
-        task?.resume()
+        let task = Self.session.dataTask(with: request)
+        task.delegate = self
+        self.task = task
+        task.resume()
     }
     private func cancel() {
         lock.lock(); cancelled = true; let task = task; lock.unlock()
@@ -78,8 +82,6 @@ final class BoundedHTTP: NSObject, URLSessionDataDelegate, @unchecked Sendable {
         else if let error { callback?.resume(throwing: error) }
         else if let response { callback?.resume(returning: (buffer, response)) }
         else { callback?.resume(throwing: BridgeError.message("Invalid HTTP response.")) }
-        session.finishTasksAndInvalidate()
-        self.session = nil
     }
 }
 
