@@ -485,9 +485,13 @@ struct CarDisplayMapOptions: Equatable {
     let maximumFPS: Float
 
     static func followY(height: CGFloat, bottomInset: CGFloat, dashboard: Bool) -> CGFloat {
-        // A full-screen CarPlay ETA card is about 54 points tall with a small bottom margin.
-        let clearance = dashboard ? min(26, height * 0.18) : min(32, height * 0.15)
-        return max(height / 2, height - max(0, bottomInset) - clearance)
+        if dashboard {
+            // CarPlay can draw the ETA strip over the map without including it in the safe area.
+            let etaStripHeight: CGFloat = 48
+            let markerRadius: CGFloat = 15
+            return max(height / 2, height - max(bottomInset, etaStripHeight) - markerRadius - 8)
+        }
+        return max(height / 2, height - max(0, bottomInset) - min(32, height * 0.15))
     }
 
     static func followX(in frame: CGRect, dashboard: Bool, rightToLeft: Bool) -> CGFloat {
