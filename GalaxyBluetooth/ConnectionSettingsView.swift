@@ -256,7 +256,7 @@ struct ConnectionSettingsView: View {
             }.disabled(model.loadingLegacyURL || pairing)
             Link("Comma device support", destination: URL(string: "https://wiki.firestar.link/ticketsystem/")!)
             Link("Privacy", destination: URL(string: "https://github.com/natehuby76/starpilot-galaxy-ios/blob/ios-companion-release/docs/privacy.md")!)
-        }.font(.system(size: 12)).frame(minHeight: 44)
+        }.font(.caption).frame(minHeight: 44)
     }
 
     private var languageMenu: some View {
@@ -268,13 +268,13 @@ struct ConnectionSettingsView: View {
             Button("简体中文") { language = "zh-Hans" }
         } label: {
             Label("Language", systemImage: "globe")
-        }.font(.system(size: 12)).frame(minHeight: 44)
+        }.font(.caption).frame(minHeight: 44)
             .accessibilityIdentifier("setup-language")
     }
 
     private var versionLabel: some View {
         Text("StarPilot BT · \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "")")
-            .font(.system(size: 11)).foregroundStyle(muted)
+            .font(.caption2).foregroundStyle(muted)
     }
 
     private var connectionExtras: some View {
@@ -283,7 +283,7 @@ struct ConnectionSettingsView: View {
                 Button(model.tunnel.credential == nil ? "Set up" : "Manage") { showTunnel = true }.accessibilityIdentifier("tunnel-setup")
             }.padding(14).background(panel, in: RoundedRectangle(cornerRadius: 16))
             DisclosureGroup(isExpanded: $advanced) { advancedControls.padding(.top, 8) } label: {
-                Text("Advanced connection options").font(.system(size: 13)).frame(minHeight: 30)
+                Text("Advanced connection options").font(.footnote).frame(minHeight: 30)
             }.tint(accent).padding(.horizontal, 14).padding(.vertical, 7).background(panel, in: RoundedRectangle(cornerRadius: 16))
                 .overlay(RoundedRectangle(cornerRadius: 16).stroke(accent.opacity(0.16)))
         }
@@ -295,7 +295,7 @@ struct ConnectionSettingsView: View {
                 ForEach([ConnectionMode.automatic, .bluetooth, .lan], id: \.self) { mode in
                     Button { model.mode = mode } label: {
                         Text(LocalizedStringKey(mode == .automatic ? "Automatic" : mode == .bluetooth ? "Bluetooth" : "Local Wi-Fi"))
-                            .font(.system(size: 13, weight: .medium))
+                            .font(.footnote.weight(.medium))
                             .frame(maxWidth: .infinity, minHeight: 44)
                             .foregroundStyle(model.mode == mode ? Color.white : Color.primary)
                             .background {
@@ -311,9 +311,9 @@ struct ConnectionSettingsView: View {
                 .accessibilityLabel("Connection mode").disabled(pairing)
             if model.mode == .automatic {
                 HStack {
-                    Text(model.connectionPriority.map(\.title).joined(separator: " → ")).font(.system(size: 11)).foregroundStyle(muted)
+                    Text(model.connectionPriority.map(\.title).joined(separator: " → ")).font(.caption2).foregroundStyle(muted)
                     Spacer()
-                    Button("Set order") { showOrder = true }.font(.system(size: 12)).frame(minHeight: 32)
+                    Button("Set order") { showOrder = true }.font(.caption).frame(minHeight: 32)
                 }.disabled(pairing)
             }
         }.padding(14).background(panel, in: RoundedRectangle(cornerRadius: 16))
@@ -359,10 +359,10 @@ struct ConnectionSettingsView: View {
             }.buttonStyle(CompanionPressStyle()).disabled(pairing || model.selectingDiscoveredComma || (connecting && !needsRecoveryAction) || (connected && !model.opened))
             if !pairing {
                 if model.pairingKey.isEmpty && !model.hasLANPairingSetup {
-                    Text("Allow Local Network and Bluetooth when iPhone asks. We’ll find comma on your Wi-Fi or hotspot first.").font(.system(size: 11)).foregroundStyle(muted)
+                    Text("Allow Local Network and Bluetooth when iPhone asks. We’ll find comma on your Wi-Fi or hotspot first.").font(.caption2).foregroundStyle(muted)
                 }
                 Text(LocalizedStringKey(model.mode == .automatic ? "Uses your first available connection" : model.mode == .bluetooth ? "Connect directly to comma\nControl Galaxy without Local Wi-Fi" : "Connect over your local network\nJoin the same Wi-Fi or comma’s hotspot"))
-                    .font(.system(size: 11)).foregroundStyle(muted).lineSpacing(3)
+                    .font(.caption2).foregroundStyle(muted).lineSpacing(3)
                     .multilineTextAlignment(.center).frame(maxWidth: .infinity)
                     .fixedSize(horizontal: false, vertical: true).padding(.vertical, 3)
             }
@@ -393,7 +393,7 @@ struct ConnectionSettingsView: View {
                 }.font(.caption).frame(maxWidth: .infinity, minHeight: 44)
             }
             if pairing {
-                Button("Cancel pairing") { model.cancelPairing() }.font(.system(size: 12)).frame(maxWidth: .infinity, minHeight: 30)
+                Button("Cancel pairing") { model.cancelPairing() }.font(.caption).frame(maxWidth: .infinity, minHeight: 30)
             } else if !model.pairingFailure.isEmpty {
                 connectionMessage(model.pairingFailure)
             } else if model.connectionMessage != String(localized: "Connected over \(model.transport.label).") && !connected {
@@ -401,7 +401,7 @@ struct ConnectionSettingsView: View {
             }
             if !pairing && (!model.pairingFailure.isEmpty || (bluetooth.connectionFailed && model.mode != .lan)) {
                 Button("Bluetooth connection help") { showPairingHelp = true }
-                    .font(.system(size: 11)).foregroundStyle(accent).frame(minHeight: 30)
+                    .font(.caption2).foregroundStyle(accent).frame(minHeight: 30)
             }
             if !connected && !pairing && model.pairingResetNeeded {
                 Text("The comma found on Wi-Fi has a different pairing identity. Confirm it is yours before resetting.")
@@ -411,7 +411,7 @@ struct ConnectionSettingsView: View {
                 VStack(spacing: 4) {
                     Button(action: submitReport) {
                         Label("Submit connection log", systemImage: "bubble.left.and.exclamationmark.bubble.right")
-                            .font(.system(size: 12, weight: .medium)).frame(maxWidth: .infinity, minHeight: 44)
+                            .font(.caption.weight(.medium)).frame(maxWidth: .infinity, minHeight: 44)
                     }
                     Text("Review your report before sending. Includes the installed app build and a fresh diagnostic snapshot when you tap Send. Internet access is needed to send it.")
                         .font(.caption2).foregroundStyle(muted).multilineTextAlignment(.center)
@@ -427,10 +427,10 @@ struct ConnectionSettingsView: View {
         let title = split.map { String(copy[..<$0.lowerBound]) } ?? copy
         let detail = split.map { String(copy[$0.upperBound...]) }
         return VStack(spacing: 4) {
-            Text(LocalizedStringKey(title)).font(.system(size: 12, weight: .medium)).foregroundStyle(Color.primary.opacity(0.9))
+            Text(LocalizedStringKey(title)).font(.caption.weight(.medium)).foregroundStyle(Color.primary.opacity(0.9))
             if let detail, !detail.isEmpty {
                 Text(LocalizedStringKey(detail))
-                    .font(.system(size: 11)).foregroundStyle(muted).lineSpacing(3)
+                    .font(.caption2).foregroundStyle(muted).lineSpacing(3)
             }
         }.multilineTextAlignment(.center).frame(maxWidth: .infinity)
             .fixedSize(horizontal: false, vertical: true).padding(.horizontal, 8).padding(.top, 3)
@@ -511,15 +511,15 @@ struct ConnectionSettingsView: View {
                                     .frame(width: 4, height: CGFloat(7 + bar * 5))
                             }
                         }.frame(width: 28, height: 26).accessibilityHidden(true)
-                        Text(device.name).font(.system(size: 14, weight: .semibold))
+                        Text(device.name).font(.subheadline.weight(.semibold))
                             .lineLimit(1).truncationMode(.middle)
                         Spacer(minLength: 4)
-                        Text(device.address).font(.system(size: 10, design: .monospaced))
+                        Text(device.address).font(.system(.caption2, design: .monospaced))
                             .foregroundStyle(muted).lineLimit(1)
                         if connectingCommaID == device.id {
                             ProgressView().controlSize(.small).tint(accent)
                         } else {
-                            Image(systemName: "chevron.right").font(.system(size: 11, weight: .semibold)).foregroundStyle(accent)
+                            Image(systemName: "chevron.right").font(.caption2.weight(.semibold)).foregroundStyle(accent)
                         }
                     }.padding(.horizontal, 14).frame(minHeight: 58)
                         .background(LinearGradient(colors: [accent.opacity(0.18), panel], startPoint: .leading, endPoint: .trailing), in: RoundedRectangle(cornerRadius: 16))
@@ -541,11 +541,11 @@ struct ConnectionSettingsView: View {
             HStack(spacing: 8) {
                 if discovery.searching { ProgressView().controlSize(.mini).tint(accent) }
                 Text(discovery.devices.isEmpty ? discovery.status : "Select your comma")
-                    .font(.system(size: 11)).foregroundStyle(muted)
+                    .font(.caption2).foregroundStyle(muted)
                 Spacer()
                 Button(discovery.searching ? "Stop" : "Search again") {
                     if discovery.searching { discovery.stop() } else { discovery.start() }
-                }.font(.system(size: 11, weight: .medium)).foregroundStyle(accent)
+                }.font(.caption2.weight(.medium)).foregroundStyle(accent)
                     .frame(minHeight: 44).disabled(model.selectingDiscoveredComma)
             }
         }
@@ -620,7 +620,7 @@ struct ConnectionSettingsView: View {
                             model.autoOpenGalaxyPending = false
                             startupSearch = ""
                             showStartupPages = true
-                        }.font(.system(size: 12)).frame(minHeight: 44)
+                        }.font(.caption).frame(minHeight: 44)
                     }
                 }
                 separator
@@ -628,7 +628,7 @@ struct ConnectionSettingsView: View {
                 if model.phoneMusicEnabled {
                     separator
                     row("hifispeaker", title: "Music pairing", subtitle: pairing ? "Waiting for app pairing" : audio.summary) {
-                        Button("Set up") { model.startAudioPairing() }.disabled(!connected || pairing).font(.system(size: 12)).frame(minHeight: 44)
+                        Button("Set up") { model.startAudioPairing() }.disabled(!connected || pairing).font(.caption).frame(minHeight: 44)
                     }
                 }
                 separator
@@ -658,14 +658,14 @@ struct ConnectionSettingsView: View {
                                     tunnelReady: model.mode == .automatic && ShareGroup.tunnel != nil, over: route)
                             }
                         }.disabled(sentry.testingPhoto)
-                            .font(.system(size: 12)).frame(minHeight: 44)
+                            .font(.caption).frame(minHeight: 44)
                             .accessibilityLabel("Send a Sentry photo test to this iPhone")
                     }
                     Divider()
                 }
                 Toggle("Hide background location indicator", isOn: Binding(get: { hideLocationIndicator }, set: { hideLocationIndicator = $0; location.setHideBackgroundIndicator($0) }))
                 Text("Requires Always location access. iOS may still show the indicator with While Using access.")
-                    .font(.system(size: 11)).foregroundStyle(muted)
+                    .font(.caption2).foregroundStyle(muted)
             }
             separator
             preferenceSection("Appearance & language", expanded: $galaxyExpanded) {
@@ -685,7 +685,7 @@ struct ConnectionSettingsView: View {
                     if !DuoLayout.isEnabled {
                         row("arrow.up.arrow.down", title: "Galaxy toolbar", subtitle: "Choose and arrange four shortcuts") {
                             Button("Edit") { showToolbarOrder = true }
-                                .font(.system(size: 12)).frame(minHeight: 44)
+                                .font(.caption).frame(minHeight: 44)
                         }
                         separator
                     }
@@ -698,14 +698,14 @@ struct ConnectionSettingsView: View {
                     } label: {
                         if checking { ProgressView().controlSize(.small).accessibilityLabel("Checking Galaxy") }
                         else { Text(checked ? assets.readyRoot != nil ? "✓ Checked" : "Retry" : "Check") }
-                    }.font(.system(size: 12)).frame(minHeight: 44).disabled(checking || !connected || pairing)
+                    }.font(.caption).frame(minHeight: 44).disabled(checking || !connected || pairing)
                 }
                 if !checking && (checked || assets.status.contains("screens have changed") || assets.status.contains("Couldn’t check Galaxy screens")) { message(assets.status).padding(.horizontal, 14).padding(.bottom, 10) }
                 separator
                 languageMenu
                 Toggle("Follow Galaxy language", isOn: $followGalaxyLanguage)
                 Text("Use Galaxy’s selected language after connecting.")
-                    .font(.system(size: 11)).foregroundStyle(muted)
+                    .font(.caption2).foregroundStyle(muted)
             }
             separator
             preferenceSection("Support & developer", expanded: $supportExpanded) {
@@ -788,12 +788,12 @@ struct ConnectionSettingsView: View {
             message(assets.status)
             if let url = model.legacyURL { Text(url.absoluteString).font(.caption).textSelection(.enabled) }
             Button("Disconnect") { model.disconnect() }.disabled(pairing)
-        }.font(.system(size: 13)).buttonStyle(.bordered).frame(maxWidth: .infinity, alignment: .leading)
+        }.font(.footnote).buttonStyle(.bordered).frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var separator: some View { Rectangle().fill(accent.opacity(0.12)).frame(height: 1).padding(.leading, 42) }
     private func message(_ text: String) -> some View {
-        Text(LocalizedStringKey(text)).font(.system(size: 11)).foregroundStyle(muted).fixedSize(horizontal: false, vertical: true)
+        Text(LocalizedStringKey(text)).font(.caption2).foregroundStyle(muted).fixedSize(horizontal: false, vertical: true)
     }
     private func toggleRow(_ symbol: String, title: String, subtitle: String, isOn: Binding<Bool>) -> some View {
         row(symbol, title: title, subtitle: subtitle) {
@@ -804,8 +804,8 @@ struct ConnectionSettingsView: View {
         HStack(spacing: 10) {
             Image(systemName: symbol).foregroundStyle(accent).frame(width: 20)
             VStack(alignment: .leading, spacing: 2) {
-                Text(LocalizedStringKey(title)).font(.system(size: 13, weight: .medium))
-                Text(LocalizedStringKey(subtitle)).font(.system(size: 11)).foregroundStyle(muted).fixedSize(horizontal: false, vertical: true)
+                Text(LocalizedStringKey(title)).font(.footnote.weight(.medium))
+                Text(LocalizedStringKey(subtitle)).font(.caption2).foregroundStyle(muted).fixedSize(horizontal: false, vertical: true)
             }
             Spacer(minLength: 4)
             control().fixedSize(horizontal: true, vertical: false)
