@@ -20,6 +20,7 @@ final class BluetoothTransport: NSObject, ObservableObject, GalaxyRequestTranspo
     @Published var connecting = false
     @Published private(set) var connectionFailed = false
     @Published private(set) var pairingRecoveryNeeded = false
+    @Published private(set) var commaForgotPhone = false
     private var authenticationFailures = 0
 
     private func noteAuthenticationFailure(phase: String, message: String) {
@@ -139,7 +140,7 @@ final class BluetoothTransport: NSObject, ObservableObject, GalaxyRequestTranspo
     }
     var diagnosticSummary: String {
         let saved = UserDefaults.standard.string(forKey: "galaxy.bluetooth.device")
-        return "attempt=\(connectionAttempt); phase=\(connectionPhase); retry wait=\(String(format: "%.1f", max(0, reconnectNotBefore - ProcessInfo.processInfo.systemUptime)))s; state=\(central.state.rawValue); saved device=\(saved != nil); saved ID valid=\(saved.flatMap(UUID.init(uuidString:)) != nil); scanning=\(isScanning); connecting=\(connecting); verified=\(connected); paired handshake=\(pairingVerified); recovery scan=\(reconnectTarget != nil); failed connections=\(failedConnections); queued requests=\(queue.count); request active=\(active != nil); RX=\(rx != nil); TX=\(tx != nil); read stream=\(supportsReadStream); notifications=\(supportsNotifications); last reconnect=\(lastReconnectReason)"
+        return "attempt=\(connectionAttempt); phase=\(connectionPhase); retry wait=\(String(format: "%.1f", max(0, reconnectNotBefore - ProcessInfo.processInfo.systemUptime)))s; state=\(central.state.rawValue); saved device=\(saved != nil); saved ID valid=\(saved.flatMap(UUID.init(uuidString:)) != nil); scanning=\(isScanning); connecting=\(connecting); verified=\(connected); paired handshake=\(pairingVerified); comma removed pairing=\(commaForgotPhone); recovery scan=\(reconnectTarget != nil); failed connections=\(failedConnections); queued requests=\(queue.count); request active=\(active != nil); RX=\(rx != nil); TX=\(tx != nil); read stream=\(supportsReadStream); notifications=\(supportsNotifications); last reconnect=\(lastReconnectReason)"
     }
     private func reconnectDecision(_ reason: String) {
         guard reason != lastReconnectReason else { return }
@@ -282,6 +283,7 @@ final class BluetoothTransport: NSObject, ObservableObject, GalaxyRequestTranspo
         else if lower.contains("push stalled") { reason = "Bluetooth notification transfer stalled" }
         else if lower.contains("cancelled") { reason = "Bluetooth request cancelled during transfer" }
         else if lower.contains("timed out") { reason = "Bluetooth connection timed out" }
+        else if lower.contains("cberrordomain 14") { reason = "Bluetooth pairing removed on comma" }
         else if lower.contains("pairing") { reason = "Bluetooth pairing or authentication failed" }
         else if lower.contains("encrypt") || lower.contains("verify bluetooth") { reason = "Bluetooth encrypted response failed" }
         else if lower.hasPrefix("bluetooth operation failed:") { reason = message }
@@ -516,6 +518,7 @@ final class BluetoothTransport: NSObject, ObservableObject, GalaxyRequestTranspo
         guard peripheral == self.peripheral else { return }
         if let error = error as NSError?, error.domain == CBErrorDomain,
            error.code == CBError.Code.peerRemovedPairingInformation.rawValue {
+            commaForgotPhone = true
             failConnection("Bluetooth operation failed: comma removed its Bluetooth pairing information (CBErrorDomain 14). In iPhone Settings > Bluetooth, forget the comma entry if listed, then reconnect in StarPilot. Your saved app key has not been removed.")
             return
         }
@@ -656,6 +659,7 @@ final class BluetoothTransport: NSObject, ObservableObject, GalaxyRequestTranspo
         if let peripheral { UserDefaults.standard.set(peripheral.identifier.uuidString, forKey: "galaxy.bluetooth.device") }
         failedConnections = 0
         reconnectNotBefore = 0
+        commaForgotPhone = false
         connectionPhase = "ready"
         phaseStarted = ProcessInfo.processInfo.systemUptime
         connected = true

@@ -403,6 +403,9 @@ struct ConnectionSettingsView: View {
                 Button("Bluetooth connection help") { showPairingHelp = true }
                     .font(.caption2).foregroundStyle(accent).frame(minHeight: 30)
             }
+            if !pairing && model.mode != .lan && bluetooth.commaForgotPhone {
+                connectionMessage("Bluetooth needs a reset on this iPhone. Open iPhone Settings → Bluetooth, tap ⓘ beside comma and choose Forget This Device, then come back to StarPilot. Your app pairing is kept.")
+            }
             if !connected && !pairing && model.pairingResetNeeded {
                 Text("The comma found on Wi-Fi has a different pairing identity. Confirm it is yours before resetting.")
                     .font(.caption2).foregroundStyle(muted).multilineTextAlignment(.center)
